@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- P6（B6.2）：Breezy Weather 数据共享 provider 的 custom permission。
+         天气在模块 App 进程内读取（宿主 manifest 不可改，拿不到该 permission），
+         快照经广播桥下发宿主。protectionLevel 由 Breezy 声明（normal 则声明即得）。 -->
+    <uses-permission android:name="org.breezyweather.READ_PROVIDER" />
+
+    <!-- hotfix7：包可见性。设置页（模块 App 进程）的应用选择列表自建应用清单
+         （AppRepository PackageManager MAIN/LAUNCHER 查询），Android 11+ 无此声明
+         只能看到系统默认可见的少数应用 —— 隐藏应用/文件夹/图标包等所有选应用入口
+         "只有几个应用"的根因。宿主进程不受影响（com.miui.home 是桌面角色）。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:label="HomeMode4Miui"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher">
+
+        <!-- LSPosed 模块声明 -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription"
+            android:value="为 com.miui.home 增加自定义桌面模式底座（原生式模式注册 + 视图挂载 + 手势隔离），UI 由 HomeView 接入" />
+        <meta-data android:name="xposedminversion" android:value="93" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+
+        <!-- 模块开关界面 -->
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- C 组（C1）：Grace 设置页（模块 App 进程，正常 Compose Activity，不碰宿主）。
+             exported=false：入口统一走 MainActivity route 转发（BAL 可行路径）。 -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_title"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- P6（B6.1/B6.3）：通知监听服务。系统按 manifest 绑定到本模块 App 进程，
+             媒体 token/controller 全在该进程内；快照经 GraceBridgeEngine 广播下发宿主。 -->
+        <service
+            android:name="com.galaxyrio.gracelauncher.data.media.MediaNotificationListener"
+            android:exported="false"
+            android:label="HomeMode4Miui notifications and media"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- keep1：进程保活入口。宿主 com.miui.home（常驻前台）在桌面挂载/首页
+             交互时跨包 startService 拉起模块进程（引擎幂等）；Magisk service.d
+             守护脚本亦经此入口拉起。exported=true 仅暴露"幂等启动引擎"一个
+             无害动作。 -->
+        <service
+            android:name=".bridge.GraceKeepAliveService"
+            android:exported="true" />
+
+        <!-- P6：宿主命令接收器（媒体控制/通知打开与清除/天气刷新）。
+             notif4：改为 GraceBridgeEngine.start() 内动态注册 —— manifest 静态注册
+             在 MIUI/HyperOS 上被省电策略拦截（后台模块进程收不到任何命令广播，
+             装机实锤：receiver 打点零输出），而快照方向（模块→宿主）的宿主
+             receiver 一直是动态注册、工作正常。安全不变：exported 动态注册 +
+             onReceive 内校验发送方 uid 必须为 com.miui.home
+             （GraceCommandReceiver.fromHost）。 -->
+
+        <!-- P6（B6.2）：Breezy Weather 官方更新通知器可选回调（数据仍以 provider 快照为准）。
+             exported=true：Breezy 的 Location Update Notifier 显式跨包广播（仅 invalidate
+             快照缓存，不带数据 payload，无命令面）。 -->
+        <receiver
+            android:name="com.galaxyrio.gracelauncher.platform.BreezyWeatherUpdateReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.breezyweather.ACTION_UPDATE_NOTIFIER" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

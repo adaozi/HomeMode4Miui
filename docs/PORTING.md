@@ -1,0 +1,342 @@
+# 移植指南 —— 把本模块搬到其它小米桌面版本
+
+本文回答一个具体问题：**宿主 `com.miui.home` 换版本后，这个模块要怎么改才能跑起来？**
+
+开发基准是 **RELEASE-5.39.40.10843（HyperOS）**。真机联调时已经踩过一轮"设备版本 ≠ 分析版本"的坑，  
+所以模块内部已经内建了三层漂移防护。但防护不是万能的，仍然有必须手工适配的部分。  
+本文按「先分类 → 再逐项核对 → 然后排错」组织。
+
+---
+
+## 1. 先搞清楚：什么会漂移，什么不会
+
+| 类别                                                                 | 是否随版本漂移       | 模块如何应对                    |
+| ------------------------------------------------------------------ | ------------- | ------------------------- |
+| 宿主**方法签名**（裁决入口、当前模式字段）                                            | ✅ 会           | 按**名字特征扫描**，而非硬编码签名（三级锚点） |
+| 宿主**类名**（`SuperDraglayer` / `Launcher` / `LauncherModeController`） | ⚠️ 基本稳定，但可能挪包 | hook 点集中在 4 个类；失败即降级      |
+| 宿主**视图结构**（Workspace/HotSeats 类名）                                  | ✅ 会（真机已验证全变）  | **不按类名**隐藏，改为容器子 View 记账  |
+| 宿主**资源 ID**（图标尺寸、颜色）                                               | ✅ 会           | 零宿主资源依赖，UI 全自绘            |
+| `LauncherMode` **抽象方法/覆写方法签名**                                     | ⚠️ 可能增减       | **必须手工同步宿主桩**（唯一编译期契约）    |
+| 系统框架 API（`LauncherApps` / `UsageStatsManager` / `AppWidgetHost`）   | ❌ 不会（AOSP 稳定） | 直接用公开 API（应用/使用记录/小部件获取已随 UI 清除，重写时照用，见 ARCHITECTURE §3.2） |
+| MIUI 私有 Provider（隐藏应用）                                             | ⚠️ 可能改 schema | 探测 + 反射兜底 + 降级不过滤（实现已随数据层清除，实证结论存档） |
+| 模块自有 SP / 数据格式                                                     | ❌ 不会          | —                         |
+
+**结论**：真正需要人工介入的只有三处 —— ① 宿主桩签名、② hook 锚点、③ 私有 Provider schema。  
+其余部分（约 80% 代码，即全部 UI 与数据层）是版本无关的。
+
+---
+
+## 2. 移植三步法
+
+### 第 1 步：反编译目标宿主，只核对一件事 —— `LauncherMode`
+
+本仓库自带方法表导出工具（已实测可用）：
+
+```bash
+pip install androguard
+
+# 导出目标宿主 LauncherMode 的完整方法/字段表，并与桩文件对比
+python tools/dump_class_methods.py <目标版本APK> \
+    com.miui.home.launcher.allapps.LauncherMode \
+    --diff app/src/host/java/com/miui/home/launcher/allapps/LauncherMode.java
+
+# 一次性导出移植关心的全部类
+python tools/dump_class_methods.py <目标版本APK> --preset --out docs/host-signatures-<版本>.txt
+```
+
+输出示例（对基准版实测）：
+
+```
+--- METHODS (47) ---
+  getModeName                  (<none>) -> java.lang.String  [ABSTRACT]
+  supportAssistant             (<none>) -> boolean  [ABSTRACT]
+  supportFeed                  (<none>) -> boolean  [ABSTRACT]
+  supportSearch                (<none>) -> boolean  [ABSTRACT]
+  canAddToWorkspace            (java.util.Collection, com.miui.home.launcher.ShortcutInfo) -> boolean
+  …
+
+DIFF vs 桩文件: app/src/host/java/…/LauncherMode.java
+  [OK] 宿主全部抽象方法都已在桩中声明。
+  [i]  宿主有、桩未声明的普通方法（安全——运行期自然继承宿主实现）：
+       - backupDatabaseFile
+       - getDBCellCountPreKey
+       …
+```
+
+**工具会重点标出 `[ABSTRACT]`**：宿主新增的抽象方法如果桩里没有、`CustomLauncherMode` 也没实现，
+运行期直接 `AbstractMethodError` 崩桌面 —— 这是移植时**唯一必须立刻处理**的漂移类型。
+
+**要核对的清单**（逐条比对 `app/src/host/java/com/miui/home/launcher/allapps/LauncherMode.java`）：
+
+1. **抽象方法**有没有增减？
+   > 基准版是 4 个：`getModeName()` / `supportAssistant()` / `supportFeed()` / `supportSearch()`。  
+   > 新增抽象方法 → `CustomLauncherMode` 必须实现，否则运行期 `AbstractMethodError`。
+2. **我们覆写的 12 个方法**签名有没有变？
+   | 方法                              | 基准签名                          |
+   | ------------------------------- | ----------------------------- |
+   | `isScreenCellsLocked`           | `()Z`                         |
+   | `isAutoFillEmptyEnable`         | `()Z`                         |
+   | `isHomeSupportSearchBar`        | `(Context)Z`                  |
+   | `isHomeSupportIconSearchBar`    | `(Context)Z`                  |
+   | `isPersonalAssistantOn`         | `(Context)Z`                  |
+   | `isIconPositionFixed`           | `(View)Z`                     |
+   | `canAddToWorkspace`             | `(Collection, ShortcutInfo)Z` |
+   | `canAddToFolder`                | `(Collection, ShortcutInfo)Z` |
+   | `canShowShortcutMenu`           | `(DragObject)Z`               |
+   | `defaultPullDownIsNotification` | `()Z`                         |
+   | `getPullDownGesture`            | `(Context)String`             |
+   | `getSlideUpGesture`             | `(Context)String`             |
+   > **参数类型变了是硬错误**：Java 里那是**重载**不是覆写，  
+   > 结果就是我们 override 的方法永不生效，宿主走默认实现。而且**不会报错**，只会行为诡异。
+3. `ShortcutInfo` / `DragObject` 作为参数类型是否还在原包？（挪包 → 改桩的包名）
+
+### 第 2 步：同步宿主桩
+
+改 `app/src/host/java/**`。这是**唯一的编译期契约**，改完必须能编译通过。
+
+```bash
+# 快速自检：只编译，不打包
+JAVA_HOME=<jdk17> ANDROID_HOME=<sdk> bash tools/build_apk.sh 2>&1 | head -40
+# javac rc=0 且 classes > 0 即为通过
+```
+
+注意两条**不要动**的留白：
+
+- `LauncherModeController.loadCurrentLauncherMode` / `onLauncherModeChanged` 是宿主 `private static`，  
+  桩里**故意不声明** —— 声明了会在跨类加载器 invoke 时 `IllegalAccessError`；
+- 桩方法体保持 `throw RuntimeException("HOST STUB")` —— 这是"误执行即显式失败"的保险丝，别改成 return 默认值。
+
+### 第 3 步：装机跑，读日志，补锚点
+
+装好后打开 LSPosed 日志，过滤 tag **`HomeMode4Miui`**：
+
+```bash
+adb logcat -s LSPosed-Bridge | grep HomeMode4Miui
+# 或直接看 LSPosed 管理器 → 日志
+```
+
+**逐条判读**：
+
+```
+[HomeMode4Miui] loaded into com.miui.home / … | host 5.39.40.10843 (…)   ← 确认版本对上了
+[HomeMode4Miui] hook installed: 1.getAllModes                            ← ✓
+[HomeMode4Miui] hook installed: 2.modeAdjudication                       ← ✓
+[HomeMode4Miui] adjudication via loadCurrentLauncherMode([...])          ← 命中哪一级锚点
+[HomeMode4Miui] hook FAILED (degraded): 3.Launcher.setupViews -> …       ← ✗ 需处理
+```
+
+**如果出现 `hook FAILED (degraded): 2.modeAdjudication`**，日志里会紧接着有 `dumpMembers` 打出的  
+宿主 `LauncherModeController` 全部成员：
+
+```
+[HomeMode4Miui] host LauncherModeController members:
+  M loadCurrentLauncherMode([Context]) -> LauncherMode
+  M someRenamedResetXxx() -> void
+  F sCurrentMode : LauncherMode
+```
+
+照着 dump 结果，去 `MainHook.hookModeAdjudication()` 里补一级锚点即可（或调整 `contains(...)` 的关键词）。
+
+---
+
+## 3. 漂移防护机制详解（决定你要改多少）
+
+### 3.1 模式裁决 —— 三级自适应
+
+`MainHook.hookModeAdjudication()` **不依赖固定方法名**，按特征扫描：
+
+| 级别 | 扫描条件                                               | 命中后做法                                      |
+| -- | -------------------------------------------------- | ------------------------------------------ |
+| a  | 静态 + 返回 `LauncherMode` + 名字含 `loadcurrentlauncher` | hook 返回值                                   |
+| b  | 静态 + 名字含 `resetcache`                              | hook 后改写静态字段 `*CurrentMode*`（字段也是按类型+名字扫描） |
+| c  | 静态 + 无参 + 返回 `LauncherMode` + 名字含 `getcurrentmode` | hook 访问器                                   |
+
+**如果宿主把这三个命名习惯全改了**（新写一个 `resolveMode()`），三级都会落空 → 走 `dumpMembers` 降级。  
+此时需要加第 d 级锚点，或放宽匹配条件。
+
+### 3.2 当前模式字段 —— 按类型+名字扫描
+
+```java
+// MainHook.sCurrentModeField()
+// 扫描"静态 + LauncherMode 类型 + 名称含 CurrentMode"的字段
+```
+
+字段被重命名（如 `mCurrentMode` → `sActiveMode`）会失配 → 改关键词。
+
+### 3.3 原生表面隐藏 —— 容器子 View 记账
+
+```java
+// HomeController.hideLauncherSurfaces()
+// 遍历容器所有子 View，除挂载视图（HomeView）外全部记账 GONE
+```
+
+**这个设计对版本完全免疫**，因为它不认任何宿主类名。  
+唯一前提：挂载视图得挂在正确的容器下 → 靠 `resolveContainer()` 三级降级：
+
+```
+getDragLayer()  →  mDragLayer 字段  →  DecorView（最后兜底，但原生表面可能藏不掉）
+```
+
+若日志出现 `falling back to DecorView container (native surfaces may stay visible)`，  
+说明宿主把 DragLayer 访问方式也改了 → 按 dump 补第三种取法。
+
+### 3.4 隐藏应用 —— Provider + 反射双路（知识存档，实现已随数据层清除）
+
+```
+content://com.miui.home.app.hide
+   ├─ 打不开 / schema 不识别 → 返回 null（区别于"空列表"）
+   └─ 结果 > 400 条 → 保险丝，视为误读 → 降级
+        ↓ 兜底
+反射 com.miui.home.launcher.HideAppList.Companion.getHideAppList()
+        ↓ 仍失败
+不过滤（列表会显示被隐藏的应用，但不崩）
+```
+
+**代价**：Provider schema 变了 → 隐藏应用失效（用户可见异常），**但绝不崩溃**。  
+你的 UI 若要支持隐藏应用过滤，重写时按此降级链设计（旧实现见 git 历史 v2.22.0）。
+
+---
+
+## 4. 移植到**旧版**小米桌面
+
+旧版（如 Android 12/13 时代的小米桌面）通常**没有 `LauncherModeController` 这套三模式抽象**  
+（经典 / 抽屉 / 极简 是本模块开发基准期才成熟的架构）。这意味着：
+
+**如果旧版没有 `LauncherMode` / `LauncherModeController`**：
+
+| 方案                      | 做法                                                                                  | 代价                                      |
+| ----------------------- | ----------------------------------------------------------------------------------- | --------------------------------------- |
+| **A. 放弃"原生第四模式"，改借壳**   | 复用宿主已有的 DRAWER 模式，hook 其行为方法                                                        | 与"零借壳"设计原则冲突；但旧版无原生注册点，这是唯一路径           |
+| **B. 不注册模式，只做 overlay** | 不碰模式系统，仅 hook `Launcher.setupViews` 直接在 DragLayer 上挂载 HomeView，并把隐藏/显示交给模块自己的开关 | 最简单、最稳；但失去「独立数据库目录」「设置页选项」「原生菜单集成」等模式红利 |
+
+**方案 B 的改法**（推荐作为旧版最小可用路径）：
+
+```java
+// 删掉：hookGetAllModes / hookModeAdjudication（旧版无对应类，会整段降级）
+// 保留：其余全部底座代码（它们是版本无关的）
+// 修改：isCustomModeActive() 直接读 SP → 完全绕开宿主模式系统
+public static boolean isCustomModeActive() {
+    Activity launcher = sLauncher;
+    return launcher != null && ModePrefs.isModeEnabled(launcher);
+}
+```
+
+`CustomLauncherMode` 与 `mode/` 整个包可以不要（旧版无 `LauncherMode` 可继承）。
+
+**其他旧版注意点**：
+
+- **`minSdk`**：旧版宿主可能 minSdk 29~31 → 把 `app/build.gradle` 的 `minSdk 33` 下调；  
+  同时检查是否用到高版本 API（`Transliterator` 需要 API 24，没问题；`AppWidgetHost` 一直有）；
+- **`RECEIVER_EXPORTED`**：这是 `targetSdk 34` 的要求。若旧版工程 targetSdk < 33，  
+  广播注册去掉该 flag 亦可（但建议保留 targetSdk 34 + flag 的组合）；
+- **深色/浅色壁纸取色**：`WallpaperColors.HINT_SUPPORTS_DARK_TEXT` 需要 API 27+，旧版一般满足。
+
+---
+
+## 5. 移植到**新版**小米桌面
+
+新版本（小米桌面大版本更新 / HyperOS 迭代）常见变化：
+
+### 5.1 `LauncherMode` 增删方法
+
+**最可能的破坏点。** 宿主新增一个抽象方法 → 模块编译期报错（好事，能立刻发现）；  
+宿主改某个 `isXxx()` 的参数类型 → **编译通过但 override 失效**（坏事，静默出错）。
+
+**自检手段**：反编译目标版本，把 `LauncherMode` 的方法表和桩文件做 diff。
+
+```bash
+# 生成方法表
+python tools/dump_class_methods.py <目标APK> com.miui.home.launcher.allapps.LauncherMode
+# 与 docs/ 里的基准表对比
+```
+
+### 5.2 手势控制器新增/改名
+
+`GestureIsolator` hook 的是 `SuperDraglayer.findActiveController`，**这个点本身很稳定**（是唯一分配点）。  
+但如果新版**不再用 `findActiveController`**，或改了参数：  
+→ 手势闸门失效 → 表现为"列表滚到一半被打断""下拉弹出原生搜索"。  
+**排查**：反编译 `SuperDraglayer`，看 `onInterceptTouchEvent` / `onTouchEvent` 里调用了什么分配方法。
+
+### 5.3 浮层检测 API 失效
+
+```java
+// GestureIsolator.hostFloatingViewOpen()
+// 依赖 AbstractFloatingView.getTopOpenView(activity)（public static）
+```
+
+变了的话，闸门会在"宿主浮层在场"时误判为无浮层 → 可能拦住宿主自己的弹层手势。  
+**当前降级偏向**：探测失败按"无浮层"处理（即偏向隔离生效）。这个取舍是刻意的。
+
+### 5.4 新版本验收清单
+
+移植到新版后，逐项勾选（这是从真机联调里沉淀出来的，只列**底座相关**项；
+UI 相关验收项由你的桌面实现自行定义）：
+
+- [ ] 日志 tag `HomeMode4Miui` 里 **9 条 hook 全部 `hook installed`**（无 `FAILED (degraded)`）
+- [ ] 模块 App 开关能切进 / 切出自定义模式
+- [ ] 进入模式后显示 `PlaceholderHomeView` 占位提示（挂载链路通）
+- [ ] 原生桌面表面**完全隐藏**（日志无 `falling back to DecorView` / `warn: no siblings hidden`）
+- [ ] 自定义视图滚动流畅，**滚动中途不被抢断**（手势隔离生效）
+- [ ] Home 键触发 `HomeView.onHomeIntent()`（加日志验证）
+- [ ] 关闭模式后原生桌面**完整恢复**（可见性记账还原正确）
+- [ ] 静止时零无效重绘（开发者选项"显示 GPU 过度渲染"辅助观察）
+
+---
+
+## 6. 排错手册
+
+
+| 症状                                           | 最可能原因                   | 处理                                                                  |
+| -------------------------------------------- | ----------------------- | ------------------------------------------------------------------- |
+| 装完模块，桌面**毫无变化**                              | 作用域没勾 / 没重启桌面           | LSPosed 勾 `com.miui.home` → 重启桌面；看日志有没有 `loaded into com.miui.home` |
+| 日志有 `loaded into` 但无 `hook installed`        | 宿主类加载失败                 | 看具体哪条 FAILED；多半是 `Launcher` 挪包了                                     |
+| `hook FAILED (degraded): 2.modeAdjudication` | 裁决入口改名                  | 读紧随其后的 `dumpMembers`，补第 d 级锚点                                       |
+| 能进模式但**原生桌面还露着**                             | 容器解析走到了 DecorView 兜底    | 看 `attach: container=…` 日志；补 `resolveContainer` 的取法                 |
+| 自定义视图滚动被打断 / 下拉弹原生搜索                        | 手势闸门失效                  | 反编译 `SuperDraglayer`，核对 `findActiveController`                      |
+| 文字有难看的阴影                                     | 宿主主题默认样式                | 确认该 TextView 走了 `UiText.noShadow`；容器用 `noShadowTree`                |
+| 你的 UI 一开桌面崩                                  | UI 链路没兜底                | UI/弹层必须与 hook 链路同等兜底，走 `util/ModLog` 打全堆栈                           |
+| 退出模式后原生桌面**少了一块**                            | 可见性记账还原失败               | 检查 `sOriginalVisibility` 是否被中途清空 / 容器被重建                            |
+| `AbstractMethodError` / `NoSuchMethodError`  | 宿主桩签名与真机不符              | 回到第 2 步，同步桩                                                         |
+
+---
+
+## 7. 一句话总结
+
+> **改版本 = 改 2 个文件 + 补 1 个锚点。**
+>
+> - `app/src/host/java/**` —— 编译期契约（必改）
+> - `mode/CustomLauncherMode.java` —— override 列表（跟随契约改）
+> - `MainHook.java` —— 锚点匹配关键词（按日志 dump 补）
+>
+> 其余底座代码（`hook/**`、`home/**`、`ModePrefs`）**版本无关，不用动**；
+> 桌面 UI 由你实现（`home/HomeView` 接缝），同样是版本无关的自绘代码。
+
+---
+
+## 8. 附：本次移植自检记录（基准版实测）
+
+对开发基准版（RELEASE-5.39.40.10843）跑一遍工具，确认：
+
+```
+$ python tools/dump_class_methods.py \
+    xiaomizhuomian_RELEASE-5.39.40.10843-03212137.apk \
+    com.miui.home.launcher.allapps.LauncherMode \
+    --diff app/src/host/java/com/miui/home/launcher/allapps/LauncherMode.java
+
+CLASS  com.miui.home.launcher.allapps.LauncherMode
+SUPER  java.lang.Object
+--- METHODS (47) ---
+  getModeName / supportAssistant / supportFeed / supportSearch   [ABSTRACT]
+  ... 43 个具体方法 ...
+--- FIELDS (1) ---
+  modeDatabasePath  com.miui.home.launcher.allapps.LauncherModeDatabasePath
+
+DIFF vs 桩文件:
+  [OK] 宿主全部抽象方法都已在桩中声明。
+```
+
+```
+
+**结论**：桩文件与宿主完全对齐，4 个抽象方法齐备 → 这条链路是健康的。
+把这段输出留档，将来换版本时直接 diff 两版输出即可看出差异。
+```

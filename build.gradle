@@ -1,0 +1,5 @@
+// 根构建文件 —— P0 起：AGP 9.x（内置 Kotlin 编译）+ Compose 编译器插件（版本对齐 GraceLauncher v1.1.4）
+plugins {
+    id 'com.android.application' version '9.3.3' apply false
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.20' apply false
+}

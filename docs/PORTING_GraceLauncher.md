@@ -1,0 +1,825 @@
+# GraceLauncher 移植清单
+
+源码已下载到工作区 `GraceLauncher-src/`（经镜像站 gh-proxy.com 拉取 master 分支，zip 5.4 MB / 455 个文件）。  
+本文回答一个具体问题：**把 GraceLauncher 的 UI 装进 HomeMode4Miui 第四模式底座，要改哪些文件、按什么顺序、有什么坑。**
+
+---
+
+## 1. 源码概况（v1.1.4，master @ 2026-10-07）
+
+| 项   | 值                                                                           | 对移植的影响                                                                  |
+| --- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 技术栈 | Kotlin 2.4.20 + Jetpack Compose (BOM 2026.09.00) + Material 3               | ⚠️ **最大风险点**：底座模块目前是纯 Java + 传统 View，宿主 com.miui.home 进程内没有 Compose 运行时 |
+| 规模  | 176 个 .kt，0 个 .java；分层 data / platform / ui                                 | 需要决定"整包搬"还是"分阶段搬"                                                       |
+| SDK | minSdk 28 / compileSdk 37 / AGP 9.3.3 / **OpenJDK 21** / build-tools 36.1.0 | ⚠️ 当前模块 compileSdk 34 + 用户环境 JDK17 + build-tools 34，**构建链必须整体升级**       |
+| 数据  | Room 2.8.4（LauncherDatabase）+ SharedPreferences（"launcher_appearance"）      | 库落在宿主进程数据目录，需与模式 DB 隔离策略对齐                                              |
+| 权限  | 无 INTERNET；通知监听/日历可选；天气依赖外部 Breezy Weather                                  | 宿主进程内权限模型不同，附属特性需要降级设计                                                  |
+| 小部件 | 自建 AppWidgetHost，HOST_ID = `0x47524143`("GRAC")                             | 需核对与宿主自身 host id 不冲突（前作 Niagara 用 `0x4E49`）                             |
+| 许可证 | **GPL-3.0**                                                                 | 引用其代码后，本模块分发需遵循 GPL-3.0（当前模块 LICENSE 需同步调整）                             |
+
+---
+
+## 2. 架构对位：GraceLauncher ↔ 底座接缝
+
+GraceLauncher 是独立 APK：`MainActivity.setContent { LauncherAppTheme { LauncherRoute } }`。  
+本底座是宿主进程内挂载：`HomeView(抽象) → HomeViewFactory.create() → 挂到 DragLayer`。
+
+```
+GraceLauncher 独立APK                      HomeMode4Miui 底座
+─────────────────────                     ─────────────────────
+MainActivity (ComponentActivity)    →     GraceHomeView extends HomeView
+  setContent { ... }                →     内部 ComposeView + 手动 LifecycleOwner/ViewModelStoreOwner
+LauncherRoute (Compose 根路由)       →     同一个 Composable 原样复用
+LauncherViewModel (viewModels())    →     手动构造（绕过 viewModels() 委托，宿主 Activity 不是 ComponentActivity）
+LauncherAppTransitions (合约动画)    →     适配层：改走宿主 Launcher.startActivity 路径或降级系统动画
+SettingsActivity / IconDesigner      →     ✅ 不动：运行在模块 App 自己进程，Compose Activity 原样保留
+```
+
+**两个红利**：
+
+1. 设置全家桶（`ui/settings/*` 约 20 个文件）跑在模块 App 自己的进程 → 原样可用，只需把读写接到 `ModePrefs` 的 SP 桥上（模块 App 与 com.miui.home 的数据目录不互通）。
+2. 手势隔离（GestureIsolator）隔离的是 View 层触摸分发，ComposeView 是普通 View → **天然兼容，零改动**。
+
+---
+
+## 3. 移植清单（按三角色归类）
+
+### A. hook 原版桌面（底座侧，改动极小）
+
+| #  | 文件                                      | 改动      | 说明                                                         |
+| -- | --------------------------------------- | ------- | ---------------------------------------------------------- |
+| A1 | `app/build.gradle`                      | **重写**  | 加 Kotlin 插件 + Compose 依赖组；compileSdk 34→37；JDK 17→21       |
+| A2 | `gradle/wrapper` + 根 `build.gradle`     | 升级      | AGP 9.3.3 要求；建议同时配 maven 镜像（腾讯云/阿里）                        |
+| A3 | `home/HomeViewFactory.java`             | 1 行     | `PlaceholderHomeView` → `GraceHomeView`（唯一必改点，照 README 约定） |
+| A4 | `LICENSE`                               | 同步      | 含 GPL-3.0 衍生代码后改用 GPL-3.0                                  |
+| A5 | 底座其余全部（`hook/**`、`mode/**`、`ModePrefs`） | **零改动** | 已由 HOME 键/广播/手势隔离/负一屏链路验证                                  |
+
+
+### B. 实现新桌面（移植主体，按阶段推进）
+
+**P0 — Compose 宿主接桩（风险最高，先证明可行）**
+
+| #    | 内容                               | 源文件                                                                                | 要点                                                                                                                              |
+| ---- | -------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| B0.1 | 新建 `home/GraceHomeView.java/.kt` | （新增）                                                                               | FrameLayout 内嵌 ComposeView；自实现 `LifecycleOwner` + `ViewModelStoreOwner`（SavedStateRegistry 可选）；`onHomeDetached` 里销毁 composition |
+| B0.2 | 引入 `ui/theme/` 全部                | Theme.kt / LauncherAppearance.kt / LauncherFonts.kt / Type.kt / LauncherHaptics.kt | Material You 动态色（material-kolor）在 HyperOS 上可用，保留                                                                                |
+| B0.3 | 最小路由                             | LauncherScreen.kt 裁剪版                                                              | 只渲染 HomeScreen 静态骨架，验证宿主进程内 Compose 可跑                                                                                          |
+| B0.4 | 依赖裁剪                             | libs.versions.toml                                                                 | 先不带 aboutlibraries / navigation-compose（P0 不需要）                                                                                 |
+
+**P1 — 首页（favorites + 时钟）**
+
+| #    | 内容            | 源文件                                                                                                       | 要点                                                              |
+| ---- | ------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| B1.1 | HomeScreen 主体 | ui/home/HomeScreen.kt (435 行)                                                                             | favorites 列表 + 嵌套滚动（NestedScrollConnection 逻辑在内）                |
+| B1.2 | 自绘时钟          | ui/home/ClockFace.kt / ClockSpacing.kt / SeparatedClockGlyphs.kt + data/ClockStyle.kt / ClockFontStore.kt | 字体走 `res/raw ttf`（noCompress 已配置），随资源打包                         |
+| B1.3 | ViewModel 中枢  | ui/LauncherViewModel.kt (851 行)                                                                           | 绕过 `viewModels()`，在 GraceHomeView 构造时手动创建并传入 Composable         |
+| B1.4 | 偏好落地          | data/LauncherPreferences.kt / LauncherSettings.kt                                                         | SP 文件名建议加前缀（如 `grace_launcher_appearance`）避免与宿主 shared_prefs 混淆 |
+
+**P2 — 应用列表（抽屉 + 字母索引）**
+
+| #    | 内容   | 源文件                                                                    | 要点                                                                      |
+| ---- | ---- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| B2.1 | 抽屉   | ui/drawer/AppDrawerScreen.kt (193 行) / AppListModel.kt                 | —                                                                       |
+| B2.2 | 字母索引 | ui/components/AlphabetRail.kt                                          | 拼音分组：GraceLauncher 无拼音实现，中文首字母需按前作拼音分组知识补（docs/ARCHITECTURE.md §3.2 存档） |
+| B2.3 | 搜索   | ui/search/AppSearchScreen.kt + data/SearchIndex.kt / SearchSettings.kt | SearchIndex 含拼音/联系人索引，评估后可裁                                             |
+
+**P3 — 数据层（Room + 应用仓库）**
+
+| #    | 内容     | 源文件                                                                                           | 要点                                                                                               |
+| ---- | ------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| B3.1 | 应用仓库   | data/AppRepository.kt                                                                         | `PackageManager.queryIntentActivities` + `LauncherApps.getActivityList` = AOSP 稳定 API，宿主进程直接可用 ✅ |
+| B3.2 | Room 库 | data/LauncherDatabase.kt + FavoritesStore / HomeLayout / LauncherItems / ShortcutRepository 等 | 建库位置 = com.miui.home 进程数据目录；对照底座"独立 DB 目录"惯例（custom/）确认不与宿主库撞名；KSP 编译器接入构建脚本                     |
+| B3.3 | 应用增删同步 | HomeView.onPackagesChanged() → ViewModel.refreshApps()                                        | 底座已聚合广播，接一行                                                                                      |
+
+**P4 — 小部件 + 弹层**
+
+| #    | 内容        | 源文件                                                                                                            | 要点                                                                                                                                                                |
+| ---- | --------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B4.1 | Widget 宿主 | platform/HomeWidgetHost.kt + ui/widgets/HomeWidget.kt / WidgetPicker.kt / WidgetPreview.kt / HomeEditHandle.kt | ① HOST_ID `0x47524143` 建议改（避开与宿主冲突，前作惯例 `0x4E49` 系）；② 宿主 com.miui.home 有 BIND_APPWIDGET，bind 链路可用；③ startListening/stopListening 挂到 onHomeAttached/onHomeDetached |
+| B4.2 | 长按弹层      | ui/overlays/ShortcutPopup.kt / LauncherSheets.kt / PopupMorphGeometry.kt + ui/components/ShortcutPicker.kt     | Compose 弹层画在 HomeView 内部，不走宿主 AbstractFloatingView（手势隔离已偏向隔离生效）                                                                                                   |
+| B4.3 | 收藏重排      | ui/overlays/FavoritesReorderState.kt / ItemSelectionScreen.kt                                                  | —                                                                                                                                                                 |
+
+**P5 — 启动动画适配**
+
+| #    | 内容       | 源文件                                                                                 | 要点                                                                                              |
+| ---- | -------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| B5.1 | 启动转场     | platform/LauncherAppTransitions.kt / AppLaunchTransition.kt / GestureNavContract.kt | 依赖 ComponentActivity 合约 → 二选一：改走宿主 Launcher 的 startActivitySafely 路径；或 P5 先降级为系统默认动画（标注砍功能不砍体验） |
+| B5.2 | 启动图标动画目标 | ui/components/LauncherAnimationTarget.kt / LauncherIcon.kt                          | 跟随 B5.1 决策                                                                                      |
+
+**P6 — 附属特性（逐项独立开关，坏了可降）**
+
+| #    | 内容                | 源文件                                                                                     | 要点                                                                                       |
+| ---- | ----------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| B6.1 | 媒体控制              | data/media/* + ui/home/HomeMediaPlayer.kt                                               | NotificationListenerService 跑在**模块 App 进程**，落盘 JSON → 宿主 UI 读文件（前作 SP 桥同思路）；无通知监听权限则隐藏组件 |
+| B6.2 | 日程/天气             | data/CalendarRepository.kt / data/weather/* + ui/weather/* / ui/overlays/AgendaSheet.kt | 日历权限在宿主进程内申请（宿主也有日历权限可借）；Breezy Weather Provider 跨进程读需实测，读不到就降级隐藏                        |
+| B6.3 | 通知小红点             | data/notifications/AppNotificationStore.kt                                              | 同 B6.1 通道                                                                                |
+| B6.4 | 图标包/Icon Designer | data/icons/* + ui/overlays/IconPackGrid.kt                                              | 渲染纯本地，可用；设置页在模块 App 进程（见 C 组）                                                            |
+| B6.5 | Private Space     | platform/PrivateSpaceController.kt                                                      | API 35 特性，宿主进程内可探测，做独立开关                                                                 |
+
+### C. 获取数据（模块 App 进程，原样保留）
+
+| #  | 文件                                                                                                                                                                                                                                              | 处置                                                                          |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| C1 | SettingsActivity.kt + ui/settings/* 全家（LauncherSettingsScreen / ThemeSettings / ClockStyleSettings / IconDesigner* / FontSettings / GraceButtonSettings / WeatherSettings / Media / Search / Calendar / PrivateSpace / License / About ≈ 20 文件） | **原样搬入模块 App**：正常 Compose Activity，不碰宿主                                     |
+| C2 | WidgetSetupActivity.kt                                                                                                                                                                                                                          | 同上                                                                          |
+| C3 | 跨进程读写                                                                                                                                                                                                                                           | 设置项落 `ModePrefs` SP 桥（已有机制）；大块数据（图标设计、字体选择）走模块目录文件 + 宿主进程按路径读               |
+| C4 | MainActivity.kt                                                                                                                                                                                                                                 | ❌ **不移植**（宿主进程没有自己的 HOME Activity；其 onNewIntent 逻辑已由底座 `onHomeIntent()` 覆盖） |
+
+---
+
+## 4. 构建环境前置项（✅ 2026-10-08 已全部就绪，详见 tools/ENV.md）
+
+1. ✅ **JDK 21** — Temurin 21.0.12.1 → `C:\Users\Administrator\dev-env\jdk-21`（清华镜像）
+2. ✅ **SDK Platform 37 + Build-Tools 36.1.0** — `dev-env/android-sdk/`（另备 platform-34 供现模块构建）
+3. ✅ **Gradle 9.5.0 + wrapper** — 项目根 `gradlew` 指腾讯镜像（sha256 官方锚定 + 缓存预热）；AGP/Kotlin 插件随 P0 构建脚本升级引入
+4. ✅ **maven 镜像** — `~/.gradle/init.gradle`：阿里云 google/public/gradle-plugin 优先 + 腾讯聚合兜底
+5. ✅ **Xposed API jar** — `app/libs/XposedBridgeApi-82.jar` 已补齐（阿里云 maven）
+6. ✅ **全链路验证** — `build_apk.sh` 已用新环境出包成功；脚本已完成 Git Bash/Windows 路径兼容修复
+
+---
+
+## 5. 风险登记
+
+| 风险                                          | 等级                      | 缓解                                                                                                                                                                                        |
+| ------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **宿主进程内模块资源不可达（R.string/R.font）**           | 🔴 高（P1 已实锤，hotfix1 修复） | Compose LocalContext 被覆盖为模块包 Context（createPackageContext）；宿主侧行为走 LocalHostContext；后续阶段搬运的任何 `stringResource`/`Font(R.font.x)` 自动生效，但新增宿主 Context 依赖（如 filesDir 写入）必须显式用 LocalHostContext |
+| Compose 运行时在 com.miui.home 进程初始化失败（反射/资源冲突） | 🔴 高                    | P0 第一天就验证；失败兜底方案 = 只搬 Compose 渲染产物思路改自绘 View（成本翻倍，提前知道）                                                                                                                                   |
+| APK 体积（Compose 依赖组），R8 未开                  | 🟡 中（已缓解，2026-10-09） | 已开 `minifyEnabled + shrinkResources` + `app/proguard-rules.pro` 放行规则；31MB → 7.3MB（详见 §④）                                                                                                                                                  |
+| 两大铁律（零崩溃 / 语义化颜色）：Compose 异常不会自动走 ModLog    | 🔴 高                    | GraceHomeView 全链路 try-catch + `CompositionError` 回调打 ModLog；Theme 层把 M3 colorScheme 映射到壁纸取色，禁硬编码色值进 UI                                                                                    |
+| Room 库与宿主数据库目录混淆                            | 🟡 中                    | 库名加 grace_ 前缀；卸载模式时保留（用户数据）                                                                                                                                                               |
+| HOST_ID 冲突导致 widget 列表异常                    | 🟡 中                    | 换 id + 实测 widget 绑定/解绑/重启桌面三场景                                                                                                                                                            |
+| GPL-3.0 传染                                  | 🟡 中                    | 发布前确认 LICENSE 与 README 声明                                                                                                                                                                 |
+
+---
+
+
+## 6. 里程碑验收（对齐 PORTING.md 第 5.4 节风格）
+
+- [ ] P0：切入第四模式 → 宿主进程内 Compose 渲染出静态时钟 + 空列表，LSPosed 日志 9 条 hook 全 installed，零崩溃
+  - ✅ 开发侧完成（2026-10-08）：构建链升级（AGP 9.3.3 / Gradle 9.5.0 / compileSdk 37 / JDK21）+ GraceHomeView 接桩 + theme 全量引入 + 最小路由；`./gradlew :app:assembleRelease` 出包成功（v2.1.0-grace-p0, versionCode 3, 25MB 未开 R8），dex 内已验证 Compose 运行时 + materialkolor + 主题包齐全，签名沿用 homemode4miui keystore。待装机验收（切第四模式看静态时钟 + LSPosed 日志）
+- [x] P1：favorites 增删即时刷新；时钟字体/样式切换生效；滚动流畅不被宿主抢断（手势隔离）——✅ **装机验收通过（2026-10-08 13:24 日志）**：11 hook installed / 挂载+心跳正常 / 五次复用路径幂等 / 零崩溃零异常；自绘时钟+日期+favorites 渲染正确，长按菜单（hotfix2 后）与启动应用使用正常
+  - ✅ 开发侧完成（2026-10-08，v2.2.0-grace-p1 / versionCode 5 / 27.8MB）：  
+    B1.1 裁剪版 HomeScreen（保留 BoxWithConstraints 顶距约束 + HomeOverscrollConnection 嵌套滚动 + favorites LazyColumn；删 widget/media/weather/calendar/folder/editingLayout 分支）；  
+    B1.2 时钟全家（ClockFace/ClockSpacing/SeparatedClockGlyphs/ClockStyle/ClockFontStore 逐字搬运）+ LauncherFonts 完整版（Josefin Sans + noto_sans fallback；阿拉伯/希伯来/天城文/泰文 4 个 fallback 资产裁剪省 1.7MB；5 个 preset 字体入 res/font）；  
+    B1.3 新建 GraceHomeViewModel（LauncherApps.getActivityList 查询 + PM 兜底 + FavoritesStore 收藏/排序/迁移 + SP settings + 包变化广播自刷新；shutdown() 由 GraceHomeView.onHomeDetached 显式调用，规避手动构造 ViewModel 不走 onCleared 的泄漏）；  
+    B1.4 SP 偏好落地（LauncherPreferences 文件名改 grace_launcher_appearance；新建 GraceHomeSettings/GraceHomeSettingsStore，clockStyle 用原版 encode/decode 格式落 grace_launcher_settings，P3 切 Room 字节级兼容）。  
+    演示入口：长按时钟循环 ClockLayout（P3 接设置全家桶后替换）、长按收藏行菜单（移除收藏/应用信息；P4 换 ShortcutPopup）、favorites 空态点按恢复默认收藏（P2 抽屉落地后移除）。  
+    通用注意：移植文件的 R import 必须指向 com.homemode4miui.R（模块 namespace），非原版包名。
+  - ⚠️ hotfix1（2026-10-08，v2.2.1-grace-p1-hotfix1 / versionCode 6，commit a1b8c46）：装机长按收藏行桌面崩溃  
+    （Resources$NotFoundException: 0x7f0b0065，Popup 组合期，熔断覆盖不到）。根因：宿主进程内 Compose  
+    LocalContext 是宿主 Context，resources 解析不了模块 APK 资源 ID。修复：GraceHomeRoot 覆盖
+
+```
+LocalContext 为模块包 Context（createPackageContext，不带 INCLUDE_CODE）；新增 LocalHostContext
+供宿主侧行为（filesDir/Activity window）；preset 字体迁移 res/font → assets/fonts/ 经
+Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）。待复测长按菜单 + 时钟长按切样式。
+```
+
+- [ ] ⚠️ hotfix2（2026-10-08，v2.2.2-grace-p1-hotfix2 / versionCode 7，commit 70a61d7）：装机截图确认 hotfix1  
+  主链路恢复（时钟/日期/favorites 正常），但长按菜单两个菜单项文字显示 "false"。根因：Compose 1.12 的  
+  PopupLayout 是独立 ComposeView 树根，经 ComposeViewContext.ProvideCompositionLocals 把 LocalContext  
+  重设为宿主——模块 Context 覆盖不穿透 Popup，菜单内 stringResource 在宿主表错位解析（bool→"false"）。  
+  修复：菜单文案主树预解析成 String 传入，Popup 子树零资源调用。规则：Popup/Dialog 子树禁止  
+  stringResource；P4 弹层全家沿用此规则或做 GracePopup 统一重覆盖。
+- [ ] P2：中文应用按拼音分组 + 字母索引跳转正确
+  - ✅ 开发侧完成（2026-10-08，v2.3.0-grace-p2 / versionCode 8 / 27.9MB）：  
+    B2.1 抽屉（AppListModel 裁剪版：删 folders/private/recentlyInstalled，保留 LauncherAppOrder 排序 +  
+    section 分组 + 字母表顺序；AppDrawerScreen 裁剪版：保留 retainItemSpace 字母 scrub 几何保持 +  
+    userScrollEnabled 语义，删 FolderRow/PrivateApp/notifications；P2 新增行长按菜单 =  
+    加入/移出收藏 + 应用信息，文案主树预解析遵守 hotfix2 Popup 规则）；  
+    B2.2 字母索引（AlphabetRail 逐字搬运 + LauncherIcon Star 裁剪版 + ms_star drawable；  
+    拼音分组无需补——v1.1.4 LauncherApp.appSortKey 已内置 ICU Transliterator  
+    "Any-Latin; Latin-ASCII"，中文应用自动归入 A–Z，P1 已随 LauncherApp.kt 搬入）；  
+    B2.3 搜索（AppSearchScreen 裁剪版：删 SearchContacts/Internet/SearchLauncher 与设置按钮，  
+    保留 SearchQuery/SearchName 打分（拼音 initials/子序列/模糊）+ 最近应用建议；  
+    LauncherSearchBar 逐字搬运；SearchSettings 逐字搬运并挂入 GraceHomeSettings.searchSettings  
+    SP 落盘 grace_launcher_settings/search_settings key；recordSearchApp 接 recordApp）。  
+    路由重构：新建 GraceLauncherRoute（两态 UI：首页/抽屉/搜索 + rail + FAB 搜索入口），  
+    GraceHomeRoot 改为直连路由；删 P1 favorites 空态点按引导（收藏管理走抽屉长按菜单）；  
+    Home 键回桌面链路：底座 onHomeIntent → GraceHomeView override → ViewModel.returnHomeRequests  
+    (SharedFlow) → 路由复位两态（宿主非 ComponentActivity，BackHandler 不可用，rail 星星/HOME 关抽屉）。  
+    版本注意：本 compose foundation 版本 TextFieldState 只有 clearText() 扩展（无 edit）。  
+    待装机验收（rail scrub 跳转/中文分组/搜索匹配/收藏增删即时刷新）。
+- [ ] P3：重启桌面后 favorites/布局从 Room 恢复；装/卸应用列表自动刷新
+  - ✅ 开发侧完成（2026-10-08，v2.4.0-grace-p3 / versionCode 9）：  
+    B3.2 Room 库（LauncherDatabase 逐字搬运：6 实体 + 全部 17 个 migration，schema version 18  
+    一次到位，P4 弹层/widget、P6 private space 直接复用无需补 migration；唯一适配点 =  
+    建库路径 databases/custom/grace_launcher.db，对齐底座独立 DB 目录惯例，Room name 传  
+    绝对路径 + 父目录 mkdirs；LauncherItems 裁剪版 = entities + DAO + PopupItem，裁  
+    ItemIcon/LauncherItemsRepository 到 P4/P6；HomeLayout 逐字）+ 构建链 KSP 2.3.10 +  
+    room-runtime/room-ktx 2.8.4（schemaLocation → app/schemas 入 git）；  
+    B3.1 AppRepository 裁剪版（loadApps = LauncherApps 主路径 + PM 兜底 + ensureActive  
+    对齐原版；launch = startMainActivity；裁 icon packs/P6）自 ViewModel 抽出；  
+    B3.3 装卸同步 P1 已实现（packageReceiver → refreshApps → favoritesFor 补 key），本阶段零改动；  
+    新建 GraceSettingsRepository（Room launcher_settings 承载 GraceHomeSettings 4 字段：  
+    clockEnabled/clockStyleJson/hideFavoriteNames/searchJson；SP→Room 一次性 seed 迁移  
+    ——clockStyle 原版 JSON 字节级兼容；withTransaction read-modify-write，copy 只覆写  
+    4 列、未知列原样带回；DB 初始化/读/写失败全链路降级回 SP，零崩溃铁律）。  
+    ViewModel 切换：settings 初值/更新走 Room（observeSettings Flow 常驻 + mutateSettings  
+    launch 内消化，对外签名不变 → 路由层零改动）；favorites 保留 SP（原版 v1.1.4 语义）；  
+    shutdown() 增加 settingsJob 取消（手动构造 ViewModel 不走 onCleared，防 collect 泄漏）。  
+    待装机验收（重启后时钟样式/布局/搜索设置从 Room 恢复 + 首次启动 SP 迁移 + 装卸刷新）。
+- [x] P4：桌面 widget 添加/缩放/移除 + 重启保持；长按弹层 morph 动画正常
+  - ✅ **装机验收通过（2026-10-08 16:2x，用户确认 + 日志复核）**：
+    ① 时钟长按 → HomeWidgetMenu → 添加 widget → WidgetPicker 选型 → 桌面渲染 ✅
+    （**bind 免确认链路同项实锤**：widget 上桌 = bindAppWidgetIdIfAllowed 返回
+    true——本实现 bind 失败不会弹系统确认对话框而是直接失败 Toast，无对话框
+    即宿主 BIND_APPWIDGET 免确认路径生效）；② widget 长按 → 移动/调整（编辑
+    把手）→ 重启桌面布局保持（Room homeLayoutJson 持久化）✅；③ 行右滑 →
+    ShortcutPopup reveal morph 弹层 + 快捷方式 + 尾部收藏行 ✅。
+    待观察项（非阻塞）：带配置页 widget 的 configure 跳转（NEW_TASK）、
+    CustomWidgetMenu"Change widget settings"入口、provider 推送刷新
+    （startListening 生命周期）。
+  - ✅ 开发侧完成（2026-10-08，v2.5.0-grace-p4 / versionCode 11 / 28.9MB）：  
+    B4.1 Widget 宿主（HomeWidgetHost/HomeWidgetHostView 逐字，HOST_ID 0x47524143；  
+    HomeWidget.kt 逐字——rememberWidgetHost 的 lifecycle 观察随自托管 LifecycleOwner 原语义  
+    成立；build.gradle 补 lifecycle-runtime-compose 2.9.4；startListening/stopListening 由  
+    GraceLauncherRoute 顶层 rememberWidgetHost 挂 ON_START/ON_STOP）；  
+    **WidgetSetupActivity 不搬**（原版跑模块 App 进程，其 Room 写入与宿主进程  
+    grace_launcher.db 不互通）→ bind 链路宿主进程内完成：allocateAppWidgetId →  
+    bindAppWidgetIdIfAllowed（宿主持 BIND_APPWIDGET 免确认）→ 写 Room homeLayout →  
+    有配置页 NEW_TASK 启动 configure（fire-and-forget）；WidgetPicker 裁剪版改为宿主  
+    Compose 全屏浮层（删 SettingsScaffold/IconPackRepository/多 profile 过滤）；  
+    HomeLayout 持久化：GraceHomeSettings 加 homeLayout 字段（第 5 列），Room  
+    launcher_settings.homeLayoutJson 原版 schema 已有零 migration；HomeEditHandle×2  
+    编辑把手（位置/高度），FAB 编辑态变完成键；  
+    B4.2 弹层（PopupMorphGeometry/AsyncQueryCache/ShortcutRepository 逐字 +  
+    LauncherShortcut 去重沿用 P1 模型；ShortcutPopup 裁剪版：删 FolderPopup/notifications/  
+    Private/弹层 widget 分支，LauncherActions → GracePopupActions 子集 + menuEntries  
+    附加行承载收藏增删；SwipeRevealPanel 同窗口 morph 动画原样；HomeSheets 新建 =  
+    LauncherOverlay 裁剪 sealed（Shortcuts/HomeWidgetMenu/CustomWidgetMenu）+  
+    PanelAction + LauncherOverlays 分发 + HomeWidgetPanel；**原版 ModalBottomSheet  
+    替换为同窗口底部面板**——ModalBottomSheetPopup 是独立窗口，踩 hotfix2 的  
+    LocalContext 重置坑）；手势接线：favorites/抽屉行右滑 = ShortcutPopup reveal  
+    morph（原版 soul 交互），长按保持应用信息语义，AppRowGestures onPrepare 预取/  
+    onDrag 拖拽 reveal/onDragEnd 提交；时钟长按 = HomeWidgetMenu，widget 长按 =  
+    CustomWidgetMenu，P1 演示入口 cycleClockLayout 迁入菜单；删 P1/P2 临时 DropdownMenu；  
+    B4.3 收藏重排（ItemSelectionScreen/FavoritesScreen 依赖 C 组设置体系  
+    （SettingsScaffold/FavoriteFoldersScreen/ShortcutPickerScreen）**缓至 C 组**；  
+    FavoritesReorderState 同缓；收藏增删经弹层 menuEntries 承载零回退）。  
+    LauncherIcon 补 10 符号（Outbound/Info/Plus/Delete/Edit/Apps/Check/Settings/Move/  
+    Resize/Clock）+ drawable 12 个（ms_schedule 等）；strings 补 P4 面（widget\_*/  
+    shortcut\_*/plurals widget_count 等）。待装机验收（widget 添加/缩放/移除/重启保持 +  
+    右滑弹层 morph + 时钟/widget 长按菜单）。
+- [ ] P5：点应用有启动动画（或明确降级声明）；Home 键两态复位
+  - ✅ 开发侧完成（2026-10-08，v2.6.0-grace-p5 / versionCode 13）：  
+    B5.1 启动转场走「系统默认动画」路径（ActivityOptions.makeThumbnailScaleUpAnimation，  
+    不依赖 ComponentActivity，不改底座）：AppLaunchTransition.kt 逐字搬运  
+    （Compose boundsInWindow → 屏幕坐标换算 + thumbnail/scale-up options + API 33  
+    splash style）；LauncherAppTransitions.kt **裁剪版**（LauncherIconTarget +  
+    register/unregister/launch 防抖 + 80ms capture 超时 + close，逐字；  
+    **裁掉 HomeReturnAnimation + GestureNavContract + selectHomeTarget** ——  
+    降级声明：① 底座 HomeView.onHomeIntent() 不带 Intent 参数，接 Quickstep 合约  
+    需扩展底座 hook（违反 A 组零改动边界）；② MIUI 快速手势是否注入 AOSP  
+    gesture_nav_contract_v1 未实测；③ HomeReturnAnimation 往宿主 Activity content  
+    注入 SurfaceView 在 MIUI DragLayer 窗口结构内未验证。恢复节点 = 实测 contract  
+    后按原文件头部 diff 逐字补回，构造签名已保留 activity 参数零变更）；  
+    B5.2 LauncherAnimationTarget.kt 逐字（LocalAppTransitions/LocalHomeAnimationTarget  
+    + Modifier.launcherAnimationTarget：GraphicsLayer 录制真实渲染 artwork 含  
+    themed/单色图标 → capture 做 thumbnail）；AppIcon 恢复动画目标挂点  
+    （app.folderId == null 时包装）。  
+    接线（GraceLauncherRoute）：顶层 CompositionLocalProvider(LocalAppTransitions)  
+    （对齐原版 MainActivity.setContent）+ HomeScreen 包 LocalHomeAnimationTarget  
+    provides true（仅首页图标 home=true，原版语义）；启动链路 launchApp(app, bounds) /  
+    launchShortcut(shortcut, bounds) —— favorites/抽屉行点击（rowGestures.onLaunchAt  
+    P4 丢弃的 iconBounds 接回）、右滑 reveal 提交、弹层快捷方式（GracePopupActions  
+    launchShortcutAt P4 预留字段接上）、搜索结果行（AppSearchScreen onLaunch 签名扩  
+    (LauncherApp, Rect?)，open(app, iconBounds) 原本就有）全覆盖；  
+    GraceHomeViewModel.launch/launchShortcut 加 sourceBounds/options 透传  
+    （AppRepository/ShortcutRepository P3/P4 已带参数零改动）；失败 Toast 对齐原版  
+    （app_unavailable/shortcut_error，P1 裁剪版 strings 已有）。  
+    宿主 Activity 获取：GraceHomeView.mLauncher → GraceHomeRoot(hostActivity) →  
+    GraceLauncherRoute（ComposeView 的 LocalContext 是 ModuleResourceBridge  
+    ContextWrapper 拿不到 Activity，必须显式透传）；LauncherAppTransitions 的 scope  
+    用 rememberCoroutineScope（组合级，onHomeDetached dispose 时随组合取消，替代原版  
+    Activity lifecycleScope，与自托管生命周期对齐）。  
+    Home 键复位扩展：returnHomeRequests.collect 里加 appTransitions?.close()（对齐  
+    原版 onHomeIntent 取消进行中 capture）。  
+    降级链（零崩溃铁律）：hostActivity == null → appTransitions = null →  
+    LocalAppTransitions null → 图标不注册目标 → bounds 启动直接 fromIcon（无 thumbnail  
+    的 makeScaleUpAnimation）；bounds == null → 纯 startMainActivity（P4 及以前行为）。  
+    待装机验收（点应用 thumbnail scale-up 动画 + Home 键复位 + 右滑/弹层/搜索路径动画）。
+- [ ] P6：每项独立开关，任一失效不阻塞主链路
+  - ⚠️ **装机验收部分通过（2026-10-08 晚，用户确认）**：通知预览/日程/天气/图标包/
+    Private Space/开关面均可使用；媒体行显示正常（曲名/歌手/按钮）✓。
+    残留 2 点挂起：① 媒体控制命令（hotfix8 已修 sessionId 漂移根因，待复测）；
+    ② 封面显示（原版 loadArtwork 拒绝网络封面 = 原版语义，小米音乐封面为网络
+    URI 不显示，维持原版行为）。
+    hotfix 链（v2.7.1~v2.7.8，5 轮根因修复 + 1 次 NPE 手误）：NOT_EXPORTED 跨包
+    广播不可达 → NEW_TASK 设置页秒退 → BAL 静默拦截 → 引擎启动时序 → bridgeDiag
+    NPE → 布局截断 → MIUI 媒体通知缺 EXTRA_MEDIA_SESSION token → 降级模式
+    sessionId 漂移。通用教训入 memory：跨包广播动态 receiver 必须 EXPORTED；
+    HyperOS 宿主直启他应用深层设置页 = 无异常静默拦截（引导一律走主入口
+    Activity 二级跳转）；LSPosed modules 日志只收 hook 进程输出。
+  - ✅ 开发侧完成（2026-10-08，v2.7.0-grace-p6 / versionCode 14 / 28.1MB）：  
+    **B6.1 媒体控制 + B6.3 通知小红点（跨进程广播桥）**：  
+    NotificationListenerService 落模块 App 进程（系统按 manifest 绑定，token/
+    controller 不可离进程；含 binder 的 Parcel 不能 marshall 落盘 → 文件桥不可行，
+    PORTING 原设想修正为广播桥）；data/media/*（MediaAccess/MediaPlayback/
+    MediaNotificationListener/MediaSessionRepository）+ AppNotificationStore 逐字
+    搬运（listener 仅 onListenerConnected/onListenerDisconnected 两处挂桥，数据面
+    单例 appNotifications/mediaNotifications 与原版一致）；新建 bridge/
+    BridgeContract（ACTION_GRACE_MEDIA/NOTIFICATIONS/WEATHER 快照广播 +
+    ACTION_GRACE_COMMAND 命令广播 + JSON 编解码 + 封面 JPEG bytes extra ≤100KB，
+    bandle 1MB 缓冲安全区）+ GraceBridgeEngine（模块进程单例：state collect →
+    指纹去重 → 显式 setPackage("com.miui.home") 下发；命令执行面）+
+    GraceCommandReceiver（manifest 静态注册，exported=true + onReceive 内
+    Binder.getCallingUid 校验必须解析为 com.miui.home——宿主无法声明自定义
+    uses-permission，权限保护不可用，uid 校验兜底）+ 宿主侧 GraceBridgeReceiver
+    （动态注册 RECEIVER_NOT_EXPORTED）。媒体行（HomeMediaPlayer 逐字 +
+    IdleMediaSessionId 常驻占位 mediaAlwaysVisible）、favorites 行通知预览
+    （LauncherRow notification 分支恢复：label 时间后缀 + 正文两行 + Chevron 箭头，
+    notificationAge 逐字）+ 弹层附加行通知打开/清除；无通知监听权限（宿主进程
+    isNotificationListenerAccessGranted 探测）→ 组件整体隐藏；mediaPlayer 开关开启
+    且未授权时引导 MediaAccess.settingsIntent。  
+    **B6.2 日程/天气**：CalendarRepository + ScheduleEvent（agendaDays/
+    nextVisibleEvent/eventCountdown）宿主进程直读；READ_CALENDAR 能力探测（宿主
+    manifest 不可改、无法在宿主进程弹授权 → PermissionRequired 降级，Connect
+    calendar 按钮打开系统日历 app，宿主 manifest 已声明该权限时授权后自动生效）；
+    weather/*（WeatherModels/BreezyWeatherParser/BreezyWeatherRepository/
+    BreezyWeatherUpdates）在模块 App 进程读 Breezy provider（manifest 声明
+    org.breezyweather.READ_PROVIDER——custom permission 宿主拿不到，读侧必须
+    在模块进程）经桥下发；HomeClockHeader 恢复日程行（ScheduleLine）/
+    calendarAboveClock/电量（rememberBatteryPercent）/天气温度行（HomeWeather/
+    WeatherIcon/WeatherComponents 搬运 + 12 个 ms_weather drawable）；日期点击 →
+    AgendaSheet 裁剪版（同窗口面板，ModalBottomSheet → scrim+Surface 对齐 hotfix2
+    规则；AgendaEvent/NewAgendaEvent/WeatherConnectionNotice/weatherAgendaDays；
+    newEvent/openEvent 降级系统日历 Intent，openBreezy/installBreezy 降级
+    launch intent/市场 intent）。  
+    **B6.4 图标包**：IconPackDefinition/IconPackRepository/IconPackOrder 搬运
+    （裁 selectedIcon/matchingIconName/designLayers* —— ItemIcon/IconDesignRenderer
+    per-app 选择面随 C 组）；AppRepository 恢复 makeApp 装饰链（normalizeIconPackOrder
+    + iconFor + firstMatchingPackIcon，包加载失败回退系统图标）；IconPackPanel
+    宿主内单选面板（原版多选 fallback 顺序随 C 组设置页恢复），时钟长按面板加
+    "Icon pack"入口；iconPackPackages 落 Room iconPackPackagesJson 列。  
+    **B6.5 Private Space（诚实降级）**：PrivateSpaceSettings 数据面搬运
+    （Room privateSpaceJson 列就位）+ PrivateSpaceProbe 轻量探测（API 35 +
+    launcherApps.profiles USER_TYPE_PROFILE_PRIVATE + QuietMode 状态）+ 面板状态行
+    （跳系统安全设置）；完整 PrivateSpaceController（310 行解锁/锁定/凭据会话）
+    依赖抽屉 PrivateApp/folders UI 载体，随 folders 阶段恢复。  
+    **开关面**：GraceHomeSettings 扩 9 字段（calendarAgenda/calendarAboveClock/
+    showBatteryPercentage/mediaPlayer/mediaAlwaysVisible/weatherEnabled/
+    weatherForecastDays/iconPackPackages/privateSpace）——全部命中 schema v18
+    launcher_settings 已有列，零 migration（P3 一次到位策略兑现）；SP 桥同步扩 key；
+    时钟长按面板注入开关行组（WidgetToggle 原版逐字：日程/天气/媒体控制+授权引导/
+    电量）。drawable 补 19 个（ms_sunny 全套/ms_music_note/ms_pause/ms_play_arrow/
+    ms_skip_*/ms_calendar_month/ms_lock），strings 补 ~60 key；LauncherSymbol 补
+    Chevron/Calendar/Weather/Lock/Music。  
+    降级链（任一失效不阻塞主链路）：桥断/广播被拦 → 快照过期 → 组件空缺；无通知
+    监听权限 → 媒体/通知隐藏；宿主无 READ_CALENDAR → 日程 PermissionRequired →
+    首页行自然无事件隐藏；Breezy 未装/未授权/读不到 → 天气 Disabled/NotInstalled
+    不下发 → 隐藏；图标包加载失败 → safely 回退系统图标；private space API < 35 →
+    unsupported 状态行。  
+    待装机验收（通知监听授权后媒体行/通知预览/控制命令闭环 + 日程行/Agenda 面板 +
+    Breezy 装机后天气 + 图标包选择上图标 + 开关落 Room 重启保持）。
+- [ ] 全程：切回原生模式完整还原；GPU 过度渲染无静止重绘
+
+---
+
+## 7. 一句话总结
+
+> **P0 用一周证明"Compose 能活在 com.miui.home 里"，证明成功后 P1–P4 基本是搬运 + 接线（底座侧只改 `HomeViewFactory` 一行）；  
+> 真正的工程量在 P5 动画适配和 P6 跨进程数据通道，先把它们标为独立可降级项。**
+
+---
+
+## 8. 后续路线图（2026-10-08 定，P6 装机验收后）
+
+当前位置：P0–P6 开发侧全部完成；装机验收 P1/P2/P3/P4 ✓、P6 主体 ✓
+（媒体控制命令等 hotfix8 复测；封面为原版语义——拒绝网络封面，维持）。
+移植清单上只剩一大块（C 组），另有发布准备与收尾验证。
+
+### ① C 组：设置全家桶（唯一剩的大块，约 20 个文件）—— v2.8.0-grace-c1（2026-10-08，开发侧完成，待装机验收）
+
+- [x] C1 `SettingsActivity` + `ui/settings/*` 原样搬入模块 App 进程（23 文件全量：
+  LauncherSettingsScreen / ThemeSettings / ClockStyleSettings / IconDesigner* /
+  FontSettings / GraceButtonSettings / WeatherSettings / Media / Search /
+  Calendar / PrivateSpace / License / About）＋ 依赖补齐：ShortcutPicker /
+  AppSelectionList / AppSelectionScrollbar / IconPackGrid / SettingsDialogs
+  （自原版 LauncherSheets 尾部拆出）/ LauncherUiState / LauncherActions /
+  SearchLauncher / SearchContacts / IconPackRepository 恢复原版全量。
+  入口 = 模块 MainActivity（route extra）→ SettingsActivity（BAL 可行路径，P6 hotfix3 实锤）
+  —— 正常 Compose Activity，不碰宿主；新增依赖 androidx.activity-compose 1.13.0 /
+  navigation-compose 2.9.8
+- [x] C3 跨进程设置同步：模块设置页写 → `ACTION_GRACE_SETTINGS_COMMAND`（列级增量
+  JSON）→ 宿主 GraceSettingsHostEngine（新建）→ LauncherSettingsRepository 大模型
+  read-modify-write 全量落 Room（launcher_settings 表 schema v18 列全覆盖，零 migration）
+  → `ACTION_GRACE_SETTINGS_SNAPSHOT` 快照回推闭环；宿主 receiver = GraceBridgeReceiver
+  扩展（挂载期动态注册）。快照超时 ≈4s → settingsLoadFailed → 设置页只读
+  （SettingsStorageState.canEdit 语义，与原版一致）
+- [x] 解锁挂起项：**收藏重排组件**（FavoritesReorderState / ItemSelectionScreen /
+  FavoritesScreen / FavoriteFoldersScreen 落仓，收藏序命令 reorder_favorites →
+  FavoritesStore，宿主桌面弹层接线待装机复测后启用）、multi icon pack fallback 顺序
+  （iconPackPackagesJson 全量往返 + IconPackRepository 原版恢复）、weather location
+  （weatherLocationId 设置→宿主 Room→快照回带→模块桥引擎 load(preferredLocationId)
+  闭环）、**图标设计器**（ItemIcon 补回 LauncherItems + IconDesign + IconDesignRenderer
+  + ItemIconStore + per-app item_icons 表经桥读写）、mediaAppKey（设置行持久化）、
+  时钟样式选择器（桌面长按面板"时钟样式"行改为直达模块设置页 ClockStyle 面板，
+  替掉 cycleClockLayout 演示入口）、时钟长按面板 "Grace settings" 行接通
+  （→ 模块 MainActivity route 转发）
+- [x] 宿主侧字段对齐：宿主仓库升级为 LauncherSettings 大模型（34 列 ↔ 原版模型逐项
+  映射，GraceHomeSettings 变为宿主 UI 视图，主链路零破坏）；设置页逐面板接线经
+  updateSettings 统一走增量桥。**仅持久化、宿主渲染待接**（登记）：hideStatusBar ✅
+  （hotfix3 接渲染 + hotfix6 升级 autoHide 语义：LauncherSystemBars 移植，滚顶下拉/边缘滑
+  唤出 3s 回收，2026-10-09 装机验收通过）/ dimWallpaper ✅（hotfix3 已接：黑 scrim 随抽屉
+  可见度；hotfix6 纠正为原版 wallpaperTint 主题色调遮罩，2026-10-09 验收通过）/
+  blurWallpaper ✅（hotfix3 已接：window.setBackgroundBlurRadius 随抽屉可见度，宿主原窗口；
+  hotfix5 修 dp→px 量纲；hotfix6 加 WallpaperManager 快照 + Modifier.blur Compose 兜底层
+  ——MIUI home 窗口对 setBackgroundBlurRadius 静默 no-op 定案，2026-10-09 验收通过）/
+  hideAlphabet ✅（hotfix3 接渲染 + hotfix4 纠正为原版 autoHide 语义：触摸即现松手淡出，
+  2026-10-09 验收通过）/
+  themeColor / darkMode / amoledMode（外观三件套）✅ / appFontId（全局字体）✅ /
+  allowHapticFeedback（触感反馈）✅ / clockAppKey / mediaAppKey（跳转目标）✅
+  —— 以上 7 项宿主消费链路本已存在（LauncherAppearance / Typography / 时钟媒体点击），
+  **2026-10-09 装机验收全部通过，"仅持久化待接"清单清零**
+- **C 组降级登记**（桌面零崩溃铁律，任一失效不阻塞主链路）：① 图片导入图标
+  （importItemIcon）：图片必须落宿主 filesDir 才能被宿主渲染，模块进程导入无意义 →
+  返回 false（UI 走 icon_edit_failed 提示）；② 私人空间建档/解锁（requestPrivateSpace）
+  需宿主 Activity 鉴权 → 乐观回调，编辑器 app 列表空（privateApps 不跨桥，ps 状态
+  行来自快照）；③ 弹层 widget 项（addPopupWidget）：宿主 widget host 特有 → no-op；
+  ④ 快捷方式查询在模块进程无 shortcut host 权限 → DefaultLauncherRequired（原版
+  同款提示）；⑤ 许可列表（LicensesRepository）：aboutlibraries 插件不引入 → 静态
+  依赖清单（手工维护，GPL-3.0 自身条目在列）；⑦ 设置页时钟预览不含宿主导入的
+  自定义时钟字体（ClockFontStore filesDir 跨进程不可达，typeface() file.isFile
+  守卫 → 回落 preset/默认字体；导入入口仍在设置页可用，文件落模块目录仅设置页
+  预览可见——hotfix1 修复 LocalHostContext 组合期 error 崩溃时一并登记）；
+  ⑥ 安全区：宿主 receiver 导出
+  （动态注册无法 uid 校验），伪造广播面 = 等同用户操作设置数据，AIDL 收紧同 P6 登记项
+
+### folders 阶段（v2.9.0-grace-folders1 / versionCode 33，commit 665da1a，2026-10-09）
+
+- [x] 原版语义核对（逐字）：数据 = Room folders 表 + 成员存 popup items JSON
+  （owner `folder:<id>`，LauncherSettingsRepository.snapshots :18-33）；placement 双表面
+  （Favorites/AppList/Both/None）；抽屉两种位置（按名内联 / appListAtBottom 底部 ◇ 区）；
+  收藏区 favoriteItems = favoriteApps + inFavorites 文件夹项（LauncherViewModel.kt:183-195
+  "Folder placement owns membership; shared order determines position"，新文件夹排末尾）；
+  FolderPopup = ShortcutPopup 文件夹分支（header 点击→编辑、空态提示+编辑钮、
+  已删文件夹自动关弹层 LauncherSheets.kt:172-174）
+- [x] 恢复渲染：AppListModel 文件夹分支 / AppDrawerScreen FolderRow /
+  HomeScreen 收藏区 folder 分支 / LauncherComponents FolderIcon+FolderRow+AppIcon
+  folderId 兜底+LauncherRow trailing 参数
+- [x] 宿主数据面：GraceHomeUiState.folders（combine(observeFolders, popups) 直读，
+  原版映射逐字）+ folderItem + favoriteItems 派生；文件夹增删改实时跟随
+- [x] 文件夹弹层：LauncherOverlay.Folder + FolderPopup.kt（同窗口 SwipeRevealPanel
+  morph；成员路由层解析；点成员 launchApp 带 bounds 走 P5 动画）
+- [x] 文件夹设置（重命名/placement/删除）→ 模块设置页 Folders 面板
+  （openGraceSettingsInModule(context, "folders")，对齐 hotfix8 模式）
+- [x] 编辑收藏页：文件夹入口恢复（FavoriteFoldersScreen → setFolderFavorites 直连宿主
+  Room，同进程免桥）；快捷方式添加接通宿主 ShortcutRepository
+  （DefaultLauncherRequired 降级解除——宿主持 HOME 角色，shortcut host 权限成立）
+- [x] 补 4 字符串（open_folder / folder_actions / folder_contents_empty / recently_installed）
+- **folders 阶段降级登记**：① 文件夹成员图标不做 ItemIcon 装饰（原版经
+  uiState.folderItem 走 itemIcons，模块弹层暂用原始应用图标）；② 文件夹 reveal 拖拽
+  morph 参数默认 no-op（点按即开弹层；行内拖拽展开随后续 soul 动画阶段）；
+  ③ recentlyInstalledFolder / Private Space 文件夹载体仍随对应阶段
+
+### folders hotfix2（v2.9.1-grace-folders2 / versionCode 34，2026-10-09）
+
+装机反馈三连修复（文件夹已显示但设置不生效 / 弹层两个"+"不可用）：
+
+- [x] **文件夹重命名不保存**（根因）：模块设置页 rename 对 folderId != null 的
+  owner 走 RENAME（SP `label:`）—— 文件夹名在 folders 表，永不被消费。按原版
+  renameApp 分支（LauncherViewModel.kt:589-596）：普通文件夹 → UPDATE_FOLDER{name}；
+  PrivateSpaceFolderId → MUTATE_SETTINGS privateSpace.name；app/shortcut 保持 SP。
+- [x] **弹层成员新增静默丢失**（根因）：宿主引擎 SAVE_POPUP 以 `defaults=emptyList`
+  调 updatePopup，transform 内 keys 仅在 previous popup 行内匹配 → 新勾选成员
+  （行不存在/不在 previous）全被丢弃。改为无命中时构造 `PopupItem(key)`（widget 项
+  仍保序追加尾部，模块 keys 已滤 widget）。
+- [x] **快捷方式"+"（模块设置页）**：模块进程无 shortcut host 权限 → 新增桥中继：
+  `Cmd.SHORTCUTS_QUERY`（批量 appKey）→ 宿主 ShortcutRepository 代查 →
+  `ACTION_SHORTCUTS_RESULT` 回包 → 模块 GraceShortcutsRelay（快照同生命周期动态
+  receiver）+ SettingsViewModel.shortcuts 接通（单飞行批 + 会话内缓存；
+  hasShortcutAccess 随快照 ok=true 置真）。快捷方式成员落库路径不变
+  （REMEMBER_SHORTCUT + SAVE_POPUP）。
+- [x] **弹层小组件"+"**：addPopupWidget 走 moveWidget 同款模式 —— 发
+  `Cmd.ADD_POPUP_WIDGET(ownerKey)` + 关设置页；宿主 Route 收
+  addPopupWidgetRequests 开 WidgetPicker 弹层模式；VM.addPopupWidgetTo：
+  allocate → bindAppWidgetIdIfAllowed → `PopupItem("widget:<id>", HomeLayout)`
+  落 app_popups（原版 WidgetSetupActivity.finishAdding popupOwner 分支同构）→
+  配置页 fire-and-forget。
+- [x] **桌面弹层 widget 渲染恢复**：FolderPopup 补原版 ShortcutPopup.kt:172-182
+  widget 分支（rememberHostedWidget + HomeWidget，editing=false，长按进编辑）；
+  宿主 UiState 透出 folderWidgets（combine popups widget 项）+ savedShortcutApps
+  （saved_shortcuts 表 → LauncherApp，成员 shortcut key 解析）。
+- **hotfix2 降级登记**：① 快捷方式跨桥无图标（ImageBitmap 不可 JSON 序列化）→
+  选择列表/文件夹成员行用默认图标；② 文件夹弹层 widget 行排成员尾部（原版按
+  popup JSON 顺序与 app 成员交错）；③ showInAppList 快捷方式的抽屉内嵌显示
+  随 app-list 阶段；④ 抽屉 FolderRow 成员 shortcut key 解析未接（仅收藏区弹层）。
+
+
+### folders hotfix3（v2.9.2-grace-folders3 / versionCode 35，2026-10-09）
+
+装机反馈：弹层小组件选择完成后直接停在桌面，看不到添加结果。
+
+- [x] **添加成功后回弹文件夹弹层**（根因）：设置页 onEdit 已把 `overlay=null`，
+  WidgetPicker 选中 → addPopupWidgetTo 落库成功后无恢复动作 → 用户停在裸桌面。
+  原版同进程语义 = WidgetSetupActivity finish 后 launcher 恢复、弹层仍在最上层、
+  新 widget 即时可见。修复（GraceLauncherRoute）：① `lastFolderAnchor` 记录最近一次
+  onOpenFolder 锚点（收藏区 + 抽屉两处）；② onSelect 弹层分支登记
+  `popupWidgetReturn = ownerKey`；③ widgetSetupResults 成功且 returnOwner 非 null →
+  重开 `LauncherOverlay.Folder(folder, lastFolderAnchor)`，widget 经 folderWidgets
+  流即时透出（Room 流毫秒级，视觉上弹层打开即含新 widget）。
+- **hotfix3 降级登记**：① 锚点恢复依赖同次宿主进程会话（进程被杀后锚点为
+  Rect.Zero，reveal morph 定位退化但弹层功能不受影响）；② 带 configure 的 widget
+  配置页仍 fire-and-forget 覆盖在弹层之上（原版同序）。
+
+
+### notif1（v2.9.3-grace-notif1 / versionCode 36，2026-10-09）
+
+装机反馈：桌面图标不显示通知。
+
+- [x] **抽屉行内通知预览恢复**（根因）：P2 移植 AppDrawerScreen 时删掉
+  `notifications` 参数（头注登记"P6 恢复"），P6 只恢复了 LauncherRow 组件分支与
+  收藏区（HomeScreen.kt:261），抽屉这层漏接 —— 应用列表行永不出现通知预览。
+  按原版 AppDrawerScreen.kt:66/152 逐字恢复：`notifications` 参数 +
+  `LauncherAppRow(notification = notifications[item.app.packageName]?.firstOrNull())`
+  + Route 传入 `state.notifications`。
+- **设计语义澄清（对齐 Niagara/GraceLauncher）**：本桌面没有 MIUI 式角标圆点，
+  通知以**行内预览**呈现（label · 时间 + 正文摘要 + 箭头），"打开/清除"走行右滑
+  弹层附加行（menuEntriesProvider）。数据链：模块进程 NotificationListener →
+  appNotifications 快照 → GraceBridgeEngine 指纹去重下发 → 宿主
+  GraceBridgeReceiver → UiState.notifications（收藏区在 P6 已接通）。
+- **前置条件**：模块 App 需要"通知使用权"（NotificationListenerService 授权），
+  未授权 = 快照为空 = 全部行无预览（降级语义，不报错）。
+
+
+### notif2（v2.9.4-grace-notif2 / versionCode 37，2026-10-09）
+
+装机反馈：仍然没有通知显示，媒体仍不能控制，封面要过挺久才显示。
+
+- [x] **宿主挂载快照拉取（SNAPSHOT_REFRESH）**（通知不显示 + 封面慢的共同根因）：
+  GraceBridgeEngine 指纹去重是模块进程的持久单例状态，快照只在底层状态变化时重发
+  —— 宿主桌面每次重启（装新 APK / 桌面进程被杀）都会错过重启前的一次性推送，
+  要等到下一次新通知/切歌才有数据。修复：宿主 GraceHomeViewModel 挂载（receiver
+  注册后）发 `Cmd.SNAPSHOT_REFRESH` → 引擎清全部指纹 → 重发当前通知快照（空也发，
+  宿主据此清行）+ 当前媒体快照（含封面，publishMediaCurrent 与 observe 同一套
+  指纹记账）+ refreshWeather()。
+- [x] **命令回程 uid 校验加固**（媒体控制失效候选根因）：manifest 静态 receiver
+  的派发路径上 `Binder.getCallingUid()` 不可靠（可能返回 system uid 而非发送方，
+  宿主命令被误判 "dropped broadcast from untrusted uid" 丢弃）。API 34+ 改用
+  `BroadcastReceiver.getSentFromUid()`（权威，防伪造），叠加原 getCallingUid
+  双路径判定；uid 必须解析为 com.miui.home 不变。
+- **装机复测锚点**：装好后若媒体控制仍失败，logcat 抓 `HomeMode4Miui` tag ——
+  若出现 "dropped broadcast from untrusted uid" 说明 uid 校验仍未命中宿主
+  （需升级 AIDL 绑定方案，见 GraceBridgeReceiver 头注收紧路径）。
+
+
+### notif3（v2.9.5-grace-notif3 / versionCode 38，2026-10-09）
+
+用户 logcat（logcat_media_control.txt）实锤三根因：
+
+- **日志关键证据**：① 14:05:46 QQ 通知真实到达系统（第三方监听 app 都收到），
+  引擎零动作、零 `ACTION_GRACE_NOTIFICATIONS` 下发；② 14:06:55 切歌引擎立即发
+  媒体快照但 `art=0`（切歌却无封面）；③ "attach: reused existing view" ——
+  宿主进程装新 APK 后**没有重启**，宿主侧注入代码仍是旧版。
+- [x] **封面异步加载被指纹吞掉**（引擎实锤 bug）：封面由 repository artJob 在
+  publish 之后异步加载，加载完成时 sessionId:revision 未变 → 引擎 artKey 相同 →
+  `art=null` 且 json 相同 → 去重吞掉。封面只能等下一次播放状态变化"搭车"发出
+  （"过挺久才显示"的根因）。修复：artKey 加入封面存在性
+  `"$sessionId:$revision:${artwork != null}"`（observe 与 publishMediaCurrent 两处）。
+- [x] **listener 服务未绑定自愈**：媒体链只需授权角色（MediaSessionManager
+  getActiveSessions），通知链必须服务绑定（onNotificationPosted）——授权在、
+  媒体工作、通知零反应即"服务未绑"状态（更新 APK/懒绑定/MIUI 省电解绑后可卡住）。
+  引擎 ensureListenerBound()：`MediaAccess.isGranted && !mediaNotifications.connected`
+  → `NotificationListenerService.requestRebind(component)`（60s 防抖），
+  在 start() 与 refreshSnapshots() 触发。
+- **⚠️ 装机前置（交付疏漏，本轮补登记）**：LSPosed 注入宿主进程的代码在宿主
+  进程启动时加载 —— **模块更新 APK 后必须强停 com.miui.home（或重启手机）再进
+  桌面**，否则 notif1 抽屉通知行 / notif2 挂载拉取等宿主侧修复全部不生效。
+  日志中"reused existing view"即旧宿主进程未重启的直接证据。
+- **封面残余降级**：loadArtwork 只接受 metadata bitmap / content|android.resource
+  URI —— 播放器只给 http 或本地文件路径封面时无图（原版同语义，网络抓取禁止）。
+
+
+### notif4（v2.9.6-grace-notif4 / versionCode 39，2026-10-09）
+
+装机复测：**通知已通**（notif2/3 修复确认生效）。剩余两症结 + 用户日志实锤：
+
+- **日志关键证据**：① 通知快照链路全程可见（引擎 send ↔ 宿主 bridge snapshot，
+  双端打点齐全）；② 切歌快照 `art=5421` 已带封面字节且宿主已接收，但 UI 仍显示
+  上一首封面（暂停后才换）；③ 整段日志**零** `GraceCommandReceiver` 打点 ——
+  该 receiver 无论命令到达（hotfix8 诊断打点）还是被 uid 拒（dropped 日志）
+  都必留痕，零输出 = 广播根本没派发到 receiver。
+- [x] **媒体控制失效 = manifest 静态 receiver 被 MIUI/HyperOS 省电策略拦截**
+  （根因定案）：后台模块进程收不到任何命令广播。反方向（模块→宿主快照）一直
+  正常，正因为宿主 `GraceBridgeReceiver` 是动态注册。修复：从 AndroidManifest
+  移除 `GraceCommandReceiver` 声明，改为 `GraceBridgeEngine.start()` 内动态注册
+  （`ContextCompat.registerReceiver` + `RECEIVER_EXPORTED`，幂等；模块进程由
+  listener service 常驻，start 时机覆盖全部命令窗口）。uid 校验语义不变。
+- [x] **封面滞后 = 引擎指纹协议与 repository 异步封面加载语义错位**：切歌时
+  repository 先发布 `artwork=null` 再由 artJob 异步加载（装机时序：art=0 快照 →
+  补发带封面），而旧 `artKey(session:rev:hasArt)` 去重 + 宿主"沿用旧封面"合并
+  让封面字节只能在部分状态跳变时搭车发出。修复（引擎 observe + publishMediaCurrent
+  统一）：语义指纹 = `session|rev|title|artist|playing|can*|封面对象 identityHashCode`，
+  **指纹变化即发送且总是携带当前封面字节**（JPEG 512px 编码 ≈几 ms，频率 ≤ 播放
+  状态变化率）。`lastMediaArtKey` 字段删除；宿主合并逻辑保留作兜底。
+- **降级登记**：引擎未 start（listener 未授权/模块进程死）时命令无人接收 ——
+  动态注册前提是进程常驻；原 manifest 注册在此场景同样被 MIUI 拦截，无功能回退。
+
+
+### notif5（v2.9.7-grace-notif5 / versionCode 40，2026-10-09）
+
+装机复测：动态注册生效、命令**到达** receiver（"registered (dynamic)" + 逐次
+"dropped"），快照/封面补发协议全程正常。卡点收敛为 uid 校验误杀：
+
+- **根因**：AMS 派发广播时 `onReceive` 内 `Binder.getCallingUid()` **恒为
+  system_server（1000）** 而非发送方；`getSentFromUid()`（API 34+）为权威，
+  但设备实际 API / MIUI 转发都可能让双源落空 → 全拒。
+- [x] 修复：`fromHost` 重写 —— 命中（任一候选 uid 解析出 com.miui.home）即放行；
+  未命中时**打印完整诊断**（SDK_INT + 各候选 uid 的包解析 + myUid）后放行
+  （insecure 标记）。下轮日志直接看到真实 sender uid，为收紧定案。
+- **安全降级声明**：命令面低敏 —— 媒体控制需随机 UUID sessionId、通知 key
+  不可枚举、天气/快照刷新无害，第三方注入面极小。**后续收紧路径 = AIDL 绑定**
+  （onBind 的 `Binder.getCallingUid()` 对 binder 调用可靠，不受广播派发路径
+  影响），随工程化阶段实施。
+
+
+### notif6（v2.9.8-grace-notif6 / versionCode 41，2026-10-09）
+
+装机复测：**媒体控制全通**（`mediaCommand -> true`），uid 诊断行定案：
+`sdk=35`，`getSentFromUid() = -1`（**MIUI 广播派发不填充 sentFromUid**），
+`Binder.getCallingUid() = 模块自身 uid` —— 两个来源都拿不到宿主 uid，
+notifi5 放行策略是当前唯一可行路径（AIDL 收紧维持登记）。
+
+本轮新问题：**通知行消失**。日志窗口内引擎零通知快照、无 requestRebind、
+无 refreshSnapshots 打点，且尾部 `attach: reused existing view` 证明宿主
+进程未随模块 APK 重装而重启 —— 时序推断：模块进程重启后 listener 重连
+晚于宿主的最后一次快照拉取，宿主停在空快照上。
+
+- [x] **宿主每次挂载都拉取快照**：`HomeController.attach()`（首挂 + 复用两条
+  路径）发送 `SNAPSHOT_REFRESH`（`GraceBridge.snapshotRefreshIntent()` Java
+  互操作）。此前只在宿主 VM init 发一次，宿主存活期内模块 listener 重连 /
+  模块重装后的状态变化无法同步。
+- [x] **通知链全打点**：listener seed 数量（`seeded=N active notifications`）、
+  引擎每次通知快照下发（apps/entries/len）、ensureListenerBound 各分支
+  （not granted / already connected / rebind）—— 下轮日志可直接区分
+  "listener 未连"、"连了但 seed 空"、"seed 有但未下发"三类断点。
+
+
+### notif7（v2.9.9-grace-notif7 / versionCode 42，2026-10-09）
+
+notif6 复测 + 用户操作定性，根因**彻底定案**：
+
+- **媒体≠通知的连接语义**：媒体链 `MediaSessionManager.getActiveSessions(component)`
+  只要求授权 component 处于**启用**状态（服务可以没绑）；通知链必须
+  NotificationListenerService **实际绑定**（onNotificationPosted）。所以出现
+  "媒体一直正常、通知全死"的组合态。
+- **日志实锤**：`send ACTION_GRACE_NOTIFICATIONS len=2`（len=2 = 空 JSON `{}`，
+  `appNotifications.state` 恒空 = stores disconnected 后的清空值）；窗口内
+  `refreshSnapshots` 调用 ensureListenerBound 但 "already connected /
+  not granted / requestRebind" 三条日志全无 → 唯一可能 = **静默的 60s 防抖
+  分支**（rebind 刚发过但 listener 至今没重连）。
+- **用户操作定性**：重新授权权限 → 立即恢复；关掉模块页面再回来 → 又死。
+  = MIUI 省电策略在模块退后台后**解绑**后台模块进程里的 listener，
+  系统不自动重绑；重授权动作触发系统重绑所以恢复。原有代码 rebind 只在
+  宿主挂载时被动触发一次、防抖分支零日志、断连不主动重绑 —— 后台一解绑
+  就永远没人救。
+
+- [x] **断连即重绑**：`onListenerDisconnected()` 调 `ensureListenerBound()`
+  （原只清指纹）。
+- [x] **30s 看门狗**：引擎 `startWatchdog()` 每 30s 检查
+  `mediaNotifications.state.connected`，未连接即自愈（防抖挡重频）。
+- [x] **防抖分支补日志**：`rebind debounced (Xs ago, attempts=N)`。
+- [x] **component toggle 升级兜底**：连续 3 次 rebind 仍连不上 →
+  `setComponentEnabledSetting(DISABLED→ENABLED, DONT_KILL_APP)` 强制
+  NotificationManagerService 拆绑重绑（HyperOS 上 requestRebind 偶发不派发
+  的实锤手段；瞬间闪断后系统自动重绑走 onListenerConnected）。
+- [x] **重连登记**：listener `onListenerConnected` → 引擎
+  `noteListenerConnected()`（清升级计数 + 打点）。
+- [ ] **装机侧配套（用户操作项）**：模块应用给 MIUI「自启动」+ 省电策略
+  「无限制」—— 自愈链是兜底，白名单是第一道防线。
+
+
+### notif8（v2.9.10-grace-notif8 / versionCode 43，2026-10-09）
+
+notif7 基础上追加 **root 保活**（用户确认：LSPosed 设备必然已 root，su 通道
+现成）。防线前移 —— notif7 自愈链是"解绑后 1~2 分钟自愈"，root 保活目标是
+"让 MIUI 根本不解绑"。
+
+- **开关设计**：不做自定义设置页开关（设置页是整屏搬运的
+  LauncherSettingsScreen，注入自定义行造成移植漂移）—— **Magisk su 授权框
+  即开关**：授予 = 保活生效；永久拒绝 = su 失败静默停用，进程内不再重试。
+- **触发**：引擎 `start()` 时 best-effort 执行一次（进程内幂等），全程后台
+  线程 + 10s 超时强杀（Magisk 授权框挂起时 waitFor 不能阻塞 —— 读流另起
+  线程，否则 readText() 卡在挂起进程上超时永不生效）。
+- **手段清单**（`RootKeepAlive.kt` 新建，逐项隔离失败、逐项打点）：
+  1. Doze 白名单 `dumpsys deviceidle whitelist +pkg`（标准 Android，可靠）；
+  2. MIUI PowerKeeper `powerkeeper.db` per-app 省电策略（解绑 listener 的
+     元凶；表结构随 HyperOS 版本漂移，多 SQL 变体尝试，sqlite3 缺失/表结构
+     不符静默跳过）；
+  3. MIUI 自启动 SecurityCenter provider（老版接口，纯尝试性）。
+- **降级链**：任一失败不影响其余；全失败 = 无 root，notif7 自愈链照常兜底
+  —— 保活是增强不是依赖。
+- [ ] 装机验证：首次触发 su 授权框（授予）→ logcat 见
+  `RootKeepAlive: su granted` + 三项结果打点。
+
+
+### gate1（v2.9.11-grace-gate1 / versionCode 44，2026-10-09）
+
+**使用前置条件门槛**（用户定案）：root / 通知权限等必须在【模块首页】确认
+齐备后才允许使用第四桌面；权限丢失桌面自动回落原生。桌面（宿主）不做权限
+引导 —— 引导与开关都在模块 App 首页（MainActivity）。
+
+- **判定统一收敛**（`PermissionGate.java` 新建，宿主/模块两侧共用）：
+  `customModeAllowed = 通知监听授权 && root 保活就绪`。SP 开关记用户意愿，
+  allowed 决定实际生效 —— 权限补齐后自动恢复，无需重新开关。
+  通知授权 = NotificationManager 公开查询（任意进程可查，宿主侧 5s TTL
+  缓存防裁决高频穿透 binder）；root 就绪 = su 探测只能模块进程发起
+  （Magisk 授权框 + 后台线程），结果经 `ACTION_SET_ROOT_READY` 广播落宿主
+  SP（`custom_root_keepalive_ready`），宿主裁决链零开销读。
+- **首页 UI**（MainActivity 重排）：前置条件区块置于模式开关之前
+  （① LSPosed hook 生效 / ② 通知使用权 / ③ root 保活，绿红状态 +
+  引导按钮），开关仅在三项齐备时可开；不齐时点击弹回 + Toast 指明缺项。
+- **hook 存活探测**：首页 `ACTION_HOOK_PING` → 宿主 MainHook 回
+  `ACTION_HOOK_LIVE`（ping/pong，800ms 超时按未生效回显）；宿主 hook
+  安装完成时也主动广播一次（模块进程活着即收到）。
+- **三层 gate 落点**：
+  1. 首页开关（UI 拦截 + Toast）；
+  2. 宿主 toggle 广播 receiver（开启前校验，防伪造/竞态直开）；
+  3. **裁决 hook**（`mAdjudicationResultHook` + `isCustomModeActive` 回退
+     分支）—— 权限被撤销（如系统设置里关通知授权）后，桌面无需重启自动
+     回落原生；补齐后自动恢复。
+- **onResume 自动回落**：首页发现"已开启但权限丢失"→ 自动发关闭广播 +
+  Toast 说明缺项。
+- **降级声明**：root 在 Magisk 侧被撤销时宿主 SP 标志不会自动翻 false
+  （su 探测只在首页发生）—— 首页重新打开时探测刷新；裁决与通知 gate 不受
+  影响（通知授权是实时查询）。
+- RootKeepAlive 新增 `ensure(onResult)` 带回调探测入口（幂等 applied 标志，
+  首页按钮用；引擎自动触发路径 `apply()` 保留）。
+
+#### keep1（v2.9.16 / vc49）：模块进程后台保活（宿主拉起 + Magisk 守护）
+
+- **装机实锤**：第四桌面可启动，但模块进程死在后台后无人拉起 —— 通知/媒体/
+  天气快照全链依赖模块进程（listener + 引擎），进程死 = 桌面侧全部降级。
+  notif7 自愈链只能在"进程还活着"前提下自救；gate5 的 root 三连里自启动
+  provider（可靠性最低的一项）没兜住。
+- **宿主拉起（主链路，root-free）**：`GraceKeepAliveService`（模块进程普通
+  Service，onCreate/onStartCommand → `GraceBridgeEngine.start`，引擎 started
+  标志幂等）。宿主 com.miui.home 几乎常驻前台，前台应用 startService 不受
+  后台限制 —— 两个拉起点：
+  1. `HomeController.attach()` 每次桌面挂载（用户回桌面即复活模块进程）；
+  2. MainHook toggle receiver onReceive 开头（首页任何交互顺带确认）。
+  `pokeFromHost` 60s 防抖；失败静默（自愈链兜底）。广播到不了死进程，
+  所以拉起必须由宿主主动 startService（与 notif6 的 snapshot refresh
+  广播是互补关系：广播管快照、startService 管进程）。
+- **Magisk service.d 守护脚本（root 增强）**：RootKeepAlive 新增第 4 项
+  `installBootScript()` —— 写 `/data/adb/service.d/hm4m_keepalive.sh`
+  （内容 base64 传输规避 su -c 引号嵌套），开机后常驻循环每 30s
+  `pidof` 检查，进程不在则 root 身份 `am startservice` 拉起（root 调用方
+  不受后台 startService 限制）。重复安装覆盖写幂等；pkill 旧守护 +
+  nohup 立即启动，不要求重启即生效。
+- **服务声明**：manifest `exported=true` —— 仅暴露"幂等启动引擎"一个无害
+  动作；跨包 startService（显式 setClassName）要求目标 exported。
+- **降级链不变**：任一保活手段失效 → notif7 自愈链（看门狗/rebind/toggle）
+  照常兜底；保活是前移防线不是依赖。
+
+#### gate6（v2.9.17 / vc50）：MIUI 自启动纳入前置条件（第④项）
+
+- **用户定案**：自启动是模块后台保活的前提（进程被杀后系统能否拉起），
+  与通知授权/root 并列 —— 前置条件区块扩为四项。
+- **探测通道**（`AutoStartProbe.java` 新建，模块进程查自己包）：MIUI/HyperOS
+  私有 AppOps op 10008（AUTO_START，SecurityCenter 自启动开关的底层落点），
+  反射 `checkOpNoThrow`（普通公开方法，无 gate5 实锤的跨包守卫问题）。
+- **三态语义（防 gate3 式误锁）**：GRANTED → 绿；DENIED → 红，阻断 gate +
+  引导跳 `com.miui.securitycenter/.permcenter.autostart.AutoStartManagementActivity`
+  （路径漂移降级到应用详情页）；UNKNOWN（op 不存在/反射失败/机型差异）→
+  黄色提示但【不阻断】—— HyperOS 版本漂移时宁可放行不锁死用户。
+- **宿主侧判定**：与 root 标志同模式 —— 模块探测 GRANTED/UNKNOWN 后经
+  `ACTION_SET_AUTOSTART_READY` 广播落宿主 SP（`custom_autostart_ready`），
+  `PermissionGate.customModeAllowed` 扩为 通知授权 && root && 自启动；
+  onResume 探测结果变化即广播（复用 gate4 补发语义）。宿主拒绝开启的
+  reason 扩 `autostart_off` 分支，首页 Toast 对应提示。
+
+
+### ② GitHub 发布准备（轻量，建议先做——发布合规是硬性的）
+
+- [ ] LICENSE 同步 **GPL-3.0** + README 声明（风险登记合规项：含 GraceLauncher
+  衍生代码必须遵循 GPL-3.0 分发）
+- [ ] README 补 GraceLauncher 移植章节（第四模式能力清单 + 截图 + 使用前提：
+  通知监听授权 / Breezy Weather 可选）
+- [ ] 发布 tag v2.7.8（当前稳定版）+ 变更日志（P0→P6 + hotfix 链摘要）
+
+### ③ 收尾验证（顺手穿插）
+
+- [ ] P5 启动动画装机确认（thumbnail scale-up + Home 键复位，无异常即勾选）
+- [ ] 全程项装机验收：切回原生模式完整还原；GPU 过度渲染无静止重绘
+- [ ] 媒体控制命令 hotfix8 复测（sessionId 稳定性——命令闭环诊断已就位，
+  logcat -s HomeMode4Miui 可见 receiver→engine 全链打点）
+
+### ④ R8/minify（发布前体积优化）—— ✅ 已完成（2026-10-09）
+
+- [x] 开 `minifyEnabled + shrinkResources`，规则见 `app/proguard-rules.pro`：
+  Xposed 入口（`MainHook` + `IXposedHook*` 实现者）、`com.miui.home.**` 宿主同名桩、
+  清单组件、Room 生成物一律保名；`com.homemode4miui.**` / `com.galaxyrio.gracelauncher.**`
+  用 `-keepnames` 保可读类名 + `SourceFile/LineNumberTable` 保行号（异常栈可定位）。
+- [x] **实测：31MB → 7.3MB（-76%）**；dex 27.38MB → 4.37MB（-84%）；
+  单 dex 文件（R8 已合并）。对照：纯激进混淆（不保可读名）为 6.9MB，多出 0.4MB
+  换取设备日志可读，属刻意取舍。
+- [x] APK 签名校验通过（Signer #1：CN=HomeMode4Miui Debug）；关键类存活验证通过
+  （MainHook / ModePrefs / HomeViewFactory / HomeController / LauncherModeController 均在）。
+- [ ] **待装机回归**：模式切换 / 挂载熔断 / 桥广播 / Room 迁移四链路实机验证
+
+### 建议顺序
+
+> ②（发布合规，半天量级，做完即可发 v2.7.8 稳定版）→ ①（C 组最后一块功能拼图）
+> → ③ 穿插 → ④ 放发布前。

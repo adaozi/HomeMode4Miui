@@ -1,0 +1,27 @@
+# 统一换行符，避免 Windows 检出时全仓库显示为"被修改"
+* text=auto
+
+# 源码与脚本
+*.java   text
+*.kt     text
+*.gradle text
+*.md     text
+*.xml    text
+*.txt    text
+*.properties text
+
+# 构建脚本在 Linux/macOS 与 Windows 都直接跑，强制 LF
+*.sh     text eol=lf
+*.list   text eol=lf
+gradlew  text eol=lf
+
+# Windows 批处理强制 CRLF
+*.bat    text eol=crlf
+
+# 二进制（Git 不参与换行转换）
+*.apk    binary
+*.jar    binary
+*.keystore binary
+*.png    binary
+*.jpg    binary
+*.webp   binary

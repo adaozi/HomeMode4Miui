@@ -1,0 +1,50 @@
+# --- 构建产物 ---------------------------------------------------------------
+*.apk
+*.ap_
+*.dex
+*.jar
+!app/libs/*.jar
+/build/
+/.build/
+/app/build/
+/app/libs/*.jar.tmp
+
+# --- 密钥（绝不入库）-------------------------------------------------------
+*.keystore
+*.jks
+!tools/debug.keystore.sample
+ks/
+keystore.properties
+
+# --- 本地配置 ---------------------------------------------------------------
+local.properties
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# --- IDE --------------------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.hprof
+captures/
+
+# --- 系统 -------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+
+# --- 逆向分析产物（体积大，单独仓库或 Release 附件）-----------------------
+apk_analysis/
+apk_analysis*/
+*.smali/
+
+# --- 本地历史管理补丁（2026-10-08）------------------------------------------
+# 第三方参考源码（GPL-3.0，不入库；重下方式见 docs/PORTING_GraceLauncher.md §1）
+GraceLauncher-src/
+# 助手工作区数据（本机会话，机器相关）
+.workbuddy/
+# gradle wrapper 引导 jar 必须入库（fresh clone 后 gradlew 才能跑），覆盖上面的 *.jar
+!gradle/wrapper/gradle-wrapper.jar

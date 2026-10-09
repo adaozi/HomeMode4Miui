@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 四宫格：2×2 圆角方块，前三格为暗色（原生三模式），第四格高亮（本模块新增的第四模式）。
+         安全区：全部内容位于中心 66dp 圆内（32~76dp 区域）。 -->
+
+    <!-- 左上 / 右上 / 左下：原生经典 / 抽屉 / 极简 -->
+    <path
+        android:fillColor="#8E99AB"
+        android:pathData="M37,32 h10 a5,5 0 0 1 5,5 v10 a5,5 0 0 1 -5,5 h-10 a5,5 0 0 1 -5,-5 v-10 a5,5 0 0 1 5,-5 z" />
+    <path
+        android:fillColor="#8E99AB"
+        android:pathData="M61,32 h10 a5,5 0 0 1 5,5 v10 a5,5 0 0 1 -5,5 h-10 a5,5 0 0 1 -5,-5 v-10 a5,5 0 0 1 5,-5 z" />
+    <path
+        android:fillColor="#8E99AB"
+        android:pathData="M37,56 h10 a5,5 0 0 1 5,5 v10 a5,5 0 0 1 -5,5 h-10 a5,5 0 0 1 -5,-5 v-10 a5,5 0 0 1 5,-5 z" />
+
+    <!-- 右下：第四模式（高亮） -->
+    <path
+        android:fillColor="#F5A623"
+        android:pathData="M61,56 h10 a5,5 0 0 1 5,5 v10 a5,5 0 0 1 -5,5 h-10 a5,5 0 0 1 -5,-5 v-10 a5,5 0 0 1 5,-5 z" />
+</vector>

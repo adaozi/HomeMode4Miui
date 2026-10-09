@@ -1,0 +1,383 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 18,
+    "identityHash": "7ab7b2291a5ded87eaf0dc559460a256",
+    "entities": [
+      {
+        "tableName": "launcher_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `clockEnabled` INTEGER NOT NULL DEFAULT 1, `calendarAboveClock` INTEGER NOT NULL DEFAULT 0, `calendarAgenda` INTEGER NOT NULL, `showBatteryPercentage` INTEGER NOT NULL, `allowHapticFeedback` INTEGER NOT NULL, `useDynamicColors` INTEGER NOT NULL, `themeColor` INTEGER NOT NULL, `darkMode` TEXT NOT NULL, `amoledMode` INTEGER NOT NULL DEFAULT 0, `iconPackPackage` TEXT, `iconPackPackagesJson` TEXT, `iconDesignJson` TEXT, `mediaPlayer` INTEGER NOT NULL DEFAULT 1, `mediaAlwaysVisible` INTEGER NOT NULL DEFAULT 0, `mediaAppKey` TEXT, `graceButtonJson` TEXT, `weatherEnabled` INTEGER NOT NULL DEFAULT 0, `weatherForecastDays` INTEGER NOT NULL DEFAULT 7, `weatherLocationId` TEXT, `clockAppKey` TEXT, `clockStyleJson` TEXT, `homeLayoutJson` TEXT, `hideStatusBar` INTEGER NOT NULL DEFAULT 1, `hideAlphabet` INTEGER NOT NULL DEFAULT 0, `hideFavoriteNames` INTEGER NOT NULL DEFAULT 0, `dimWallpaper` INTEGER NOT NULL DEFAULT 0, `wallpaperDimAmount` INTEGER NOT NULL DEFAULT 20, `blurWallpaper` INTEGER NOT NULL DEFAULT 1, `wallpaperBlurRadius` INTEGER NOT NULL DEFAULT 16, `appFontId` TEXT, `applyFontToSettings` INTEGER NOT NULL DEFAULT 1, `privateSpaceJson` TEXT, `searchJson` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clockEnabled",
+            "columnName": "clockEnabled",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "calendarAboveClock",
+            "columnName": "calendarAboveClock",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "calendarAgenda",
+            "columnName": "calendarAgenda",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "showBatteryPercentage",
+            "columnName": "showBatteryPercentage",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "allowHapticFeedback",
+            "columnName": "allowHapticFeedback",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "useDynamicColors",
+            "columnName": "useDynamicColors",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "themeColor",
+            "columnName": "themeColor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "darkMode",
+            "columnName": "darkMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amoledMode",
+            "columnName": "amoledMode",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "iconPackPackage",
+            "columnName": "iconPackPackage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "iconPackPackagesJson",
+            "columnName": "iconPackPackagesJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "iconDesignJson",
+            "columnName": "iconDesignJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "mediaPlayer",
+            "columnName": "mediaPlayer",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "mediaAlwaysVisible",
+            "columnName": "mediaAlwaysVisible",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "mediaAppKey",
+            "columnName": "mediaAppKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "graceButtonJson",
+            "columnName": "graceButtonJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "weatherEnabled",
+            "columnName": "weatherEnabled",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "weatherForecastDays",
+            "columnName": "weatherForecastDays",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "7"
+          },
+          {
+            "fieldPath": "weatherLocationId",
+            "columnName": "weatherLocationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "clockAppKey",
+            "columnName": "clockAppKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "clockStyleJson",
+            "columnName": "clockStyleJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "homeLayoutJson",
+            "columnName": "homeLayoutJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hideStatusBar",
+            "columnName": "hideStatusBar",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "hideAlphabet",
+            "columnName": "hideAlphabet",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "hideFavoriteNames",
+            "columnName": "hideFavoriteNames",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "dimWallpaper",
+            "columnName": "dimWallpaper",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "wallpaperDimAmount",
+            "columnName": "wallpaperDimAmount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "20"
+          },
+          {
+            "fieldPath": "blurWallpaper",
+            "columnName": "blurWallpaper",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "wallpaperBlurRadius",
+            "columnName": "wallpaperBlurRadius",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "16"
+          },
+          {
+            "fieldPath": "appFontId",
+            "columnName": "appFontId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "applyFontToSettings",
+            "columnName": "applyFontToSettings",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "privateSpaceJson",
+            "columnName": "privateSpaceJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "searchJson",
+            "columnName": "searchJson",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "hidden_apps",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`appKey` TEXT NOT NULL, PRIMARY KEY(`appKey`))",
+        "fields": [
+          {
+            "fieldPath": "appKey",
+            "columnName": "appKey",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "appKey"
+          ]
+        }
+      },
+      {
+        "tableName": "folders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `placement` TEXT NOT NULL, `appListAtBottom` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "placement",
+            "columnName": "placement",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appListAtBottom",
+            "columnName": "appListAtBottom",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "item_icons",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`itemKey` TEXT NOT NULL, `iconJson` TEXT NOT NULL, PRIMARY KEY(`itemKey`))",
+        "fields": [
+          {
+            "fieldPath": "itemKey",
+            "columnName": "itemKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "iconJson",
+            "columnName": "iconJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "itemKey"
+          ]
+        }
+      },
+      {
+        "tableName": "saved_shortcuts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`itemKey` TEXT NOT NULL, `packageName` TEXT NOT NULL, `shortcutId` TEXT NOT NULL, `activity` TEXT NOT NULL, `label` TEXT NOT NULL, `showInAppList` INTEGER NOT NULL, PRIMARY KEY(`itemKey`))",
+        "fields": [
+          {
+            "fieldPath": "itemKey",
+            "columnName": "itemKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shortcutId",
+            "columnName": "shortcutId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activity",
+            "columnName": "activity",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "showInAppList",
+            "columnName": "showInAppList",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "itemKey"
+          ]
+        }
+      },
+      {
+        "tableName": "app_popups",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ownerKey` TEXT NOT NULL, `itemsJson` TEXT NOT NULL, PRIMARY KEY(`ownerKey`))",
+        "fields": [
+          {
+            "fieldPath": "ownerKey",
+            "columnName": "ownerKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemsJson",
+            "columnName": "itemsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ownerKey"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7ab7b2291a5ded87eaf0dc559460a256')"
+    ]
+  }
+}

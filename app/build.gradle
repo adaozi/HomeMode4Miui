@@ -1,0 +1,120 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.plugin.compose'
+    // P3（B3.2）：Room 注解处理器走 KSP（版本对齐 GraceLauncher-src/gradle/libs.versions.toml）
+    id 'com.google.devtools.ksp' version '2.3.10'
+}
+
+android {
+    namespace 'com.homemode4miui'
+    compileSdk 37
+    buildToolsVersion '36.1.0'
+
+    defaultConfig {
+        applicationId "com.homemode4miui"
+        minSdk 33          // 与宿主一致（com.miui.home minSdk 33）
+        targetSdk 34
+        versionCode 53
+        versionName "2.9.20-grace-dualapp"
+    }
+
+    sourceSets {
+        main {
+            // host 桩源集：提供宿主类的编译期签名（策略见 README"宿主桩说明"）
+            // Kotlin 源（GraceHomeView.kt / 主题移植文件）同放 src/main/java，由 AGP 内置 Kotlin 一并编译
+            java {
+                srcDir 'src/main/java'
+                srcDir 'src/host/java'
+            }
+        }
+    }
+
+    signingConfigs {
+        release {
+            // 与 tools/build_apk.sh 同一把 keystore（缺文件时先跑一次旧脚本生成，或 keytool 自建）
+            storeFile rootProject.file('.build/ks/debug.keystore')
+            storePassword 'android'
+            keyAlias 'homemode4miui'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        release {
+            // 发布瘦身：开启 R8 代码压缩 + 资源压缩（放行规则见 app/proguard-rules.pro）
+            // 关键放行：xposed_init 入口类、com.miui.home.** 宿主同名桩、清单组件
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    lint {
+        checkReleaseBuilds = false   // 模块 APK 不做发布前 lint 卡口
+    }
+
+    packaging {
+        resources {
+            // Compose / kotlinx-coroutines 携带的许可元数据去重
+            excludes += ['META-INF/AL2.0', 'META-INF/LGPL2.1', 'META-INF/DEPENDENCIES']
+        }
+    }
+
+    // P1（B1.2）：assets 字体（josefin_sans/noto_sans）与 res/font preset 字体
+    // 不做 zip 压缩，保证 Typeface 直接 mmap（原版 GraceLauncher 同配置）
+    androidResources {
+        noCompress += ['ttf', 'otf', 'ttc']
+    }
+}
+
+dependencies {
+    // 仅编译期依赖 Xposed API，运行时由 LSPosed 提供（本机 jar，见 tools/ENV.md）
+    compileOnly fileTree(dir: 'libs', include: ['*.jar'])
+
+    // ---- P0 Compose 依赖组（BOM/版本对齐 GraceLauncher-src/gradle/libs.versions.toml）----
+    implementation platform('androidx.compose:compose-bom:2026.09.00')
+    implementation 'androidx.compose.runtime:runtime'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.animation:animation'
+    implementation 'androidx.compose.material3:material3:1.5.0-alpha26'
+    // 主题：LauncherAppearance 用到 ContextCompat.registerReceiver
+    implementation 'androidx.core:core-ktx:1.19.0'
+    // C 组（C1）：SettingsActivity（ComponentActivity + setContent + activity-result）
+    implementation 'androidx.activity:activity-compose:1.13.0'
+    // C 组（C1）：LauncherSettingsScreen NavHost 导航
+    implementation 'androidx.navigation:navigation-compose:2.9.8'
+    // 主题：Material You 动态取色（GraceLauncherTheme 动态色分支）
+    implementation 'com.materialkolor:material-kolor:4.1.1'
+
+    // ---- Compose 宿主接桩（GraceHomeView 自实现三 Owner 所需，非 compose-ui 传递可见）----
+    // 版本 = compose-ui 1.12.1 传递解析的版本，保持一致避免冲突
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.4'   // LifecycleRegistry / ViewTreeLifecycleOwner
+    implementation 'androidx.lifecycle:lifecycle-viewmodel:2.9.4'     // ViewModelStore(Owner) / ViewTreeViewModelStoreOwner
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4' // P1：viewModelScope（GraceHomeViewModel）
+    implementation 'androidx.savedstate:savedstate:1.3.3'             // SavedStateRegistry(Controller) / ViewTreeSavedStateRegistryOwner
+    // P4：LocalLifecycleOwner（lifecycle-runtime-compose；HomeWidget.rememberWidgetHost 生命周期观察）
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.9.4'
+    // P1 明确不带：navigation-compose / aboutlibraries（见 PORTING_GraceLauncher.md B0.4）
+
+    // ---- P3 Room 数据层（B3.2；版本对齐 GraceLauncher-src/gradle/libs.versions.toml）----
+    implementation 'androidx.room:room-runtime:2.8.4'
+    implementation 'androidx.room:room-ktx:2.8.4'   // withTransaction 扩展
+    ksp 'androidx.room:room-compiler:2.8.4'
+}
+
+// P3：schema JSON 落 app/schemas/（入 git），后续 P4/P6 migration 有编译期依据
+ksp {
+    arg('room.schemaLocation', "$projectDir/schemas")
+}

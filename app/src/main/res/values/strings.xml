@@ -1,0 +1,515 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P1 字符串 —— 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
+  仅收录当前移植面引用的 key；后续阶段（P2 抽屉 / P4 弹层）随文件搬运按需追加。
+-->
+<resources>
+    <!-- LauncherRow 语义动作（TalkBack / 无障碍） -->
+    <string name="app_shortcuts">Open shortcuts</string>
+    <string name="app_actions">App actions</string>
+    <string name="app_info">App info</string>
+
+    <!-- HomeClockHeader 语义描述 -->
+    <string name="date_calendar_action">%1$s. Open or connect calendar</string>
+    <string name="clock_action">%1$s. Open clock</string>
+
+    <!-- P1 演示入口（长按收藏行；P4 ShortcutPopup 落地后替换回原版语义） -->
+    <string name="remove_from_favorites">Remove from favorites</string>
+    <string name="add_to_favorites">Add to favorites</string>
+
+    <!-- P1 空态引导（原版无；P2 抽屉落地后移除） -->
+    <string name="favorites_empty">No favorites yet. Tap to restore the default selection</string>
+
+    <!-- P2 抽屉 + 字母索引（移植自 GraceLauncher strings；沿用英文，本地化随 C 组设置页） -->
+    <string name="app_name">HomeMode4Miui</string>
+    <string name="alphabet_scroller">Alphabetical scroller</string>
+    <string name="back_home">Back to home</string>
+    <string name="jump_to_letter">Jump to letter %1$s</string>
+    <string name="jump_to_section">Jump to section %1$s</string>
+
+    <!-- P2 搜索 -->
+    <string name="settings_search">Search</string>
+    <string name="search_no_results">No results</string>
+    <string name="search_clear_query">Clear query</string>
+    <string name="settings_back">Back</string>
+    <string name="app_unavailable">App unavailable</string>
+
+    <!-- P4 弹层 / 小部件（移植自 GraceLauncher strings；沿用英文，本地化随 C 组设置页） -->
+    <string name="shortcut_permission">Set this launcher as your default home app to see shortcuts provided by this app.</string>
+    <string name="set_default_launcher">Set default launcher</string>
+    <string name="shortcut_error">Couldn’t load or open this shortcut</string>
+    <string name="no_shortcuts">This app hasn’t provided any shortcuts.</string>
+    <string name="retry">Try again</string>
+    <string name="done">Done</string>
+    <string name="cancel">Cancel</string>
+    <string name="reset">Reset</string>
+    <string name="settings_move_widget">Move widget</string>
+    <string name="grace_settings">Settings</string>
+    <string name="settings_clock_style">Clock style</string>
+    <string name="widget_home_menu">Home widget</string>
+    <string name="widget_add">Add custom widget</string>
+    <string name="widget_choose">Choose a widget</string>
+    <string name="widget_search">Search widgets</string>
+    <string name="widget_none">No widgets found</string>
+    <string name="widget_single_limit">Only one custom widget is supported for now. Stacked widgets are coming later.</string>
+    <string name="widget_setup_error">Couldn’t add this widget. Please try again.</string>
+    <string name="widget_unavailable">This widget is unavailable. Long-press to manage it.</string>
+    <string name="widget_no_configuration">This widget doesn’t provide an available settings page.</string>
+    <string name="widget_move_resize">Move and resize</string>
+    <string name="widget_configuration">Change widget settings</string>
+    <string name="widget_remove">Remove</string>
+    <string name="widget_move_home">Move the clock and app list</string>
+    <string name="widget_resize">Resize widget</string>
+    <string name="widget_adjust_up">Move up / decrease height</string>
+    <string name="widget_adjust_down">Move down / increase height</string>
+    <string name="widget_preview_unavailable">Preview unavailable</string>
+    <string name="widget_group_expanded">Expanded</string>
+    <string name="widget_group_collapsed">Collapsed</string>
+    <plurals name="widget_count">
+        <item quantity="one">%d widget</item>
+        <item quantity="other">%d widgets</item>
+    </plurals>
+
+    <!-- ===================== P6（B6.x）附属特性 ===================== -->
+
+    <!-- B6.1 媒体控制 -->
+    <string name="media_idle_title">Nothing playing</string>
+    <string name="media_idle_summary">Tap play to resume</string>
+    <string name="media_play">Play</string>
+    <string name="media_pause">Pause</string>
+    <string name="media_previous">Previous track</string>
+    <string name="media_next">Next track</string>
+    <string name="media_open_player">Open %1$s</string>
+    <string name="media_unknown_title">Now playing</string>
+    <string name="media_player_summary">Show playback on your home screen</string>
+    <string name="media_service_name">HomeMode4Miui notifications and media</string>
+    <string name="media_access_module_hint">Opening HomeMode4Miui app — enable “Notifications and media” there, then go back to the home screen</string>
+
+    <!-- B6.3 通知预览 -->
+    <string name="notification_dismiss">Dismiss</string>
+    <string name="notification_open">Open notification</string>
+    <string name="notification_now">now</string>
+    <string name="notification_minutes">%1$dm</string>
+    <string name="notification_hours">%1$dh</string>
+    <string name="notification_days">%1$dd</string>
+
+    <!-- B6.2 日程 -->
+    <string name="calendar_permission_description">Connect your calendar to show upcoming events. Your agenda stays on this device.</string>
+    <string name="connect_calendar">Connect calendar</string>
+    <string name="calendar_error">Couldn’t load your calendar</string>
+    <string name="your_agenda">Your agenda</string>
+    <string name="today">today</string>
+    <string name="new_event">New event</string>
+    <string name="no_upcoming_events">No upcoming events</string>
+    <string name="event_soon">in &lt;1m</string>
+    <string name="event_in_minutes">in %1$dm</string>
+    <string name="event_in_hours">in %1$dh</string>
+    <string name="event_in_hours_minutes">in %1$dh %2$dm</string>
+    <string name="event_in_days">in %1$dd</string>
+    <string name="event_ongoing">now</string>
+    <string name="all_day">all day</string>
+    <!-- retry：原 strings 已有（P4），此处不重复定义 -->
+    <string name="weather_agenda_action">%1$s. Open weather and agenda</string>
+    <string name="settings_calendar_agenda">Calendar agenda</string>
+    <string name="settings_calendar_agenda_summary">Show the next event on your home screen</string>
+
+    <!-- B6.2 天气 -->
+    <string name="settings_weather">Weather</string>
+    <string name="weather_settings_enable_summary">Show weather beside the date and in your agenda.</string>
+    <string name="weather_current_description">%1$s, %2$s</string>
+    <string name="weather_daily_description">%1$s, high %2$s, low %3$s</string>
+    <string name="weather_hour_description">%1$s: %2$s, %3$s</string>
+    <string name="weather_clear">Clear</string>
+    <string name="weather_partly_cloudy">Partly cloudy</string>
+    <string name="weather_cloudy">Cloudy</string>
+    <string name="weather_rain">Rain</string>
+    <string name="weather_snow">Snow</string>
+    <string name="weather_thunderstorm">Thunderstorm</string>
+    <string name="weather_fog">Fog</string>
+    <string name="weather_wind">Windy</string>
+    <string name="weather_hail">Hail</string>
+    <string name="weather_sleet">Sleet</string>
+    <string name="weather_unknown">Weather unavailable</string>
+    <string name="weather_temperature_unknown">Temperature unavailable</string>
+    <string name="weather_now">now</string>
+    <string name="weather_updated">updated %1$s</string>
+    <string name="weather_outdated">out of date · updated %1$s</string>
+    <string name="weather_update_unknown">update time unavailable</string>
+    <string name="weather_via_breezy">Weather from Breezy Weather</string>
+    <string name="weather_settings_not_installed">Install Breezy Weather to use built-in weather. Without it, this feature stays unavailable.</string>
+    <string name="weather_settings_permission">Allow HomeMode4Miui to read weather shared by Breezy Weather.</string>
+    <string name="weather_settings_no_locations">Add a location in Breezy Weather, then return here.</string>
+    <string name="weather_settings_no_data">Open Breezy Weather and refresh the forecast for this location, then return here.</string>
+    <string name="weather_settings_incompatible">Check for updates to HomeMode4Miui and Breezy Weather to use compatible versions of weather sharing.</string>
+    <string name="weather_settings_unavailable">Breezy Weather could not share its data. Open it to check the forecast, then try again.</string>
+    <string name="weather_settings_install">Install Breezy Weather</string>
+    <string name="weather_settings_open">Open Breezy Weather</string>
+
+    <!-- B6.4 图标包 -->
+    <string name="settings_icon_pack">Icon pack</string>
+    <string name="settings_icon_pack_summary">Replace app icons with an icon pack</string>
+    <string name="icon_pack_system">System icons</string>
+    <string name="icon_pack_loading">Checking icon packs…</string>
+    <string name="icon_pack_empty">No icon packs installed</string>
+
+    <!-- B6.5 Private Space（探测降级面；完整 UI 随 folders 阶段） -->
+    <string name="private_space_title">Private space</string>
+    <string name="private_space_setup">Open Private space settings</string>
+    <string name="private_space_locked">Locked</string>
+    <string name="private_space_unlocked">Unlocked</string>
+    <string name="private_space_unsupported">Private space requires Android 15 or later</string>
+    <string name="private_space_unavailable">Private space is unavailable. Please try again.</string>
+
+    <!-- P6 通用（retry/grace_settings 已有定义，见上方） -->
+    <string name="action_unavailable">This action isn’t available on this device</string>
+    <string name="settings_media_player">Media player</string>
+    <string name="settings_show_battery">Show battery percentage</string>
+
+    <!-- GraceLauncher settings strings (EN)（C 组设置全家桶搬运） -->
+    <string name="calendar_above_clock">Place above the clock</string>
+    <string name="calendar_enable">Enable calendar and agenda</string>
+    <string name="clock_apps_load_failed">Couldn’t load apps</string>
+    <string name="clock_apps_loading">Loading apps…</string>
+    <string name="clock_bokor" translatable="false">Bokor</string>
+    <string name="clock_choose_app_description">Choose which app opens when you tap the home screen clock.</string>
+    <string name="clock_default_app">Default clock app</string>
+    <string name="clock_digit_spacing">Digit spacing</string>
+    <string name="clock_double_plaster" translatable="false">Double Plaster</string>
+    <string name="clock_enable">Enable clock</string>
+    <string name="clock_font_default">Default · Josefin Sans</string>
+    <string name="clock_font_import">Import font</string>
+    <string name="clock_font_import_error">Could not import this font. Choose a valid TTF, OTF or TTC file with clock digits, up to 20 MB.</string>
+    <string name="clock_font_importing">Importing font…</string>
+    <string name="clock_font_shadow">Font shadow</string>
+    <string name="clock_font_unavailable">Font unavailable · using default</string>
+    <string name="clock_hour_minute_spacing">Hour–minute spacing</string>
+    <string name="clock_letter_spacing">Letter spacing</string>
+    <string name="clock_lucky" translatable="false">Lucky</string>
+    <string name="clock_monoton" translatable="false">Monoton</string>
+    <string name="clock_plaster" translatable="false">Plaster</string>
+    <string name="clock_reset_value">Reset %1$s to default</string>
+    <string name="clock_sacramento" translatable="false">Sacramento</string>
+    <string name="clock_sacramento_week" translatable="false">Sacramento Week</string>
+    <string name="clock_selected_unavailable">Selected app is unavailable</string>
+    <string name="clock_separate_digits">Digit separation</string>
+    <string name="clock_separate_digits_summary">Leave a transparent outline between overlapping characters</string>
+    <string name="clock_show_colon">Show colon</string>
+    <string name="clock_show_colon_summary">Separate hours and minutes with a colon</string>
+    <string name="clock_single_line">Single line</string>
+    <string name="clock_size">Font size</string>
+    <string name="clock_style_apply">Apply</string>
+    <string name="clock_two_lines">Two lines</string>
+    <string name="clock_week" translatable="false">Week</string>
+    <string name="clock_weight">Font weight</string>
+    <string name="edit_app_popup">Edit %1$s pop-up</string>
+    <string name="edit_favorites">Edit favorites</string>
+    <string name="favorites_all_apps">All apps</string>
+    <string name="favorites_move_down">Move down</string>
+    <string name="favorites_move_up">Move up</string>
+    <string name="favorites_reorder">Reorder %1$s</string>
+    <string name="favorites_selected">Selected</string>
+    <string name="folder_unavailable">This folder is not available.</string>
+    <string name="font_apply_settings">Apply font to settings</string>
+    <string name="font_apply_settings_summary">Use the selected font in Grace settings</string>
+    <string name="font_import_error">Could not import this font. Choose a valid TTF, OTF or TTC file, up to 20 MB.</string>
+    <string name="font_luckiest_guy">Luckiest Guy</string>
+    <string name="font_noto_sans">Noto Sans</string>
+    <string name="font_system">System default</string>
+    <string name="grace_button_disabled">Disabled</string>
+    <string name="grace_button_enable">Enable Grace button</string>
+    <string name="grace_button_long_press">Long press</string>
+    <string name="grace_button_open_app">Open app</string>
+    <string name="grace_button_open_shortcut">Open shortcut</string>
+    <string name="grace_button_tap">Single tap</string>
+    <string name="icon_designer_adaptive_apps">Adaptive icons</string>
+    <string name="icon_designer_add_tray">Add tray</string>
+    <string name="icon_designer_add_tray_summary">Add a separate background behind single-layer icons</string>
+    <string name="icon_designer_all">all</string>
+    <string name="icon_designer_choose_app">Choose an app</string>
+    <string name="icon_designer_color">Color</string>
+    <string name="icon_designer_color_done">Done</string>
+    <string name="icon_designer_color_presets">Color presets</string>
+    <string name="icon_designer_cookie_sides">Cookie · %1$d sides</string>
+    <string name="icon_designer_custom_color">Custom color</string>
+    <string name="icon_designer_data">data</string>
+    <string name="icon_designer_data_empty">No saved icon designs</string>
+    <string name="icon_designer_delete_data">Delete selected icon designs</string>
+    <string name="icon_designer_discard">Discard</string>
+    <string name="icon_designer_drag_symbol">%1$s · Drag the symbol to move it</string>
+    <string name="icon_designer_effects">Effects</string>
+    <string name="icon_designer_example">Example</string>
+    <string name="icon_designer_hex">Hex color</string>
+    <string name="icon_designer_hue">Hue</string>
+    <string name="icon_designer_icon_size">Size</string>
+    <string name="icon_designer_icon_size_title">Icon size</string>
+    <string name="icon_designer_invert_background">Invert icon background detection</string>
+    <string name="icon_designer_invert_background_summary">When generating a monochrome layer, treat dark areas as the symbol and light areas as the background</string>
+    <string name="icon_designer_legacy_apps">Legacy icons</string>
+    <string name="icon_designer_original_color">Original color</string>
+    <string name="icon_designer_pack_apps">Icons matched by an enabled pack</string>
+    <string name="icon_designer_reset">Reset</string>
+    <string name="icon_designer_saturation_brightness">Saturation and brightness</string>
+    <string name="icon_designer_save">Save</string>
+    <string name="icon_designer_saved">Saved</string>
+    <string name="icon_designer_select_data">Select icon designs</string>
+    <string name="icon_designer_shape">Shape</string>
+    <string name="icon_designer_shape_circle">Circle</string>
+    <string name="icon_designer_shape_cookie">n-side cookie</string>
+    <string name="icon_designer_shape_gem">Gem</string>
+    <string name="icon_designer_shape_none">None</string>
+    <string name="icon_designer_shape_pebble">Pebble</string>
+    <string name="icon_designer_shape_square">Square</string>
+    <string name="icon_designer_single">single</string>
+    <string name="icon_designer_size">Symbol size</string>
+    <string name="icon_designer_size_position">Symbol size &amp; position</string>
+    <string name="icon_designer_source">Icon pack or image</string>
+    <string name="icon_designer_switch_app">Switch app</string>
+    <string name="icon_designer_symbol_color">Symbol color</string>
+    <string name="icon_designer_theme_color">Theme color</string>
+    <string name="icon_designer_theme_icon">Theme icon</string>
+    <string name="icon_designer_theme_unsupported">Theme unsupported icon</string>
+    <string name="icon_designer_theme_unsupported_summary">Use a normalized grayscale symbol when no monochrome layer is provided</string>
+    <string name="icon_designer_title">Icon designer</string>
+    <string name="icon_designer_tray_color">Tray color</string>
+    <string name="icon_designer_unsaved_message">Your icon changes haven’t been saved.</string>
+    <string name="icon_designer_unsaved_title">Save changes?</string>
+    <string name="icon_designer_x">X position</string>
+    <string name="icon_designer_y">Y position</string>
+    <string name="icon_edit_failed">Couldn’t save this icon. Please try another image or icon.</string>
+    <string name="icon_edit_follow_theme">Follow icon theme</string>
+    <string name="icon_edit_image">Custom image</string>
+    <string name="icon_edit_search">Search icons</string>
+    <string name="icon_pack_all">all</string>
+    <string name="icon_pack_enabled">Enabled icon packs</string>
+    <string name="icon_pack_load_failed">Could not load icon packs. Try again.</string>
+    <string name="icon_pack_missing">%1$s is unavailable. Other enabled packs or system icons will be used.</string>
+    <string name="icon_pack_search">Search icon packs</string>
+    <string name="icon_pack_unavailable">Icon pack unavailable · using system icons</string>
+    <string name="licenses_app_license">GNU GPLv3</string>
+    <string name="licenses_app_summary">Grace Launcher is free software, licensed under the GNU General Public License version 3. Distributed without warranty. Third-party components retain their own licenses.</string>
+    <string name="licenses_artifact_id">Artifact</string>
+    <string name="licenses_clear_search">Clear search</string>
+    <string name="licenses_collapsed">Collapsed</string>
+    <string name="licenses_developer">Developer</string>
+    <string name="licenses_expanded">Expanded</string>
+    <string name="licenses_full_text">Full text</string>
+    <string name="licenses_license">License</string>
+    <string name="licenses_link_unavailable">No app is available to open this link.</string>
+    <string name="licenses_load_failed">Could not load the library licenses.</string>
+    <string name="licenses_named_full_text">%1$s · Full text</string>
+    <string name="licenses_no_results">No matching libraries</string>
+    <string name="licenses_retry">Retry</string>
+    <string name="licenses_search">Search libraries</string>
+    <string name="licenses_third_party">Third-party libraries</string>
+    <string name="licenses_unknown">Not provided</string>
+    <string name="licenses_unknown_developer">Not provided</string>
+    <string name="licenses_unknown_version">Version not provided</string>
+    <string name="media_access_explanation">Enable notification access for Grace Launcher on the next screen. Grace uses it to show app notification previews and messages, open or dismiss notifications when you choose, and control media sessions. Notification text and icons are kept only in memory, never saved or uploaded. You can revoke access at any time in system settings.</string>
+    <string name="media_access_required">Notification access is required</string>
+    <string name="media_allow_controls">Allow notifications and media</string>
+    <string name="media_always_visible">Always show</string>
+    <string name="media_always_visible_summary">Keep the player visible even when nothing is playing</string>
+    <string name="media_enable">Enable media player</string>
+    <string name="media_fallback_app">App to open when no media is available</string>
+    <string name="media_open_settings">Open settings</string>
+    <string name="notification_allow">Show app notifications</string>
+    <string name="popup_add_new">Add new</string>
+    <string name="popup_app_shortcuts">%1$s shortcuts</string>
+    <string name="popup_custom_widget">Custom widget</string>
+    <string name="popup_empty">Choose shortcuts, apps or widgets below.</string>
+    <string name="popup_item_unavailable">Item unavailable</string>
+    <string name="private_space_default_home">Set Grace as your default launcher to use Private space</string>
+    <string name="private_space_display">Display as</string>
+    <string name="private_space_display_folder">Folder</string>
+    <string name="private_space_display_heading">Display</string>
+    <string name="private_space_display_list">Additional list</string>
+    <string name="private_space_display_normal">Normal app</string>
+    <string name="private_space_edit">Edit</string>
+    <string name="private_space_edit_summary">Change the name, icon and app order</string>
+    <string name="private_space_empty">No apps in Private space</string>
+    <string name="private_space_enable">Enable Private space</string>
+    <string name="private_space_indicator">Private app indicator</string>
+    <string name="private_space_indicator_summary">Show a badge on private app icons</string>
+    <string name="private_space_lock_immediately">Lock immediately</string>
+    <string name="private_space_lock_on_exit">Close automatically when leaving the list</string>
+    <string name="private_space_lock_on_screen">Keep unlocked until the screen locks</string>
+    <string name="private_space_password">Password protection</string>
+    <string name="private_space_password_summary">Verify with fingerprint or a system password when opening. Android may also require the Private space password.</string>
+    <string name="private_space_security_heading">Security</string>
+    <string name="private_space_setup_summary">Add or manage apps in Android Private space</string>
+    <string name="private_space_summary">A protected space for your private apps</string>
+    <string name="private_space_unlock_edit">Unlock to edit</string>
+    <string name="rename_folder">Rename folder</string>
+    <string name="save">Save</string>
+    <string name="search_contacts">Contact search</string>
+    <string name="search_contacts_permission">Allow Contacts access in Android settings to search contacts.</string>
+    <string name="search_contacts_summary">Find contacts by name or phone number</string>
+    <string name="search_enable">Enable search</string>
+    <string name="search_engine">Search engine</string>
+    <string name="search_engine_bing">Bing</string>
+    <string name="search_engine_custom">Custom</string>
+    <string name="search_engine_duckduckgo">DuckDuckGo</string>
+    <string name="search_engine_google">Google</string>
+    <string name="search_engine_name">Name (optional)</string>
+    <string name="search_engine_qwant">Qwant</string>
+    <string name="search_engine_sogou">Sogou</string>
+    <string name="search_engine_startpage">Startpage</string>
+    <string name="search_engine_url">Search URL</string>
+    <string name="search_engine_url_error">Enter a valid http:// or https:// URL and include {query} after the domain.</string>
+    <string name="search_engine_url_example">https://example.com/search?q={query}</string>
+    <string name="search_engine_url_hint">Use {query} where the search terms should go. Opens in your default browser.</string>
+    <string name="search_files">File search</string>
+    <string name="search_fuzzy">Fuzzy search</string>
+    <string name="search_fuzzy_summary">Match spelling variations and initials</string>
+    <string name="search_hidden_apps">Search hidden apps</string>
+    <string name="search_hidden_apps_summary">Include apps hidden from the app list</string>
+    <string name="search_internet_setting">Internet search</string>
+    <string name="search_settings_summary">Apps, contacts, and suggestions</string>
+    <string name="search_suggestions">Search suggestions</string>
+    <string name="search_suggestions_summary">Show the last 5 apps opened from search</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_app">Application</string>
+    <string name="settings_about_description">A calm, list-based Android launcher built with Kotlin and Jetpack Compose.</string>
+    <string name="settings_about_summary">Grace Launcher, updates, and licenses</string>
+    <string name="settings_accent_color">Accent color</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="settings_advanced_summary">More options for your launcher</string>
+    <string name="settings_allow_haptics">Allow haptic feedback</string>
+    <string name="settings_allow_haptics_summary">Follow the system haptic feedback setting</string>
+    <string name="settings_amoled_mode">AMOLED mode</string>
+    <string name="settings_amoled_mode_summary">Use true black in the dark theme</string>
+    <string name="settings_app_organization">App organization</string>
+    <string name="settings_blur_unavailable">Wallpaper blur is unavailable on this device or in the current system mode</string>
+    <string name="settings_blur_wallpaper">Blur wallpaper</string>
+    <string name="settings_blur_wallpaper_summary">Soften the wallpaper behind the app list</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="settings_changelog">Changelog</string>
+    <string name="settings_changelog_summary">Release notes</string>
+    <string name="settings_clock">Clock</string>
+    <string name="settings_color_option">Color %1$s</string>
+    <string name="settings_coming_soon">Coming soon</string>
+    <string name="settings_dark_mode">Dark</string>
+    <string name="settings_dim_wallpaper">Dim wallpaper</string>
+    <string name="settings_dim_wallpaper_summary">Add a theme-colored overlay behind the app list</string>
+    <string name="settings_dynamic_colors">Dynamic colors</string>
+    <string name="settings_dynamic_colors_summary">Use wallpaper colors</string>
+    <string name="settings_dynamic_or_custom">Choose your accent color</string>
+    <string name="settings_folder_app_list">App list</string>
+    <string name="settings_folder_both">Favorites and app list</string>
+    <string name="settings_folder_create">Create folder</string>
+    <string name="settings_folder_delete">Delete folder</string>
+    <string name="settings_folder_edit">Edit folder</string>
+    <string name="settings_folder_empty">Keep related apps together. Create your first folder.</string>
+    <string name="settings_folder_favorites">Favorites</string>
+    <string name="settings_folder_name">Folder name</string>
+    <string name="settings_folder_nowhere">Not shown</string>
+    <string name="settings_folder_placement">Show folder in</string>
+    <string name="settings_folders">Folders</string>
+    <string name="settings_follow_system">Follow system</string>
+    <string name="settings_font">Font</string>
+    <string name="settings_grace_button">Grace button</string>
+    <string name="settings_hide_alphabet">Hide alphabet</string>
+    <string name="settings_hide_alphabet_summary">Hide on the home screen until you swipe the alphabet</string>
+    <string name="settings_hide_apps">Hide apps</string>
+    <string name="settings_hide_apps_description">Hide apps from the app list only. They remain available in favorites, folders, pop-ups and search.</string>
+    <string name="settings_hide_favorite_names">Hide names from favorites</string>
+    <string name="settings_hide_favorite_names_summary">Keep names visible in the app list</string>
+    <string name="settings_hide_status_bar">Hide status bar</string>
+    <string name="settings_hide_status_bar_summary">Hide on the home screen and app list</string>
+    <string name="settings_icons">Icons</string>
+    <string name="settings_instant_access">Instant access</string>
+    <string name="settings_license_loading">Loading license…</string>
+    <string name="settings_license_unavailable">The bundled license text could not be opened.</string>
+    <string name="settings_licenses">License</string>
+    <string name="settings_licenses_summary">GPLv3 and third-party libraries</string>
+    <string name="settings_light_mode">Light</string>
+    <string name="settings_misc">Misc</string>
+    <string name="settings_none">None</string>
+    <string name="settings_personalization">Personalization</string>
+    <string name="settings_productivity">Productivity</string>
+    <string name="settings_productivity_summary">At a glance, apps, and folders</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_storage_load_error">Settings could not be loaded. Reopen the launcher to try again.</string>
+    <string name="settings_storage_loading">Loading your settings…</string>
+    <string name="settings_storage_save_error">The change could not be saved. Please try again.</string>
+    <string name="settings_text_auto">Automatic</string>
+    <string name="settings_text_dark">Dark text</string>
+    <string name="settings_text_light">Light text</string>
+    <string name="settings_theme_mode">Dark mode</string>
+    <string name="settings_theme_section">Color and theme</string>
+    <string name="settings_themed_icons_summary">Use available monochrome icons</string>
+    <string name="settings_themes">Themes</string>
+    <string name="settings_themes_summary">Colors, appearance, and personalization</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_wallpaper_blur_amount">Blur strength</string>
+    <string name="settings_wallpaper_opacity">Overlay opacity</string>
+    <string name="settings_wallpaper_text">Text color</string>
+    <string name="shortcuts_load_partial">Some shortcuts could not be loaded</string>
+    <string name="shortcuts_search">Search shortcuts</string>
+    <string name="shortcuts_title">Shortcuts</string>
+    <string name="weather_settings_allow">Allow weather access</string>
+    <string name="weather_settings_attribution">Data sources and licenses</string>
+    <string name="weather_settings_connection">Breezy Weather</string>
+    <string name="weather_settings_disabled">Turn on weather to connect to Breezy Weather.</string>
+    <string name="weather_settings_disabled_summary">Optional · requires Breezy Weather</string>
+    <string name="weather_settings_display">Display</string>
+    <string name="weather_settings_enable">Show weather</string>
+    <string name="weather_settings_enabled_summary">Home screen and agenda · Breezy Weather</string>
+    <string name="weather_settings_first_location">First location in Breezy Weather</string>
+    <string name="weather_settings_forecast_days">Forecast days</string>
+    <string name="weather_settings_loading">Checking Breezy Weather…</string>
+    <string name="weather_settings_location">Location</string>
+    <string name="weather_settings_ready">Connected to Breezy Weather.</string>
+    <string name="weather_settings_refresh">Check for updates</string>
+    <string name="weather_settings_update_notifier">For automatic updates: Breezy Weather → Settings → External modules → Location Update Notifier → Grace Launcher.</string>
+    <string name="widget_calendar">Calendar</string>
+    <string name="widget_calendar_access">Allow calendar access</string>
+    <plurals name="licenses_count">
+        <item quantity="one">%1$d library</item>
+        <item quantity="other">%1$d libraries</item>
+    </plurals>
+    <plurals name="settings_folder_count">
+        <item quantity="one">%1$d folder</item>
+        <item quantity="other">%1$d folders</item>
+    </plurals>
+    <plurals name="settings_folder_summary">
+        <item quantity="one">%1$d item · %2$s</item>
+        <item quantity="other">%1$d items · %2$s</item>
+    </plurals>
+    <plurals name="settings_hidden_count">
+        <item quantity="one">%1$d app hidden</item>
+        <item quantity="other">%1$d apps hidden</item>
+    </plurals>
+    <plurals name="settings_select_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <plurals name="weather_settings_days_value">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
+
+
+    <!-- C 组补充（SearchContacts/PrivateSpaceController） -->
+    <string name="private_space_security_required">Set a device screen lock to enable password protection</string>
+    <string name="private_space_verify_title">Verify it’s you</string>
+    <string name="search_unnamed_contact">Unnamed contact</string>
+
+
+    <string name="search_apps">Search apps</string>
+
+
+    <string name="app_selection_fast_scroll">Quickly scroll through apps</string>
+    <string name="icon_edit_no_results">No matching icons</string>
+
+
+    <string name="settings_delete">Delete</string>
+    <string name="settings_folder_at_bottom">Place at bottom</string>
+    <string name="settings_folder_delete_confirmation">Delete “%1$s” and its widgets? The apps inside will stay installed.</string>
+
+    <string name="open_folder">Open folder</string>
+    <string name="folder_actions">Folder actions</string>
+    <string name="folder_contents_empty">Choose apps or widgets for this folder.</string>
+    <string name="recently_installed">Recently Installed</string>
+</resources>
