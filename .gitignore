@@ -46,5 +46,7 @@ apk_analysis*/
 GraceLauncher-src/
 # 助手工作区数据（本机会话，机器相关）
 .workbuddy/
+# 换机开发套件（机器相关：init.gradle 需复制到 ~/.gradle，说明见 docs/SETUP_NEW_MACHINE.md）
+_devkit/
 # gradle wrapper 引导 jar 必须入库（fresh clone 后 gradlew 才能跑），覆盖上面的 *.jar
 !gradle/wrapper/gradle-wrapper.jar
