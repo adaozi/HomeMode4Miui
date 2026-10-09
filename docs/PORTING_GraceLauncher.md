@@ -385,9 +385,11 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
 
 ## 8. 后续路线图（2026-10-08 定，P6 装机验收后）
 
-当前位置：P0–P6 开发侧全部完成；装机验收 P1/P2/P3/P4 ✓、P6 主体 ✓
-（媒体控制命令等 hotfix8 复测；封面为原版语义——拒绝网络封面，维持）。
-移植清单上只剩一大块（C 组），另有发布准备与收尾验证。
+当前位置（2026-10-09）：P0–P6 + C 组设置全家桶 + folders/notif/gate/keep 全链
++ dualapp 双开支持均已完成并入库；装机验收 P1/P2/P3/P4 ✓、P6 主体 ✓、C 组
+外观面 ✓（媒体控制命令等 hotfix8 复测；封面为原版语义——拒绝网络封面，维持）。
+**项目已发布 GitHub：https://github.com/adaozi/HomeMode4Miui，当前版本
+v2.9.20-grace-dualapp（versionCode 53）。** 剩余为收尾验证与增量增强。
 
 ### ① C 组：设置全家桶（唯一剩的大块，约 20 个文件）—— v2.8.0-grace-c1（2026-10-08，开发侧完成，待装机验收）
 
@@ -791,20 +793,55 @@ notif7 基础上追加 **root 保活**（用户确认：LSPosed 设备必然已 
   reason 扩 `autostart_off` 分支，首页 Toast 对应提示。
 
 
-### ② GitHub 发布准备（轻量，建议先做——发布合规是硬性的）
+### dualapp（v2.9.18 → v2.9.20-grace-dualapp / versionCode 51–53，2026-10-09）
 
-- [ ] LICENSE 同步 **GPL-3.0** + README 声明（风险登记合规项：含 GraceLauncher
-  衍生代码必须遵循 GPL-3.0 分发）
-- [ ] README 补 GraceLauncher 移植章节（第四模式能力清单 + 截图 + 使用前提：
-  通知监听授权 / Breezy Weather 可选）
-- [ ] 发布 tag v2.7.8（当前稳定版）+ 变更日志（P0→P6 + hotfix 链摘要）
+**装机实锤**：MIUI 双开（XSpace user）的应用整体缺席应用列表与抽屉 —— 移植版
+loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
+`LauncherApps.getProfiles()` 下发给默认桌面，需逐 profile 枚举。
+
+- [x] **主列表逐 profile 枚举**（`AppRepository.loadApps` 重写数据源）：原版
+  GraceLauncher 用 `PackageManager.queryIntentActivities`（天然仅主 user）；
+  移植版 P3 起已切 `LauncherApps.getActivityList`，本阶段扩为
+  `launcher.profiles` 全量枚举 + 逐 profile 拉列表。健壮性三件套：
+  ① `runCatching { launcher.profiles }` 失败降级仅主 user；
+  ② **单 profile 失败不拖垮整体**（XSpace 受限/未就绪时 getActivityList 抛
+  SecurityException，该 profile 记空集）；
+  ③ LauncherApps 整体受限时回落 PM 兜底路径。
+- [x] **key 隔离复用原版 profile 协议**：`LauncherApp.user/userSerial` 与
+  `profile:<serial>:<cmp>` key 前缀是原版为 Private Space/managed profile
+  设计的现成机制，本阶段直接复用 —— 主 user 不带 serial（key 维持无前缀，
+  收藏/隐藏等既有数据全兼容），其他 profile 带 serial（同组件双开不撞 key
+  互相吞）。`LauncherUiState`/`IconDesignerData` 原有的 `profile:` 过滤语义
+  随模型自动生效。
+- [x] **图标与启动链路**：`getBadgedIcon(0)` 对非主 profile 自动叠加系统角标
+  （双开/工作资料标识）；`launch` 走 `startMainActivity(component, app.user,
+  bounds, options)` —— 原版签名本就带 user，双开应用带 user 启动直达目标
+  profile，P5 缩略图动画链路不受影响。
+- **降级登记**：PM 兜底路径只能枚举主 user（PM 无跨 profile 查询能力）；
+  双开应用参与排序/分组/搜索与主应用一致（`LauncherAppOrder`/拼音 sortKey
+  不区分 profile）。
+
+### ② GitHub 发布准备 —— ✅ 已完成（2026-10-09）
+
+- [x] 仓库：**https://github.com/adaozi/HomeMode4Miui**（Public，GPL-3.0），
+  首次入库 commit `b5fb742`（255 文件 / 31536 行），分支 main，tag
+  `v2.9.20-grace-dualapp` 已推送。远程推送凭据走 Windows 凭据管理器
+  （git credential fill），无需 gh CLI。
+- [x] LICENSE 同步 **GPL-3.0**（含 GraceLauncher 衍生代码必须遵循 GPL-3.0
+  分发，风险登记合规项闭环）
+- [x] README 重写为"第四桌面模式 + GraceLauncher 全量移植"现状
+  （进程模型 → 三类代码+桥 → Compose 宿主接桩四难题 → 跨进程桥+保活三闸
+  → 权限前置 gate → 构建 → 已知限制），versionCode 53
+- [x] 入库卫生：`.gitignore` 排除 `*.keystore` / `.build/` /
+  `GraceLauncher-src/`（GPL 参考源，重下见本文 §1）/ `.workbuddy/`；
+  `gradle-wrapper.jar` 刻意入库（`!` 覆盖排除）；`.gitattributes` 补齐
 
 ### ③ 收尾验证（顺手穿插）
 
 - [ ] P5 启动动画装机确认（thumbnail scale-up + Home 键复位，无异常即勾选）
 - [ ] 全程项装机验收：切回原生模式完整还原；GPU 过度渲染无静止重绘
-- [ ] 媒体控制命令 hotfix8 复测（sessionId 稳定性——命令闭环诊断已就位，
-  logcat -s HomeMode4Miui 可见 receiver→engine 全链打点）
+- [x] 媒体控制命令闭环 ✅（notifi4~6 链路定案：manifest 静态 receiver 被 MIUI
+  省电拦截 → 动态注册 + uid 放行策略，notif6 复测 `mediaCommand -> true`）
 
 ### ④ R8/minify（发布前体积优化）—— ✅ 已完成（2026-10-09）
 
@@ -821,5 +858,5 @@ notif7 基础上追加 **root 保活**（用户确认：LSPosed 设备必然已 
 
 ### 建议顺序
 
-> ②（发布合规，半天量级，做完即可发 v2.7.8 稳定版）→ ①（C 组最后一块功能拼图）
-> → ③ 穿插 → ④ 放发布前。
+> ②（发布合规）✅ 已完成（2026-10-09 已上 GitHub）→ 剩余：③ 收尾验证穿插
+> → ① C 组遗留降级项 → ④ 装机回归四链路（模式切换/挂载熔断/桥广播/Room 迁移）。
