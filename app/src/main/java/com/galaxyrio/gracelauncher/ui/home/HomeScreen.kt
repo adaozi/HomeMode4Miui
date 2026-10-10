@@ -312,6 +312,10 @@ fun HomeScreen(
                 app = app,
                 onOpen = { onOpenFolder(folder, it) },
                 onLongClick = { onEditFolder(folder) },
+                // 上游同步 v1.1.8 S7：文件夹行左滑打开内部第一项
+                onSwipeLeft = rowGestures.onOpenFirst?.let { open ->
+                    { bounds -> open(app, bounds) }
+                },
                 showLabel = listAppearance.showNames(favorites = true),
             ) else LauncherAppRow(
                 app = app,

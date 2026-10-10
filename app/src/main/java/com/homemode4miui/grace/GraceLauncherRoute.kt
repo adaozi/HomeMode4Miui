@@ -117,6 +117,7 @@ import com.galaxyrio.gracelauncher.ui.overlays.ShortcutRevealState
 import com.galaxyrio.gracelauncher.ui.overlays.WidgetToggle
 import com.galaxyrio.gracelauncher.ui.search.AppSearchScreen
 import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
+import com.galaxyrio.gracelauncher.ui.theme.wallpaperTint
 import com.galaxyrio.gracelauncher.ui.theme.rememberWallpaperBlurAvailable
 import com.galaxyrio.gracelauncher.ui.widgets.LocalWidgetHost
 import com.galaxyrio.gracelauncher.ui.widgets.WidgetPicker
@@ -372,11 +373,11 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 用 tone 10 暗罩、暗字用 tone 95 亮罩，两种文字模式都对壁纸有对比度。
     val appearance = LocalLauncherAppearance.current
     val primary = MaterialTheme.colorScheme.primary
-    val wallpaperTint = remember(primary, appearance.darkText) {
-        // Adjust primary's tone, not a black scrim. Dark text gets the matching
-        // light tint so either text mode gains contrast against the wallpaper.
-        primary.toDynamicScheme(isDark = !appearance.darkText, style = PaletteStyle.TonalSpot)
-            .primaryPalette.toneColor(if (appearance.darkText) 95 else 10)
+    // 上游同步 v1.1.8 S7（v1.1.7 特性）：遮罩色可自定义 —— settings.listAppearance.wallpaperDimColor
+    // 非空时走 IconColor.resolve（automatic 仍兜底），语义与 hotfix6 手写版一致，改走上游扩展。
+    val wallpaperDimColor = state.settings.listAppearance.wallpaperDimColor
+    val resolvedWallpaperTint = remember(primary, appearance.darkText, wallpaperDimColor) {
+        appearance.wallpaperTint(primary, wallpaperDimColor)
     }
 
     // ---- hotfix6：隐藏状态栏（原版 LauncherScreen.kt:581-585 rememberLauncherSystemBars）----
@@ -582,9 +583,22 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     }
     // P4：行拖拽手势（原版 rowGestures：预取 + 拖拽 reveal + 拖拽结束提交）
     // P5：onLaunchAt 接回 iconBounds（P4 临时丢弃），行点击/右滑 reveal 提交均带启动动画
+    // 上游同步 v1.1.8 S7（v1.1.7 特性）：文件夹行左滑打开内部第一项。
+    // 上游 openFirstItem 走弹层首项（含快捷方式兜底）；本模块宿主 UI 无 popups 模型，
+    // 文件夹语义 = appKeys 首个应用直接启动（发布说明口径），弹层版随 P5 弹层批次扩展。
+    val openFirstItem: (LauncherApp, Rect) -> Unit = openFirst@{ owner, bounds ->
+        if (overlay != null || !state.settings.shortcutsFolders.swipeLeftToOpenFirst) return@openFirst
+        val folder = state.folders.firstOrNull { it.key == owner.key } ?: return@openFirst
+        val firstKey = folder.appKeys.firstOrNull() ?: return@openFirst
+        val app = state.apps.firstOrNull { it.key == firstKey } ?: return@openFirst
+        launchApp(app, bounds)
+    }
     val rowGestures = AppRowGestures(
         onPrepare = viewModel::prepareShortcuts,
         onLaunchAt = { app, bounds -> launchApp(app, bounds) },
+        // 上游同步 v1.1.8：弹层使能 + 左滑开首项（开关 = ShortcutsFoldersSettings）
+        popupsEnabled = state.settings.shortcutsFolders.enabled,
+        onOpenFirst = openFirstItem.takeIf { state.settings.shortcutsFolders.swipeLeftToOpenFirst },
         onDrag = { app, bounds, expanded ->
             val current = overlay as? LauncherOverlay.Shortcuts
             if (current?.app?.key == app.key) {
@@ -641,7 +655,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     }
     val dimAlpha = if (state.settings.dimWallpaper)
         state.settings.wallpaperDimAmount.coerceIn(0, 100) / 100f * wallpaperEffectAlpha else 0f
-    Box(Modifier.fillMaxSize().background(wallpaperTint.copy(alpha = dimAlpha)))
+    Box(Modifier.fillMaxSize().background(resolvedWallpaperTint.copy(alpha = dimAlpha)))
     BoxWithConstraints(
         // The lists extend behind both system bars. Insets belong to their
         // scrollable content, not a parent that clips the whole viewport.

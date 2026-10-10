@@ -1365,3 +1365,20 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
 - [ ] **降级登记**：① 按钮图标设计器自定义 artwork/design 面随 itemIcons 进宿主 UI 后接入（当前
   GraceButtonIcon.defaults）；② graceReveal rail 揭幕联动未接（drawerTransition 只驱动遮罩）；
   ③ LocalLauncherInputEnabled 全局门控未提供（按钮自带 enabled 门控，风险面已覆盖）。
+
+### fix1（v2.9.27-grace-fix1 / versionCode 60，2026-10-11）—— §9 落地：S7 弹层/文件夹/外观修复（小批）
+
+- [x] **Dim Wallpaper 自定义遮罩色**（v1.1.7 特性）：route 的 hotfix6 手写 tone 版改走上游
+  `appearance.wallpaperTint(primary, settings.listAppearance.wallpaperDimColor)` 扩展（IconColor.resolve，
+  automatic 兜底语义一致）；遮罩色设置项在 ListAppearance 页（S2 已就位）即时生效。
+- [x] **文件夹左滑打开内部第一项**（v1.1.7 特性）：Route `openFirstItem`（模块文件夹版 = appKeys 首个应用
+  直启；上游弹层首项版依赖宿主 popups 模型，随 P5 弹层批次扩展）+ rowGestures
+  `popupsEnabled`/`onOpenFirst`（开关 = ShortcutsFoldersSettings.swipeLeftToOpenFirst，设置页 S2 已就位）；
+  收藏区/抽屉 FolderRow onSwipeLeft 双挂点接通。
+- [x] 构建：assembleRelease 通过，7.97MB，versionCode 60。
+- [ ] **装机回归**：① ListAppearance 页自定义遮罩色 → 抽屉/搜索壁纸遮罩即时变色；② ShortcutsFolders 页
+  开"左滑打开首项" → 收藏/抽屉文件夹行左滑直启第一个应用；③ 关闭弹层（shortcutsFolders.enabled=false）
+  时行内拖拽不再唤出弹层（popupsEnabled 门控）。
+- [ ] **降级登记**：① 弹层首项版 openFirstItem（含快捷方式兜底/冷却校验）随 P5 popups 模型进宿主 UI；
+  ② ShortcutPopup 双击冲突修复（上游 +45 行）未搬——模块 ShortcutPopup 裁剪版 197 行差异，随 P4 弹层
+  同步批次；③ 导航栏沉浸：模块列表本就延伸到导航栏之后（windowInsetsPadding 仅横向），视为已满足。

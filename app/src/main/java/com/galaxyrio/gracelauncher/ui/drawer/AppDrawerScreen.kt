@@ -144,6 +144,10 @@ fun AppDrawerScreen(
                         folder = item.folder,
                         onOpen = { onOpenFolder(item.folder, it) },
                         onLongClick = { onEditFolder(item.folder) },
+                        // 上游同步 v1.1.8 S7：抽屉文件夹行左滑打开内部第一项
+                        onSwipeLeft = rowGestures.onOpenFirst?.let { open -> { bounds ->
+                            open(item.folder.asApp(), bounds)
+                        } },
                     )
                 }
             }
