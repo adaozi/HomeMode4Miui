@@ -1345,3 +1345,23 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
   GraceButton 页 GraceSystemAccessDialog，需用户手动到系统设置开启）；② GraceButtonTransition
   英雄动画（搜索/抽屉/锁屏过渡）随 S4 接线，当前手势动作瞬时直达；③ GraceButton 按钮本体渲染
   尚未挂上桌面（组件与动画已就位，随 S4）。
+
+### button1（v2.9.26-grace-button1 / versionCode 59，2026-10-11）—— §9 落地：S4 Grace Button 重做
+
+- [x] **按钮本体挂载**：GraceButton 组件 v1.1.8 渲染于首页右下（BottomEnd，end=LauncherLayout.End /
+  bottom=22dp+bottomInset，对齐 LauncherScreen.kt:1052-1060）；编辑态显示 + onFinishEditing 完成键；
+  tap/长按/双击/四向滑动 → performGestureAction（origin=按钮当前姿态，hero 动画圆心）。
+- [x] **过渡状态机**：buttonTransition + instantButtonEntrance + 生命周期观察（ON_PAUSE 清未决/锁屏黑场保留、
+  ON_RESUME 清残留）+ LaunchedEffect 动画执行；searchAlpha snap 揭幕（过渡期全透明等待遮罩揭开）；
+  GraceButtonTransitionOverlay 根级渲染（hero 圆形展开 / 锁屏黑场遮罩）；Search/AppList 动画时长走 Lab 设置
+  （100–1500ms）；锁屏末帧提交 + 1.5s isInteractive/isKeyguardLocked 启发式撤罩（OEM 接受不执行兜底），
+  锁屏动作经桥 Cmd.SYSTEM_ACTION 跨进程委派。
+- [x] **宿主视图**：GraceHomeSettings +graceButton 字段（SP grace_launcher_settings + Room mutate/seed/read
+  三路径贯通；graceButtonJson 列 schema v17 已有，零 migration）。
+- [x] 构建：assembleRelease 通过，7.97MB（R8 后），versionCode 59。
+- [ ] **装机回归**：① 按钮右下渲染 + 点按/长按动作触发；② 搜索/AppList 英雄过渡（Lab 动画时长生效、
+  动画关 = 瞬时直达）；③ 锁屏动作：遮罩黑场 → 锁屏 → 亮屏无残留遮罩；④ 编辑态按钮拖拽定位 + 完成键；
+  ⑤ 无障碍三动作（锁屏/通知栏/快捷设置）跨进程生效。
+- [ ] **降级登记**：① 按钮图标设计器自定义 artwork/design 面随 itemIcons 进宿主 UI 后接入（当前
+  GraceButtonIcon.defaults）；② graceReveal rail 揭幕联动未接（drawerTransition 只驱动遮罩）；
+  ③ LocalLauncherInputEnabled 全局门控未提供（按钮自带 enabled 门控，风险面已覆盖）。

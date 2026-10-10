@@ -160,6 +160,13 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     var selectedLetter by selectedLetterState
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var overlay by remember { mutableStateOf<LauncherOverlay?>(null) }
+    // 上游同步 v1.1.8 S4：Grace Button 过渡状态机（原版 LauncherScreen.kt:519-606）
+    var systemActionAccess by rememberSaveable { mutableStateOf(false) }
+    var buttonTransition by remember { mutableStateOf<com.galaxyrio.gracelauncher.ui.components.GraceButtonTransition?>(null) }
+    var instantButtonEntrance by remember { mutableStateOf(false) }
+    val currentButtonTransition by androidx.compose.runtime.rememberUpdatedState(buttonTransition)
+    val searchTransition = buttonTransition?.takeIf { it.action == com.galaxyrio.gracelauncher.data.GraceButtonAction.Search }
+    val drawerTransition = buttonTransition?.takeIf { it.action == com.galaxyrio.gracelauncher.data.GraceButtonAction.AppList }
     var editingHome by rememberSaveable { mutableStateOf(false) }
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
     // folders 阶段（hotfix folders2）：非 null = 设置页 ADD_POPUP_WIDGET 请求的弹层 widget
@@ -183,7 +190,55 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 影响字母列表，favorites/其余表面用全量 apps）
     val model = remember(state.appListApps, state.folders) { AppListModel(state.appListApps, state.folders) }
     val drawerState = rememberLazyListState()
-    val searchAlpha by animateFloatAsState(if (searchOpen) 1f else 0f, tween(210), label = "searchFade")
+    // 过渡生命周期：退后台清未决过渡（已提交锁屏保留黑场直至亮屏）；回前台清残留
+    val routeLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(routeLifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            val transition = currentButtonTransition ?: return@LifecycleEventObserver
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                    transition.leftForeground = true
+                    if (!transition.lockCommitted) buttonTransition = null
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> if (transition.leftForeground) buttonTransition = null
+                else -> Unit
+            }
+        }
+        routeLifecycle.addObserver(observer)
+        onDispose { routeLifecycle.removeObserver(observer) }
+    }
+    androidx.compose.runtime.LaunchedEffect(buttonTransition) {
+        val transition = buttonTransition ?: return@LaunchedEffect
+        transition.animate()
+        if (transition.action != com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen) {
+            buttonTransition = null
+        } else {
+            // 先让 Compose 提交全黑末帧再请求锁屏，否则清屏瞬间漏出一帧亮 HOME 画面
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
+            if (!routeLifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                buttonTransition = null
+                return@LaunchedEffect
+            }
+            transition.lockCommitted = true
+            // 模块适配：锁屏动作经桥委派模块进程无障碍服务（原版同进程直调）
+            viewModel.sendSystemAction(com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen)
+            // 部分 OEM 接受动作但不执行：1.5s 后若屏幕仍亮且未锁，撤遮罩并提示
+            kotlinx.coroutines.delay(1_500)
+            val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+            val km = context.getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+            if (!transition.leftForeground && pm?.isInteractive == true && km?.isKeyguardLocked == false) {
+                buttonTransition = null
+                android.widget.Toast.makeText(context, context.getString(
+                    com.homemode4miui.R.string.grace_action_unavailable), android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val searchAlpha by animateFloatAsState(if (searchOpen) 1f else 0f,
+        if (instantButtonEntrance || searchTransition != null) androidx.compose.animation.core.snap() else tween(210), label = "searchFade")
+    androidx.compose.runtime.LaunchedEffect(searchOpen, drawerOpen) {
+        if (!searchOpen && !drawerOpen) instantButtonEntrance = false
+    }
     val drawerAlpha by animateFloatAsState(
         targetValue = if (drawerOpen) 1f else 0f,
         animationSpec = tween(110),
@@ -418,11 +473,24 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 模块适配：① GraceButtonTransition 英雄动画随 S4；② 无障碍三动作（锁屏/通知栏/快捷设置）
     // 走 GRACE 桥 Cmd.SYSTEM_ACTION 跨进程委派给模块 App 进程的 GraceAccessibilityService；
     // Website/Assistant 宿主进程内直接 startActivity（无需无障碍）。
-    fun performGestureAction(target: com.galaxyrio.gracelauncher.data.GraceButtonTarget) {
-        if (!target.active) return
+    val homeGestureRadius = with(androidx.compose.ui.platform.LocalDensity.current) { 24.dp.toPx() }
+    fun performGestureAction(target: com.galaxyrio.gracelauncher.data.GraceButtonTarget,
+        origin: com.galaxyrio.gracelauncher.ui.components.GraceButtonOrigin,
+        fromButton: Boolean = true) {
+        val buttonSettings = state.settings.graceButton
+        if (!target.active || buttonTransition != null) return
+        instantButtonEntrance = fromButton && !buttonSettings.animationsEnabled &&
+            target.action in listOf(com.galaxyrio.gracelauncher.data.GraceButtonAction.Search,
+                com.galaxyrio.gracelauncher.data.GraceButtonAction.AppList)
         when (target.action) {
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Search -> {
-                searchQuery.clearText(); searchOpen = true
+                searchQuery.clearText()
+                // 英雄过渡：动画开 + 按钮触发才走遮罩展开（搜索页 snap 全透明等待揭幕）
+                if (fromButton && buttonSettings.animationsEnabled)
+                    buttonTransition = com.galaxyrio.gracelauncher.ui.components.GraceButtonTransition(
+                        com.galaxyrio.gracelauncher.data.GraceButtonAction.Search, origin,
+                        durationMillis = buttonSettings.searchAnimationDurationMs)
+                searchOpen = true
             }
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Settings ->
                 openGraceSettingsInModule(context, "")
@@ -445,6 +513,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                     com.homemode4miui.R.string.folder_unavailable), android.widget.Toast.LENGTH_SHORT).show()
             }
             com.galaxyrio.gracelauncher.data.GraceButtonAction.AppList -> {
+                if (fromButton && buttonSettings.animationsEnabled)
+                    buttonTransition = com.galaxyrio.gracelauncher.ui.components.GraceButtonTransition(
+                        com.galaxyrio.gracelauncher.data.GraceButtonAction.AppList, origin,
+                        durationMillis = buttonSettings.appListAnimationDurationMs)
                 selectedLetter = null
                 drawerState.requestScrollToItem(0)
                 drawerOpen = true
@@ -453,16 +525,19 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 viewModel.refreshWeather(); viewModel.refreshAgenda()
                 overlay = LauncherOverlay.Agenda
             }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen -> {
+                // 锁屏走遮罩动画，LaunchedEffect(buttonTransition) 末帧提交（经桥委派）
+                buttonTransition = com.galaxyrio.gracelauncher.ui.components.GraceButtonTransition(
+                    com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen, origin,
+                    originIsButton = fromButton,
+                    animationsEnabled = !fromButton || buttonSettings.animationsEnabled)
+            }
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Website,
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Assistant,
-            com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen,
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Notifications,
             com.galaxyrio.gracelauncher.data.GraceButtonAction.QuickSettings -> {
-                val done = com.galaxyrio.gracelauncher.platform.GraceSystemActions.perform(context, target)
-                if (!done && target.action.requiresAccessibility) {
-                    // 无障碍服务在模块进程：经桥委派（服务未连接时由服务侧安全丢弃）
-                    viewModel.sendSystemAction(target.action)
-                }
+                // 通知栏/快捷设置无遮罩过渡（原版直弹）；经桥委派模块进程无障碍服务
+                viewModel.sendSystemAction(target.action)
             }
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Disabled -> Unit
         }
@@ -604,7 +679,11 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 homeGestures = state.settings.homeGestures,
                 onHomeGesture = { gesture, position ->
                     if (!drawerOpen && overlay == null && !editingHome) {
-                        performGestureAction(state.settings.homeGestures.target(gesture))
+                        // 上游同步 v1.1.8 S4：手势原点 = 触点 ±24dp（hero 动画圆心）
+                        val r = homeGestureRadius
+                        val origin = com.galaxyrio.gracelauncher.ui.components.GraceButtonOrigin(
+                            Rect(position.x - r, position.y - r, position.x + r, position.y + r))
+                        performGestureAction(state.settings.homeGestures.target(gesture), origin, fromButton = false)
                     }
                 },
                 allowHapticFeedback = true,
@@ -625,7 +704,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 onWidgetMenu = { viewModel.refreshMediaAccess(); overlay = LauncherOverlay.HomeWidgetMenu },
                 onCustomWidgetMenu = { overlay = LauncherOverlay.CustomWidgetMenu },
                 editingLayout = editingHome,
-                widgetInputEnabled = !drawerOpen && overlay == null && !editingHome,
+                widgetInputEnabled = !drawerOpen && overlay == null && !editingHome && buttonTransition == null,
                 topSpace = homeTop,
                 onTopOffsetChange = viewModel::updateHomeLayoutTopOffset,
                 onWidgetHeightChange = viewModel::updateHomeLayoutWidgetHeight,
@@ -732,6 +811,36 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 enterAlpha = searchAlpha,
                 queryState = searchQuery,
             )
+        }
+
+        // ---- 上游同步 v1.1.8 S4：Grace Button（对齐原版 LauncherScreen.kt:1052-1060）----
+        // 图标设计/自定义 artwork 面随 itemIcons 进宿主 UI 后接入（当前 defaults）。
+        if (!drawerOpen && (editingHome || state.settings.graceButton.enabled)) {
+            com.galaxyrio.gracelauncher.ui.components.GraceButton(
+                settings = state.settings.graceButton,
+                editing = editingHome,
+                enabled = overlay == null && buttonTransition == null,
+                hidden = searchTransition != null,
+                heldOrigin = buttonTransition?.takeIf {
+                    it.action == com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen && it.originIsButton
+                }?.origin,
+                design = com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.defaults,
+                onGesture = { gesture, origin ->
+                    performGestureAction(state.settings.graceButton.target(gesture), origin)
+                },
+                onFinishEditing = { editingHome = false },
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .padding(end = com.galaxyrio.gracelauncher.ui.components.LauncherLayout.End,
+                        bottom = 22.dp + bottomInset),
+            )
+        }
+
+        // 过渡遮罩（最顶层：hero 圆形展开/锁屏黑场）+ 无障碍引导（按钮 LockScreen 未授权时）
+        buttonTransition?.let {
+            com.galaxyrio.gracelauncher.ui.components.GraceButtonTransitionOverlay(it)
+        }
+        if (systemActionAccess) {
+            com.galaxyrio.gracelauncher.ui.components.GraceSystemAccessDialog { systemActionAccess = false }
         }
 
         // ---- FAB（P4：编辑态 = 完成键；常态 = 搜索入口）----
