@@ -224,8 +224,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 return@LaunchedEffect
             }
             transition.lockCommitted = true
-            // 模块适配：锁屏动作经桥委派模块进程无障碍服务（原版同进程直调）
-            viewModel.sendSystemAction(com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen)
+            // 模块适配：锁屏动作走 MIUI 原生 toggle 广播（逆向复刻）优先，root/无障碍兜底
+            com.galaxyrio.gracelauncher.platform.GraceSystemActions.perform(
+                context, com.galaxyrio.gracelauncher.data.GraceButtonTarget(
+                    com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen))
             // 部分 OEM 接受动作但不执行：1.5s 后若屏幕仍亮且未锁，撤遮罩并提示
             kotlinx.coroutines.delay(1_500)
             val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
@@ -539,8 +541,9 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Assistant,
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Notifications,
             com.galaxyrio.gracelauncher.data.GraceButtonAction.QuickSettings -> {
-                // 通知栏/快捷设置无遮罩过渡（原版直弹）；经桥委派模块进程无障碍服务
-                viewModel.sendSystemAction(target.action)
+                // 通知栏/快捷设置无遮罩过渡（原版直弹）；宿主原生（StatusBarManager 反射）优先，
+                // root/无障碍由 GraceSystemActions 内部兜底链承接
+                com.galaxyrio.gracelauncher.platform.GraceSystemActions.perform(context, target)
             }
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Disabled -> Unit
         }

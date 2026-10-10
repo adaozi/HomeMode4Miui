@@ -72,7 +72,17 @@ class GraceCommandReceiver : BroadcastReceiver() {
                         intent.getStringExtra(GraceBridge.EXTRA_ARG1) ?: "")
                 }.getOrNull()
                 if (action != null) {
-                    com.galaxyrio.gracelauncher.platform.GraceAccessibilityService.perform(action)
+                    // 原生（反射/广播）优先，root 次之，无障碍最后
+                    if (!com.galaxyrio.gracelauncher.platform.HostSystemActions.run {
+                            when (action) {
+                                com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen -> lockScreen(context)
+                                com.galaxyrio.gracelauncher.data.GraceButtonAction.Notifications -> expandNotifications(context)
+                                com.galaxyrio.gracelauncher.data.GraceButtonAction.QuickSettings -> expandQuickSettings(context)
+                                else -> false
+                            }
+                        }) {
+                        com.galaxyrio.gracelauncher.platform.GraceRootActions.perform(action)
+                    }
                 }
             }
         }

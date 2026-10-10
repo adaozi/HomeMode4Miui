@@ -1143,7 +1143,7 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
 
 ### ② GitHub 发布准备 —— ✅ 已完成（2026-10-09）
 
-- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\\\\\*\\\\\\\*（Public，GPL-3.0），>
+- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\\\\\\\\\\\\\*\\\\\\\\\\\\\\\*（Public，GPL-3.0），>
 
   首次入库 commit `b5fb742`（255 文件 / 31536 行），分支 main，tag
 
@@ -1346,24 +1346,23 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
   英雄动画（搜索/抽屉/锁屏过渡）随 S4 接线，当前手势动作瞬时直达；③ GraceButton 按钮本体渲染  
   尚未挂上桌面（组件与动画已就位，随 S4）。
 
-### fonts1（v2.9.28-grace-fonts1 / versionCode 61，2026-10-11）—— §9 落地：S5 字体管理器（S6 随 S2 已就位）
+### hostact（v2.9.29-grace-hostact / versionCode 62，2026-10-11）—— 无障碍依赖降级为第三层兜底（逆向实锤）
 
-- [x] **字体库回退链（assets 架构定制版）**：rememberAppFontFamily(id, library) 升级 v1.1.8 语义 ——
-  请求字体优先 + library.selected 顺序 CustomFallbackBuilder 逐级回退（libraryChainTypeface，
-  PlatformFont buffer 缓冲复用同 NotoFallbackApi29 策略）；来源解析：Josefin/主字体走 assets、
-  AppFont preset 走 assets/fonts、导入字体走 clock_fonts 文件（ClockFontStore.file(id)）；
-  链构建 runCatching 全兜底回落 LauncherFontFamily（桌面零崩溃铁律）。
-- [x] **Fonts 管理页**：FontLibrarySettings.kt（S2 已拷）注册进 LauncherSettingsScreen + ThemeSettings
-  onFonts 接通（S2 降级登记 ② 消除）；删除导入字体 = actions.deleteFonts → ClockFontStore.delete
-  （file 校验 + cache.evictAll），SettingsViewModel 接线。
-- [x] **宿主视图**：GraceHomeSettings +fontLibrary 字段（SP/Room 三路径）；Route 根 provider 增
-  LocalFontLibrary provides settings.fontLibrary（桌面回退链 + 设置页预览共用）。
-- [x] S6 IconDesigner：旋转/非标准图标/GraceButtonIcon 设计面已随 S2 整文件就位（无遗留项）。
-- [x] 构建：assembleRelease 通过，8.02MB（R8 后），versionCode 61。
-- [ ] **装机回归**：① Fonts 页（Themes → 字体）导入/排序/删除字体；② 字体库 selected 字体应用于桌面
-  文本（ListAppearance 字体 + 字体库链）；③ A-Z/ListAppearance 设置页预览随字体库实时变化；
-  ④ 导入字体删除后相关界面不崩（缓存清空 + 回退链收窄）；⑤ Room v21 fontLibraryJson 持久化。
-- [ ] **降级登记**：① API 29 以下无 CustomFallbackBuilder（minSdk 28 设备回落 LauncherFontFamily，
-  宿主 HyperOS 均为 Q+，无实际影响面）；② appFontId 旧单选列不再直接生效（并入字体库迁移语义，
-  FontLibrary.decode legacy 参数保留）；③ ListAppearance.fontId 指向导入字体已支持（libraryFontSource
-  按文件解析），preset 显示名沿用 appFontLabel。
+- [x] **逆向确认**（MiuiHomeOS3.apk + MiuiHomeOS2.apk，androguard 双版本一致）：
+  - 锁屏 = MIUI 桌面双击锁屏原生广播（SuperDraglayer$DoubleTapListener.onDoubleTapEvent / 旧版
+    Workspace.onDoubleTap 逐字复刻）：`sendBroadcast(Intent("com.miui.app.ExtraStatusBarManager.action_TRIGGER_TOGGLE")
+    .addFlags(FLAG_ACTIVITY_NEW_TASK).putExtra("...extra_TOGGLE_ID", 10))`，TOGGLE_ID=10 双版本一致；
+  - 通知栏 = `LauncherUtils.expandStatusBar(Context)` 原生复刻：getSystemService("statusbar") + 反射
+    expandNotificationsPanel；快捷设置 = 同 manager 反射 expandSettingsPanel。
+- [x] **三层兜底链**（GraceSystemActions.perform）：MIUI 原生（HostSystemActions，宿主/模块进程均可用）
+  → root（GraceRootActions：su input keyevent 26 / cmd statusbar expand-*，fire-and-forget worker）
+  → 无障碍服务（GraceAccessibilityService，保留为最后兜底）。无障碍授权从"必需"降级为"可选兜底"。
+- [x] 接线更新：Route 通知栏/快捷设置/锁屏提交改走 GraceSystemActions（原生直调，不再跨进程桥委派）；
+  桥 Cmd.SYSTEM_ACTION 保留（receiver 侧同三层链），作为外部触发备用通道。
+- [x] 构建：assembleRelease 通过，8.02MB，versionCode 62。
+- [ ] **装机回归**：① 手势/按钮触发锁屏（黑场过渡 → MIUI 原生锁屏广播 → 灭屏；无残留遮罩）；
+  ② 下滑手势/按钮拉通知栏、快捷设置（无 su 授权弹窗 = 原生层已生效）；③ 无障碍服务【不授权】时三动作
+  依然可用（原生层独立工作）；④ su 拒绝授权场景回落无障碍不崩。
+- [ ] **降级登记更新**：① 无障碍服务授权降为可选（S3 登记① 失效）；② 非 MIUI ROM 上原生广播层失效
+  （ExtraStatusBarManager 为 MIUI 私有），自动落 root/a11y 层——本模块定位 MIUI 专属，无实际影响面；
+  ③ goToSleep/DevicePolicyManager 层已在逆向确认后移除（原生 toggle 广播即原版唯一实现，无需备胎）。

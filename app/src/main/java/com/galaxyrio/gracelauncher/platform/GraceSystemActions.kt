@@ -33,7 +33,16 @@ internal object GraceSystemActions {
         GraceButtonAction.Assistant -> open(context, Intent(Intent.ACTION_ASSIST)) ||
             open(context, Intent(Intent.ACTION_VOICE_COMMAND))
         GraceButtonAction.LockScreen, GraceButtonAction.Notifications, GraceButtonAction.QuickSettings ->
-            GraceAccessibilityService.perform(target.action)
+            // HomeMode4Miui：三层兜底链 —— MIUI 原生（逆向实锤，宿主/模块进程均可用）
+            // → root（su 命令行）→ 无障碍服务。原生层逆自 MiuiHomeOS2/OS3 双版本一致实现。
+            HostSystemActions.run {
+                when (target.action) {
+                    GraceButtonAction.LockScreen -> lockScreen(context)
+                    GraceButtonAction.Notifications -> expandNotifications(context)
+                    GraceButtonAction.QuickSettings -> expandQuickSettings(context)
+                    else -> false
+                }
+            } || GraceRootActions.perform(target.action) || GraceAccessibilityService.perform(target.action)
         else -> false
     }
 
