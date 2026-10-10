@@ -45,7 +45,11 @@ public abstract class LauncherMode {
 
     public boolean isHomeSupportSearchBar(Context p1) { throw stub(); }
 
+    // OS2 签名（带 Context 参）；OS3（RELEASE-6.01.03）改为无参，见下方重载
     public boolean isHomeSupportIconSearchBar(Context p1) { throw stub(); }
+
+    // OS3 签名（无参）——仅 OS3 宿主会调用；OS2 上为死方法，运行期无害
+    public boolean isHomeSupportIconSearchBar() { throw stub(); }
 
     public boolean isPersonalAssistantOn(Context p2) { throw stub(); }
 
@@ -56,6 +60,15 @@ public abstract class LauncherMode {
     public boolean canAddToFolder(Collection p1, ShortcutInfo p2) { throw stub(); }
 
     public boolean canShowShortcutMenu(DragObject p1) { throw stub(); }
+
+    // ==== OS3 签名重载（RELEASE-6.01.03 参数类型漂移）====
+    // 仅 OS3 宿主会调用；OS2 上为死方法，运行期无害。
+    // 逆向依据：OS3 LauncherMode.canAddToFolder(Collection, IShortcutInfo) /
+    //           canShowShortcutMenu(IDragObject)；canAddToWorkspace 两版本均为 ShortcutInfo。
+
+    public boolean canAddToFolder(Collection p1, com.miui.home.data.IShortcutInfo p2) { throw stub(); }
+
+    public boolean canShowShortcutMenu(com.miui.home.dragdrop.IDragObject p1) { throw stub(); }
 
     public boolean defaultPullDownIsNotification() { throw stub(); }
 

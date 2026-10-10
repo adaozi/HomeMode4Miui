@@ -17,12 +17,6 @@ public final class ModePrefs {
     /** 本模式的持久化 key，命名风格与原生 "is_all_apps_drawer_mode_enable" 一致 */
     public static final String KEY_MODE_ENABLE = "is_custom_mode_enable";
     /**
-     * 负一屏手势拦截开关（手势选项，GestureIsolator 实时读取；模块 App 经广播改写）。
-     * 写在宿主 SP 里（custom_ 前缀防撞名）：桌面进程内每次触摸事件都要读，
-     * 同进程 SharedPreferences 为内存缓存，读取零开销。
-     */
-    public static final String KEY_FEED_INTERCEPT = "custom_feed_gesture_intercept";
-    /**
      * gate1：root 保活就绪标志（宿主 SP）。模块首页 su 探测成功后经广播写入 ——
      * root 探测必须由模块 App 进程发起（Magisk 授权框 + 后台线程），宿主进程
      * 不能做；探测结果落宿主 SP 后裁决/挂载链零开销读取。
@@ -63,26 +57,10 @@ public final class ModePrefs {
     }
 
     /**
-     * 负一屏手势是否拦截（默认 true=拦截）：
-     * true  → 桌面右滑不进负一屏（GestureIsolator 全闸，自定义视图滚动绝不被抢）；
-     * false → 放行宿主负一屏手势（其余手势控制器仍然隔离）。
+     * 【已固化，无开关】负一屏手势拦截语义：自定义模式激活时 GestureIsolator
+     * 恒定隔离全部宿主手势控制器（含负一屏/看点链），用户不可选择。
+     * 负一屏改由自定义 UI 经 hook/HomeController.openMinusOneScreen() 主动打开。
      */
-    public static boolean isFeedGestureIntercepted(Context ctx) {
-        try {
-            return sp(ctx).getBoolean(KEY_FEED_INTERCEPT, true);
-        } catch (Throwable t) {
-            return true; // 读取失败按拦截处理（安全侧）
-        }
-    }
-
-    /** 写负一屏拦截开关（宿主进程内；即时生效，无需走原生切换链） */
-    public static void setFeedGestureIntercept(Context ctx, boolean intercept) {
-        try {
-            sp(ctx).edit().putBoolean(KEY_FEED_INTERCEPT, intercept).apply();
-        } catch (Throwable t) {
-            android.util.Log.e("HomeMode4Miui", "setFeedGestureIntercept failed", t);
-        }
-    }
 
     /** gate1：root 保活就绪（宿主进程读；模块首页经广播写） */
     public static boolean isRootKeepAliveReady(Context ctx) {

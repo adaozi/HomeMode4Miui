@@ -29,12 +29,11 @@ import de.robv.android.xposed.XposedHelpers;
  *   自定义模式激活时，findActiveController 一律返回 false —— 宿主控制器永不认领，
  *   手势全部归挂载视图体系；模式关闭时完全透明（原生手势链原样运行）。
  *
- * 负一屏（v2.9.10 语义修正）：
- *   宿主 Feed* 控制器链路揭示的是【看点/内容中心】页（NewHomeView，com.miui.newhome），
- *   不是用户要的负一屏（MinusOneScreenView + 智能助理，从左往右滑）——真机实证。
- *   故 Feed* 控制器无条件隔离；右滑开负一屏由挂载视图驱动宿主
- *   MinusOneScreenView.openMinusOne()（宿主页面指示条点击的同款入口）实现，
- *   详见 HomeController.openMinusOneScreen()。
+ * 负一屏（语义已固化，无开关）：
+ *   自定义模式激活时【恒定隔离】宿主全部手势控制器（含 Feed 系列/看点/负一屏链），
+ *   用户不可选择 —— 右滑不进负一屏，自定义视图滚动绝不被原生手势打断。
+ *   负一屏改由挂载视图驱动宿主 MinusOneScreenView.openMinusOne()
+ *   （宿主页面指示条点击的同款入口）主动打开，详见 HomeController.openMinusOneScreen()。
  *
  * 防御边界：
  *   - 宿主浮层打开（AbstractFloatingView.getTopOpenView != null）时放行原生逻辑；
@@ -67,10 +66,16 @@ public final class GestureIsolator {
         ModLog.i("GestureIsolator: findActiveController gated (custom mode only)");
     }
 
-    /** 宿主浮层探测：getTopOpenView(mActivity) != null 即视为在场；探测失败按无浮层处理 */
+    /**
+     * 宿主浮层探测：getTopOpenView(launcherActivity) != null 即视为在场；探测失败按无浮层处理。
+     * 字段版本路由：OS2 字段 mActivity 位于 SuperDraglayer；OS3 重构后 mActivity
+     * 移至父类 BaseDragLayer、SuperDraglayer 自身新增 mLauncher(BaseLauncher)——
+     * 两个字段都是 Launcher Activity 实例，依次探测。
+     */
     private static boolean hostFloatingViewOpen(Object dragLayer) {
         try {
-            Object activity = XposedHelpers.getObjectField(dragLayer, "mActivity");
+            Object activity = fieldOrNull(dragLayer, "mActivity");
+            if (activity == null) activity = fieldOrNull(dragLayer, "mLauncher");
             if (activity == null) return false;
             Class<?> cls = XposedHelpers.findClass(
                     FLOATING_CLS, dragLayer.getClass().getClassLoader());
@@ -78,6 +83,14 @@ public final class GestureIsolator {
             return top != null;
         } catch (Throwable t) {
             return false; // 自定义模式下宿主浮层不应存在，探测失败偏向隔离生效
+        }
+    }
+
+    private static Object fieldOrNull(Object target, String name) {
+        try {
+            return XposedHelpers.getObjectField(target, name);
+        } catch (Throwable t) {
+            return null;
         }
     }
 }

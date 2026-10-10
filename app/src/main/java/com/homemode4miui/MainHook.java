@@ -8,9 +8,9 @@ import android.content.IntentFilter;
 
 import com.miui.home.launcher.allapps.LauncherMode;
 import com.miui.home.launcher.allapps.LauncherModeController;
-import com.homemode4miui.hook.DesktopModeInjector;
 import com.homemode4miui.hook.GestureIsolator;
 import com.homemode4miui.hook.HomeController;
+import com.homemode4miui.hook.HostCompat;
 import com.homemode4miui.mode.CustomLauncherMode;
 
 import java.lang.reflect.Method;
@@ -25,23 +25,36 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /**
  * MIUI Home 自定义桌面模式底座 —— 原生式第四桌面模式（无借壳）。
  *
- * Hook 点清单（共 6 + 3 个实验性设置页注入）：
+ * Hook 点清单（OS2/OS3 双版本经 HostCompat 路由）：
+ *  0. Application.onCreate            after  → gate1 根修：ping 接收器注册 + 存活广播
+ *     的最早锚点，与 Launcher 生命周期解耦（OS2/OS3 通吃；此前接收器只在
+ *     mLauncherUiSync 注册，Launcher hook 未命中即"hook 上了桌面但检测不到"）
  *  1. LauncherModeController.getAllModes()            after  → 注册第四模式
  *  2. 模式裁决（自适应）：优先 hook 任意签名的 loadCurrentLauncherMode；
  *     版本漂移找不到时兜底 hook enableAndResetCache() 改写 sCurrentMode
  *  3. Launcher.setupViews()                           after  → 挂载/同步自定义视图
- *  4. Launcher.onLauncherModeChanged()                after  → 原生模式切换链同步 UI
- *  5. Launcher.onResume()                             after  → 回桌面校准 + 通知应用变更
+ *     （OS2 声明于 Launcher，OS3 上移至 BaseLauncher —— HostCompat 解析声明类）
+ *  3b. Launcher.onCreate(Bundle)                      after  → 挂载兜底锚点：
+ *     两版本都必经的生命周期方法，不依赖"OS3 setupViews 是否仍被调用"假设
+ *  4. Launcher.onLauncherModeChanged()                after  → 原生模式切换链同步 UI（同上路由）
+ *  5. Launcher.onResume()                             after  → 回桌面校准 + 通知应用变更（同上路由）
  *  9. SuperDraglayer.findActiveController             before → 手势隔离闸门：
  *     自定义模式激活时宿主手势控制器（下拉搜索/上滑抽屉/横滑负一屏/下拉通知栏）
- *     永不认领手势流，消除与挂载视图的手势互相捣乱；负一屏可按选项放行，
+ *     永不认领手势流，消除与挂载视图的手势互相捣乱；负一屏恒定隔离（已固化，无开关），
  *     另含 isSupportShowHomeFeed 使能闸放行（hook/GestureIsolator.java）
- *  6-8. DesktopModeInjector（实验性）：设置页"桌面模式"卡片注入第四个选项
- *  10. Launcher.onMinusOneScreenViewScroll            after  → 负一屏关闭同步还原
- *  11. Launcher.onNewIntent                           after  → Home 键回首页态回调
+ *  10. Launcher.onMinusOneScreenViewScroll            after  → 负一屏关闭同步还原（同上路由）
+ *  11. Launcher.onNewIntent                           after  → Home 键回首页态回调（同上路由）；
+ *     OS3 另挂 onNewIntentWhenAlreadyOnHome（"已在桌面回首页"独立路径，OS2 无则跳过）
+ *
+ * 版本适配（HostCompat）：
+ *   - versionCode ≥ 600_000_000 → OS3 家族（RELEASE-6.01.03 实测），否则 OS2（5.39.40 基准）；
+ *   - OS3 的 Launcher 大重构：setupViews/onResume/onNewIntent/onLauncherModeChanged/
+ *     onMinusOneScreenViewScroll 全部上移到 BaseLauncher，Launcher 只剩 onCreate/injectMembers；
+ *   - launcherHookClass() 沿 Launcher→父类链解析实际声明类，两版本通吃；
+ *   - 原设置页第四选项注入（DesktopModeInjector）已按产品决策移除。
  *
  * 工程守则（两道闸）：每个 hook 独立 try/catch —— 单点失败只降级该功能并记录日志，
- * 绝不因一个 hook 未命中而放弃其余 hook（真机 5.39.40 之外的宿主版本方法签名可能漂移）。
+ * 绝不因一个 hook 未命中而放弃其余 hook（真机 5.39.40/6.01.03 之外的宿主版本方法签名可能漂移）。
  */
 public class MainHook implements IXposedHookLoadPackage {
 
@@ -49,9 +62,6 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final String HOME_PKG = "com.miui.home";
     public static final String ACTION_TOGGLE = "com.homemode4miui.ACTION_TOGGLE_MODE";
     public static final String EXTRA_ON = "custom_mode_on";
-    /** 手势选项：设置负一屏手势拦截（GestureIsolator 实时读取宿主 SP） */
-    public static final String ACTION_SET_FEED_INTERCEPT = "com.homemode4miui.ACTION_SET_FEED_INTERCEPT";
-    public static final String EXTRA_FEED_INTERCEPT = "custom_feed_intercept";
     /** gate1：root 保活就绪标志（模块首页 su 探测成功后写入宿主 SP） */
     public static final String ACTION_SET_ROOT_READY = "com.homemode4miui.ACTION_SET_ROOT_READY";
     public static final String EXTRA_READY = "root_ready";
@@ -65,12 +75,24 @@ public class MainHook implements IXposedHookLoadPackage {
     public static final String ACTION_HOOK_LIVE = "com.homemode4miui.ACTION_HOOK_LIVE";
     /** gate2：pong 附带宿主版本（首页回显，顺带定位"宿主还是旧代码"类问题） */
     public static final String EXTRA_HOST_VERSION = "host_version";
+    /** gate1：pong/live 附带宿主大版本家族标签（OS2(5.x)/OS3(6.x)/UNKNOWN） */
+    public static final String EXTRA_HOST_FAMILY = "host_family";
+    /** gate1：pong/live 附带未生效 hook 清单（首页分级提示"无法 hook/部分生效"） */
+    public static final String EXTRA_HOOK_FAILED = "hook_failed_list";
 
     /** 当前 Launcher 实例（setupViews 时缓存，供广播切换用） */
     private static volatile Activity sLauncher;
     private static boolean sReceiverRegistered;
     /** 裁决锚点是否已安装（未安装时 isCustomModeActive 回退为直读 SP 标志） */
     private static volatile boolean sAdjudicationInstalled;
+    /** 未生效 hook 清单（tryHook 失败时记录；随 pong/live 广播给模块首页分级提示） */
+    private static final java.util.List<String> sFailedHooks =
+            new java.util.concurrent.CopyOnWriteArrayList<String>();
+
+    /** 未生效 hook 快照（主 hook 线程写、广播线程读，CopyOnWrite 保证安全） */
+    public static java.util.List<String> failedHooksSnapshot() {
+        return new java.util.ArrayList<String>(sFailedHooks);
+    }
 
     /** 单个 hook 任务（允许抛 Throwable，由 tryHook 统一隔离降级） */
     private interface HookTask {
@@ -84,6 +106,38 @@ public class MainHook implements IXposedHookLoadPackage {
                 + " | host " + hostVersion(lpp));
         final ClassLoader cl = lpp.classLoader;
 
+        // 版本判别前置（独立降级：判别失败只影响日志标注与路由起点，不阻断任何 hook）。
+        // lpp.appInfo 兜底解析使 app 未就绪阶段也能拿到 versionCode（OS3 误判修复）。
+        tryHook("0.HostCompat.detect", new HookTask() {
+            @Override public void run() { HostCompat.detect(lpp, cl); }
+        });
+
+        // gate1 根修：Application.onCreate —— ping 接收器注册 + 存活广播的最早锚点。
+        // 与 Launcher 生命周期完全解耦：即使 setupViews/onLauncherModeChanged 等全部
+        // 未命中（OS3 DI 重构下已实证存在此风险），首页 ping/pong 探测依然可用。
+        // 此前接收器只在 mLauncherUiSync 里注册 —— Launcher hook 没命中即"hook 上了
+        // 桌面但判定检测不到"（OS2/OS3 通病，装机实锤）。
+        tryHook("0.Application.onCreate (gate1 接收器前置)", new HookTask() {
+            @Override public void run() {
+                XposedHelpers.findAndHookMethod("android.app.Application", cl, "onCreate",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    Context app = (Context) param.thisObject;
+                                    HostCompat.redetect(cl); // app 就绪，校正大版本家族
+                                    registerToggleReceiver(app);
+                                    app.sendBroadcast(liveIntent());
+                                    log("gate1: receiver registered + live broadcast sent"
+                                            + " (Application.onCreate, host " + HostCompat.label() + ")");
+                                } catch (Throwable t) {
+                                    log("Application.onCreate gate1 failed: " + t);
+                                }
+                            }
+                        });
+            }
+        });
+
         // 每个 hook 独立降级：一处失败不影响其余（真机版本漂移防护）
         tryHook("1.getAllModes", new HookTask() {
             @Override public void run() { hookGetAllModes(); }
@@ -92,14 +146,22 @@ public class MainHook implements IXposedHookLoadPackage {
             @Override public void run() { hookModeAdjudication(cl); }
         });
         tryHook("3.Launcher.setupViews", new HookTask() {
-            @Override public void run() { hookLauncher(cl, "setupViews", mLauncherUiSync); }
+            @Override public void run() { hookLauncherMethod(cl, "setupViews", mLauncherUiSync); }
+        });
+        // 3b. Launcher.onCreate —— 挂载兜底锚点：两版本都必经的生命周期方法，
+        // 不依赖"OS3 的 setupViews 是否仍被调用"这一待真机验证假设。
+        tryHook("3b.Launcher.onCreate (挂载兜底锚点)", new HookTask() {
+            @Override public void run() {
+                hookLauncherMethod(cl, "onCreate", mLauncherUiSync, android.os.Bundle.class);
+            }
         });
         tryHook("4.Launcher.onLauncherModeChanged", new HookTask() {
-            @Override public void run() { hookLauncher(cl, "onLauncherModeChanged", mLauncherUiSync); }
+            @Override public void run() { hookLauncherMethod(cl, "onLauncherModeChanged", mLauncherUiSync); }
         });
         tryHook("5.Launcher.onResume", new HookTask() {
             @Override public void run() {
-                XposedHelpers.findAndHookMethod(LauncherClsHolder.get(cl), "onResume", new XC_MethodHook() {
+                XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl, "onResume"),
+                        "onResume", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         try {
@@ -122,32 +184,42 @@ public class MainHook implements IXposedHookLoadPackage {
         tryHook("11.Launcher.onNewIntent (Home 键回首页态)", new HookTask() {
             @Override public void run() { HomeController.installHomeIntentSync(cl); }
         });
-        tryHook("6-8.DesktopModeInjector", new HookTask() {
-            @Override public void run() { DesktopModeInjector.inject(cl); } // 实验性：失败自动跳过
-        });
 
         // gate1：hook 全部安装完成 → 广播存活（模块进程若活着即收到；
-        // 进程不在时由模块首页 ping/pong 兜底探测）
+        // 进程不在时由模块首页 ping/pong 兜底探测，Application.onCreate 锚点也会主动广播）
         try {
             Context app = (Context) XposedHelpers.callStaticMethod(
                     XposedHelpers.findClass("android.app.ActivityThread", cl), "currentApplication");
             if (app != null) {
-                app.sendBroadcast(new Intent(ACTION_HOOK_LIVE).setPackage("com.homemode4miui")
-                        .putExtra(EXTRA_READY, true));
+                app.sendBroadcast(liveIntent());
             }
         } catch (Throwable t) {
             log("hook live broadcast failed: " + t);
         }
     }
 
-    /** 单 hook 隔离执行：成功/失败均记日志，失败只降级该功能 */
+    /** 单 hook 隔离执行：成功/失败均记日志，失败只降级该功能；失败记入 sFailedHooks */
     private static void tryHook(String name, HookTask task) {
         try {
             task.run();
             log("hook installed: " + name);
         } catch (Throwable t) {
+            String summary = name + " → " + t.getClass().getSimpleName()
+                    + (t.getMessage() != null ? ": " + t.getMessage() : "");
+            if (summary.length() > 200) summary = summary.substring(0, 200);
+            sFailedHooks.add(summary);
             log("hook FAILED (degraded): " + name + " -> " + t);
         }
+    }
+
+    /** gate1 存活广播：宿主版本 + 大版本家族 + 未生效 hook 清单（首页分级提示数据源） */
+    private static Intent liveIntent() {
+        Intent i = new Intent(ACTION_HOOK_LIVE).setPackage("com.homemode4miui")
+                .putExtra(EXTRA_READY, true)
+                .putExtra(EXTRA_HOST_VERSION, hostVersionSafe())
+                .putExtra(EXTRA_HOST_FAMILY, HostCompat.label());
+        i.putStringArrayListExtra(EXTRA_HOOK_FAILED, new java.util.ArrayList<>(sFailedHooks));
+        return i;
     }
 
     /**
@@ -372,26 +444,19 @@ public class MainHook implements IXposedHookLoadPackage {
         }
     };
 
-    private void hookLauncher(ClassLoader cl, String method, XC_MethodHook hook) {
-        XposedHelpers.findAndHookMethod(LauncherClsHolder.get(cl), method, hook);
-    }
-
-    /** Launcher 类惰性缓存（findClass 失败即抛给 tryHook 降级） */
-    private static final class LauncherClsHolder {
-        static volatile Class<?> sCls;
-
-        static Class<?> get(ClassLoader cl) {
-            Class<?> c = sCls;
-            if (c == null) {
-                synchronized (LauncherClsHolder.class) {
-                    if (sCls == null) {
-                        sCls = XposedHelpers.findClass("com.miui.home.launcher.Launcher", cl);
-                    }
-                    c = sCls;
-                }
-            }
-            return c;
-        }
+    /**
+     * 版本路由的 Launcher hook：OS2 声明于 Launcher、OS3 上移至 BaseLauncher，
+     * 由 HostCompat.launcherHookClass 解析实际声明类（结果缓存，全 hook 共享）。
+     * params 为方法参数类型（可空），hook 回调固定排在 findAndHookMethod 变参末位
+     * （Object[] 手工拼接，避免 Class[] 被当作单个 Object 嵌套）。
+     */
+    private void hookLauncherMethod(ClassLoader cl, String method, XC_MethodHook hook,
+            Class<?>... params) {
+        Object[] args = new Object[params.length + 1];
+        System.arraycopy(params, 0, args, 0, params.length);
+        args[params.length] = hook;
+        XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl, method, params),
+                method, args);
     }
 
     /* ================================================================
@@ -400,10 +465,8 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private void registerToggleReceiver(Context ctx) {
         if (sReceiverRegistered) return; // Launcher recreate 时防重复注册
-        sReceiverRegistered = true;
         try {
             IntentFilter filter = new IntentFilter(ACTION_TOGGLE);
-            filter.addAction(ACTION_SET_FEED_INTERCEPT);
             filter.addAction(ACTION_SET_ROOT_READY);
             filter.addAction(ACTION_SET_AUTOSTART_READY);
             filter.addAction(ACTION_HOOK_PING);
@@ -416,14 +479,15 @@ public class MainHook implements IXposedHookLoadPackage {
                     // 本就收不到，此调用只在宿主侧执行 —— 60s 防抖在 poke 内部）
                     com.homemode4miui.bridge.GraceKeepAliveService.pokeFromHost(c);
                     String action = i.getAction();
-                    // gate1：首页 hook 存活探测 → 立即回 pong（带宿主版本供回显诊断）
+                    // gate1：首页 hook 存活探测 → 立即回 pong（带宿主版本/家族/失败清单）
                     if (ACTION_HOOK_PING.equals(action)) {
-                        Intent pong = new Intent(ACTION_HOOK_LIVE).setPackage("com.homemode4miui")
-                                .putExtra(EXTRA_READY, true)
-                                .putExtra(EXTRA_HOST_VERSION, hostVersionSafe());
+                        Intent pong = liveIntent();
                         try {
                             c.sendBroadcast(pong);
-                            log("hook ping -> live pong sent (host " + pong.getStringExtra(EXTRA_HOST_VERSION) + ")");
+                            log("hook ping -> live pong sent (host "
+                                    + pong.getStringExtra(EXTRA_HOST_VERSION)
+                                    + ", " + pong.getStringExtra(EXTRA_HOST_FAMILY)
+                                    + ", failed=" + sFailedHooks.size() + ")");
                         } catch (Throwable t) {
                             log("hook pong failed: " + t);
                         }
@@ -441,12 +505,6 @@ public class MainHook implements IXposedHookLoadPackage {
                         boolean ready = i.getBooleanExtra(EXTRA_READY, false);
                         log("broadcast autostart-ready -> " + ready);
                         ModePrefs.setAutoStartReady(c, ready);
-                        return;
-                    }
-                    if (ACTION_SET_FEED_INTERCEPT.equals(action)) {
-                        boolean intercept = i.getBooleanExtra(EXTRA_FEED_INTERCEPT, true);
-                        log("broadcast feed-intercept -> " + intercept);
-                        ModePrefs.setFeedGestureIntercept(c, intercept); // 即时生效，无需切换链
                         return;
                     }
                     boolean on = i.getBooleanExtra(EXTRA_ON, false);
@@ -479,6 +537,10 @@ public class MainHook implements IXposedHookLoadPackage {
                     }
                 }
             }, filter, Context.RECEIVER_EXPORTED);
+            // 注册成功才置位：失败保持未注册，下次生命周期回调可重试
+            // （此前先置位后注册 —— 注册一失败接收器永久缺失，ping 永远无应答）
+            sReceiverRegistered = true;
+            log("toggle/ping receiver registered (context=" + ctx.getClass().getName() + ")");
         } catch (Throwable t) {
             log("registerToggleReceiver failed: " + t);
         }

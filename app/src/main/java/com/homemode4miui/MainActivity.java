@@ -1,6 +1,7 @@
 package com.homemode4miui;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -18,7 +19,8 @@ import android.widget.Toast;
 
 /**
  * 模块开关界面：
- *  1) 模式开关 + 手势选项（负一屏拦截）的 UI 与回显（模块自有 SP 仅存回显）；
+ *  1) 模式开关的 UI 与回显（模块自有 SP 仅存回显）；负一屏手势拦截已固化、无开关
+ *     （自定义模式激活时恒定隔离，用户不可选择）；
  *  2) 向 com.miui.home 发显式广播实时切换/改写（宿主进程写宿主 SP，始终生效）。
  *
  * gate1（用户定案）：权限前置 —— 三个条件全部就绪才允许开启第四桌面：
@@ -43,6 +45,10 @@ public class MainActivity extends Activity {
     // gate1 三项状态（本会话实时值；root 回显持久化在模块自有 SP）
     private volatile boolean mHookLive;
     private volatile String mHookHostVersion;
+    /** 宿主大版本家族标签（OS2(5.x)/OS3(6.x)/UNKNOWN，pong/live 附带） */
+    private volatile String mHookFamily;
+    /** 未生效 hook 清单（pong/live 附带；空 = 全部生效） */
+    private volatile java.util.List<String> mHookFailed;
     private boolean mRootReady;
     // gate6：MIUI 自启动三态（UNKNOWN 不阻断，仅提示无法检测）
     private int mAutoStartState;
@@ -54,6 +60,8 @@ public class MainActivity extends Activity {
     private TextView mAutoStartStatus;
     private TextView mMediaStatusRef;
     private TextView bridgeDiag;
+    /** 上次日志导出的落盘路径（常驻回显） */
+    private TextView mExportPath;
 
     private final BroadcastReceiver mHookLiveReceiver = new BroadcastReceiver() {
         @Override
@@ -62,6 +70,8 @@ public class MainActivity extends Activity {
             if (MainHook.ACTION_HOOK_LIVE.equals(action)) {
                 mHookLive = true;
                 mHookHostVersion = i.getStringExtra(MainHook.EXTRA_HOST_VERSION);
+                mHookFamily = i.getStringExtra(MainHook.EXTRA_HOST_FAMILY);
+                mHookFailed = i.getStringArrayListExtra(MainHook.EXTRA_HOOK_FAILED);
                 mHandler.removeCallbacks(mHookTimeout);
                 refreshGateUi();
                 // gate3：探测结果落定（通过）后才做自动回落判定
@@ -156,6 +166,25 @@ public class MainActivity extends Activity {
         hookHint.setTextColor(0xFF888888);
         root.addView(hookHint);
 
+        // 日志导出（bug 反馈用）：导出到 Download 文件夹，范围可选
+        Button exportLog = new Button(this);
+        exportLog.setText("导出日志（bug 反馈用）");
+        exportLog.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showLogExportDialog();
+            }
+        });
+        root.addView(exportLog);
+
+        // 上次导出路径常驻回显（导出后显示完整落盘路径，方便用户到文件管理器取文件）
+        mExportPath = new TextView(this);
+        mExportPath.setTextSize(12);
+        mExportPath.setTextColor(0xFF555555);
+        mExportPath.setPadding(0, dp(2), 0, dp(8));
+        mExportPath.setVisibility(View.GONE);
+        root.addView(mExportPath);
+
         mNotifStatus = new TextView(this);
         root.addView(mNotifStatus);
 
@@ -247,28 +276,9 @@ public class MainActivity extends Activity {
         root.addView(sw, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        // ---- 手势选项：负一屏手势拦截 ----
-        final Switch swFeed = new Switch(this);
-        swFeed.setText("拦截负一屏手势（右滑）");
-        swFeed.setChecked(mPrefs.getBoolean(ModePrefs.KEY_FEED_INTERCEPT, true));
-        swFeed.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                boolean on = swFeed.isChecked();
-                mPrefs.edit().putBoolean(ModePrefs.KEY_FEED_INTERCEPT, on).apply();
-                sendFeedIntercept(on);
-            }
-        });
-        root.addView(swFeed, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        TextView feedHint = new TextView(this);
-        feedHint.setText("开启（默认）：右滑无动作，自定义视图滚动绝不被原生手势打断；\n"
-                + "关闭：在桌面从左往右滑打开负一屏（即时生效，无需重启桌面）。\n"
-                + "自定义 UI 可经 hook/HomeController.openMinusOneScreen() 主动打开负一屏。");
-        feedHint.setTextSize(13);
-        feedHint.setTextColor(0xFF888888);
-        root.addView(feedHint);
+        // ---- 【已固化】负一屏手势拦截无开关：自定义模式激活时 GestureIsolator
+        // 恒定隔离全部宿主手势控制器，右滑不进负一屏；负一屏由自定义 UI 经
+        // hook/HomeController.openMinusOneScreen() 主动打开。
 
         // ---- hotfix4：桥自诊断（系统授权记录 / 活动媒体会话 / 引擎状态） ----
         // hotfix6：授权状态之后（用户最关心），根布局 ScrollView 防截断
@@ -401,6 +411,47 @@ public class MainActivity extends Activity {
         }
     }
 
+    /* ==================== 日志导出（bug 反馈） ==================== */
+
+    /** 范围选择：1h / 30m / 10m / 5m / 1m */
+    private void showLogExportDialog() {
+        final CharSequence[] ranges = new CharSequence[]{
+                "最近 1 小时", "最近 30 分钟", "最近 10 分钟", "最近 5 分钟", "最近 1 分钟"};
+        final int[] minutes = new int[]{60, 30, 10, 5, 1};
+        new AlertDialog.Builder(this)
+                .setTitle("导出日志范围（保存到 Download 文件夹，上限 10MB）")
+                .setItems(ranges, new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface d, int which) {
+                        doExportLog(minutes[which]);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doExportLog(final int minutes) {
+        Toast.makeText(this, "正在导出日志…（范围：最近 "
+                + (minutes >= 60 ? (minutes / 60) + " 小时" : minutes + " 分钟") + "）",
+                Toast.LENGTH_SHORT).show();
+        com.homemode4miui.util.LogExporter.export(this, minutes,
+                new com.homemode4miui.util.LogExporter.Callback() {
+                    @Override
+                    public void onDone(String message) {
+                        Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                        // 路径常驻显示在导出按钮下方（失败信息也回显，方便截图反馈）
+                        if (mExportPath != null) {
+                            String pathLine = com.homemode4miui.util.LogExporter
+                                    .pathLineOf(message);
+                            mExportPath.setVisibility(View.VISIBLE);
+                            mExportPath.setText(message.startsWith("已导出")
+                                    ? "上次导出路径：\n" + pathLine
+                                    : message);
+                        }
+                    }
+                });
+    }
+
     /* ==================== gate1 判定与回显 ==================== */
 
     /** hook 存活探测：发 ping → 宿主回 pong；超时（2s）按未生效回显。 */
@@ -422,7 +473,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean gateSatisfied() {
-        return mHookLive && gateNotif() && mRootReady && autoStartSatisfied();
+        return mHookLive && hookStatusOk() && gateNotif() && mRootReady && autoStartSatisfied();
     }
 
     /** gate6：自启动 GRANTED/UNKNOWN 都算满足（UNKNOWN 不阻断防误锁） */
@@ -432,6 +483,10 @@ public class MainActivity extends Activity {
 
     private String missingGateText() {
         if (!mHookLive) return "LSPosed hook 未生效（启用模块+勾选系统桌面作用域，且强停系统桌面/重启手机让 hook 注入）";
+        if (criticalHookFailed(mHookFailed)) {
+            return "无法 hook 当前系统桌面（核心 hook 未生效：" + failedSummary()
+                    + "）—— 桌面版本可能暂不受支持，请导出日志反馈";
+        }
         if (!gateNotif()) return "缺少通知使用权";
         if (!mRootReady) return "未确认 root 权限（点击上方检测按钮）";
         if (mAutoStartState == AutoStartProbe.DENIED) return "MIUI 自启动未开启（点击上方按钮进入自启动设置开启 HomeMode4Miui）";
@@ -440,10 +495,7 @@ public class MainActivity extends Activity {
 
     private void refreshGateUi() {
         boolean notif = gateNotif();
-        setTextState(mHookStatus, mHookLive
-                        ? "① LSPosed hook：已生效 ✓（宿主桌面 " + mHookHostVersion + "）"
-                        : "① LSPosed hook：未检测到 ✗（若刚更新模块：先强停「系统桌面」再点重新检测）",
-                mHookLive);
+        setTextState(mHookStatus, hookStatusText(), hookStatusColor());
         setTextState(mNotifStatus, notif
                         ? "② 通知使用权：已授权 ✓"
                         : "② 通知使用权：未授权 ✗（点击下方按钮，在列表中允许 HomeMode4Miui）",
@@ -481,11 +533,75 @@ public class MainActivity extends Activity {
     }
 
     private void setTextState(TextView tv, String text, boolean ok) {
+        setTextState(tv, text, ok ? 0xFF2E7D32 : 0xFFC62828);
+    }
+
+    private void setTextState(TextView tv, String text, int color) {
         if (tv == null) return;
         tv.setText(text);
         tv.setTextSize(14);
-        tv.setTextColor(ok ? 0xFF2E7D32 : 0xFFC62828);
+        tv.setTextColor(color);
         tv.setPadding(0, dp(4), 0, dp(4));
+    }
+
+    /* ---- gate1 hook 状态分级（含"无法 hook/部分生效"提示） ---- */
+
+    /** 核心挂钩：任一失败即"无法 hook 当前桌面"（模式注册/裁决/接收器锚点） */
+    private static boolean criticalHookFailed(java.util.List<String> failed) {
+        if (failed == null) return false;
+        for (String f : failed) {
+            if (f.startsWith("1.getAllModes") || f.startsWith("2.modeAdjudication")
+                    || f.startsWith("0.Application.onCreate")) return true;
+        }
+        return false;
+    }
+
+    private boolean hookStatusOk() {
+        return mHookLive && !criticalHookFailed(mHookFailed);
+    }
+
+    private int hookStatusColor() {
+        if (!mHookLive) return 0xFFC62828;                 // 红：未检测到
+        if (criticalHookFailed(mHookFailed)) return 0xFFC62828; // 红：核心 hook 失败
+        if (mHookFailed != null && !mHookFailed.isEmpty()) return 0xFFF57F17; // 黄：部分失败
+        return 0xFF2E7D32;                                  // 绿：全部生效
+    }
+
+    private String hookStatusText() {
+        if (!mHookLive) {
+            return "① LSPosed hook：未检测到 ✗（若刚更新模块：先强停「系统桌面」再点重新检测）";
+        }
+        String host = "宿主桌面 " + mHookHostVersion
+                + (mHookFamily != null ? " · " + mHookFamily : "");
+        boolean critical = criticalHookFailed(mHookFailed);
+        int failedCount = mHookFailed == null ? 0 : mHookFailed.size();
+        if (critical || failedCount >= 3) {
+            // 无法 hook 当前桌面：核心链路失败或大面积失败 —— 明确引导反馈
+            return "① LSPosed hook：无法 hook 当前桌面 ✗（" + host + "）\n"
+                    + "未生效：" + failedSummary() + "\n"
+                    + "当前系统桌面版本可能暂不受模块支持 —— 请点上方「导出日志（bug 反馈用）」"
+                    + "并把日志文件发给我们";
+        }
+        if (failedCount > 0) {
+            return "① LSPosed hook：部分生效 ⚠（" + host + "）\n"
+                    + "未生效 " + failedCount + " 项：" + failedSummary() + "\n"
+                    + "相关功能可能受限；建议「导出日志」反馈";
+        }
+        return "① LSPosed hook：已生效 ✓（" + host + "）";
+    }
+
+    private String failedSummary() {
+        if (mHookFailed == null || mHookFailed.isEmpty()) return "无";
+        StringBuilder sb = new StringBuilder();
+        for (String f : mHookFailed) {
+            if (sb.length() > 0) sb.append("；");
+            sb.append(f);
+            if (sb.length() > 150) {
+                sb.append("…（共 ").append(mHookFailed.size()).append(" 项）");
+                break;
+            }
+        }
+        return sb.toString();
     }
 
     /** root 探测回调（主线程）：更新回显（模块自有 SP 持久化）+ 通知宿主落 SP */
@@ -542,14 +658,6 @@ public class MainActivity extends Activity {
         Intent i = new Intent(MainHook.ACTION_TOGGLE);
         i.setPackage("com.miui.home"); // 显式广播直达桌面进程
         i.putExtra(MainHook.EXTRA_ON, on);
-        sendBroadcast(i);
-    }
-
-    /** 手势选项写宿主：广播 → 桌面进程写宿主 SP → GestureIsolator 每次触摸实时读取 */
-    private void sendFeedIntercept(boolean intercept) {
-        Intent i = new Intent(MainHook.ACTION_SET_FEED_INTERCEPT);
-        i.setPackage("com.miui.home");
-        i.putExtra(MainHook.EXTRA_FEED_INTERCEPT, intercept);
         sendBroadcast(i);
     }
 

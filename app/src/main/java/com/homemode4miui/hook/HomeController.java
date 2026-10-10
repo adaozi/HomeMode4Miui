@@ -27,12 +27,16 @@ import de.robv.android.xposed.XposedHelpers;
  * 在 DragLayer 上挂载/卸载 {@link HomeView}（由 HomeViewFactory 提供，UI 与底座的唯一接缝）、
  * 聚合应用增删广播、右滑打开负一屏（MinusOneScreenView）。
  *
- * 逆向依据（RELEASE-5.39.40.10843）：Launcher 有 getWorkspace()/getHotSeats()/getDragLayer() 方法，
+ * 逆向依据（OS2: RELEASE-5.39.40.10843 / OS3: RELEASE-6.01.03.1927）：
+ * Launcher 有 getWorkspace()/getHotSeats()/getDragLayer() 方法，
  * 字段 mAppsView(AllAppsContainerView)、mDropTargetBar(DropTargetBar)；
  * 负一屏 = mMinusOneScreenView(MinusOneScreenView，setupViews 由布局 inflate)，
  * PA 内容经 addMinusOneView → loadPaView 反射装载 AssistHolderView 到 mMinusViewGroup；
  * openMinusOne() = workspace.snapToScreen(0) + 自身 snapToScreen(0)，
  * 宿主页面指示条（MultiSeekBarIndicator）点击即走此入口。
+ * OS3 变化：上述 Launcher 方法上移到 BaseLauncher（hook 经 HostCompat 解析），
+ * getDragLayer()/getMinusOneScreenView()/addMinusOneView()/isMinusScreenShowing()/
+ * isUseMiuiMinusScreen() 两版本均在，反射调用不受影响。
  */
 public final class HomeController {
 
@@ -78,7 +82,7 @@ public final class HomeController {
 
     /**
      * 自定义 UI 右滑手势的落点：复刻宿主"页面指示条点击打开负一屏"的完整序列。
-     * 选项语义：「拦截负一屏手势」=false（放行）时自定义 UI 才应调用本方法，双向即时生效。
+     * 【语义已固化】负一屏手势恒定隔离（无放行开关），自定义 UI 可直接调用本方法。
      */
     public static void openMinusOneScreen() {
         Activity launcher = currentLauncher();
@@ -222,22 +226,20 @@ public final class HomeController {
     /* ---------------- 负一屏关闭同步 hook（MainHook #10 调用） ---------------- */
 
     public static void installMinusCloseSync(final ClassLoader cl) {
-        try {
-            XposedHelpers.findAndHookMethod("com.miui.home.launcher.Launcher", cl,
-                    "onMinusOneScreenViewScroll", new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            try {
-                                syncMinusClosed(param.thisObject);
-                            } catch (Throwable t) {
-                                log("minus close sync callback failed: " + t);
-                            }
+        // 版本路由：OS2 声明于 Launcher，OS3 上移至 BaseLauncher（HostCompat 解析声明类）
+        // 异常直接抛给 MainHook.tryHook 记 FAILED（此前内部吞掉会打出误导性 installed）
+        XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl,
+                "onMinusOneScreenViewScroll"), "onMinusOneScreenViewScroll", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            syncMinusClosed(param.thisObject);
+                        } catch (Throwable t) {
+                            log("minus close sync callback failed: " + t);
                         }
-                    });
-            log("minus close sync installed (Launcher.onMinusOneScreenViewScroll)");
-        } catch (Throwable t) {
-            log("minus close sync hook FAILED (degraded) — " + t);
-        }
+                    }
+                });
+        log("minus close sync installed (Launcher.onMinusOneScreenViewScroll)");
     }
 
     /* ---------------- Home 键回首页 hook ---------------- */
@@ -248,29 +250,47 @@ public final class HomeController {
      * 找不到方法/签名漂移时静默降级。
      */
     public static void installHomeIntentSync(final ClassLoader cl) {
+        // 版本路由：onNewIntent(Intent) 在 OS3 同样上移至 BaseLauncher。
+        // 主 hook 异常直接抛给 tryHook 记 FAILED（不吞）。
+        XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl,
+                "onNewIntent", Intent.class), "onNewIntent", Intent.class, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            // 仅主意图（Home 键回桌面）复位；其他 onNewIntent 不动
+                            Object tag = param.args != null && param.args.length > 0
+                                    ? param.args[0] : null;
+                            if (!(tag instanceof Intent)
+                                    || !Intent.ACTION_MAIN.equals(((Intent) tag).getAction())) {
+                                return;
+                            }
+                            HomeView v = sView;
+                            if (v != null) v.onHomeIntent();
+                        } catch (Throwable t) {
+                            log("home intent sync failed: " + t);
+                        }
+                    }
+                });
+        log("home intent sync installed (Launcher.onNewIntent)");
+        // OS3 新增路径：onNewIntentWhenAlreadyOnHome()（RELEASE-6.01.03 把"已在桌面时
+        // 回首页态"拆成独立方法）。OS2 无此方法，找不到即静默跳过；与 onNewIntent
+        // 同场景双触发时 onHomeIntent 为幂等复位，无副作用。
         try {
-            XposedHelpers.findAndHookMethod("com.miui.home.launcher.Launcher", cl,
-                    "onNewIntent", Intent.class, new XC_MethodHook() {
+            XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl,
+                    "onNewIntentWhenAlreadyOnHome"), "onNewIntentWhenAlreadyOnHome", new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             try {
-                                // 仅主意图（Home 键回桌面）复位；其他 onNewIntent 不动
-                                Object tag = param.args != null && param.args.length > 0
-                                        ? param.args[0] : null;
-                                if (!(tag instanceof Intent)
-                                        || !Intent.ACTION_MAIN.equals(((Intent) tag).getAction())) {
-                                    return;
-                                }
                                 HomeView v = sView;
                                 if (v != null) v.onHomeIntent();
                             } catch (Throwable t) {
-                                log("home intent sync failed: " + t);
+                                log("home intent (already-on-home) sync failed: " + t);
                             }
                         }
                     });
-            log("home intent sync installed (Launcher.onNewIntent)");
+            log("home intent sync installed (onNewIntentWhenAlreadyOnHome)");
         } catch (Throwable t) {
-            log("home intent sync hook FAILED (degraded) — " + t);
+            log("onNewIntentWhenAlreadyOnHome absent — skip (OS2 属正常) — " + t);
         }
     }
 
@@ -438,12 +458,19 @@ public final class HomeController {
         return m.invoke(target);
     }
 
+    /**
+     * 沿父类链找无参方法（惰性）：getDeclaredMethod 单方法精确匹配，
+     * 【严禁】getDeclaredMethods() 全量扫描 —— 宿主类链有方法引用类路径缺失的
+     * com.miui.newhome.*（看点/内容中心独立包），全量扫描必炸 NoClassDefFoundError
+     * （OS2 5.39.40 实锤，与 HostCompat.declares 同一条铁律）。
+     */
     private static Method findMethodDeep(Class<?> cls, String name) {
         for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
-            for (Method m : c.getDeclaredMethods()) {
-                if (m.getName().equals(name) && m.getParameterTypes().length == 0) {
-                    return m;
-                }
+            try {
+                Method m = c.getDeclaredMethod(name);
+                m.setAccessible(true);
+                return m;
+            } catch (NoSuchMethodException ignored) {
             }
         }
         return null;

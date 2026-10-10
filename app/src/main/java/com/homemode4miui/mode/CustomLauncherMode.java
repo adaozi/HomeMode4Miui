@@ -71,6 +71,16 @@ public final class CustomLauncherMode extends LauncherMode {
         return false;
     }
 
+    /**
+     * OS3（RELEASE-6.01.03）签名漂移适配：宿主把 isHomeSupportIconSearchBar
+     * 从 (Context) 改为无参。OS2 上本方法不存在于宿主、永不调用；OS3 上由本
+     * 覆写生效 —— 图标搜索条仍由挂载的自定义 UI 取代。
+     */
+    @Override
+    public boolean isHomeSupportIconSearchBar() {
+        return false;
+    }
+
     /** 自定义视图自行决定搜索入口（不承载全局搜索/小爱入口） */
     @Override
     public boolean supportSearch() {
@@ -111,8 +121,26 @@ public final class CustomLauncherMode extends LauncherMode {
         return false;
     }
 
+    /**
+     * OS3 签名适配：宿主 canAddToFolder 第二参数由 ShortcutInfo 改为
+     * IShortcutInfo（RELEASE-6.01.03）。OS2 上本方法不存在于宿主、永不调用。
+     */
+    @Override
+    public boolean canAddToFolder(Collection collection, com.miui.home.data.IShortcutInfo shortcutInfo) {
+        return false;
+    }
+
     @Override
     public boolean canShowShortcutMenu(DragObject dragObject) {
+        return false;
+    }
+
+    /**
+     * OS3 签名适配：宿主 canShowShortcutMenu 参数由 DragObject 改为
+     * IDragObject（RELEASE-6.01.03）。OS2 上本方法不存在于宿主、永不调用。
+     */
+    @Override
+    public boolean canShowShortcutMenu(com.miui.home.dragdrop.IDragObject dragObject) {
         return false;
     }
 
