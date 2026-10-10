@@ -5,7 +5,7 @@
 
 ---
 
-## 1. 源码概况（v1.1.4，master @ 2026-10-07）
+## 1. 源码概况（**v1.1.8，tag @ 2026-10-10，2026-10-11 已同步替换**；原 v1.1.4 分析见文末 §9）
 
 | 项   | 值                                                                           | 对移植的影响                                                                  |
 | --- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -916,3 +916,58 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
 - [ ] **待装机回归**：快速滑字母条（上下两方向 + 抽屉隐藏态触摸唤起），
   确认无旧字母行残留/闪烁；顺带观察动画跟手性（重组不再滞后一帧，
   drawerAlpha 淡入应更贴合）。
+
+---
+
+## 9. 上游同步 v1.1.4 → v1.1.8（2026-10-11，参考源已替换，代码待移植）
+
+### 9.1 上游版本动态（2026-10-08 ~ 10-10 连发 4 版）
+
+| 版本 | 日期 | 核心内容 |
+| --- | --- | --- |
+| v1.1.5 | 10-08 | Grace Button 重做（手势/动作/动画）；**桌面手势**：上滑/下滑/双击；Icon Designer 旋转图标；**Work Profile 支持** |
+| v1.1.6 | 10-09 | 双击与快捷方式展开冲突修复；动画时长+手势手感调整（实验开关 Settings > Advanced > **Lab**）；**PWA 与应用生成 widget**；**字体管理器**（可删导入字体）；**Favorites & App List 编辑器**（左侧 A-Z 滑动控制应用列表） |
+| v1.1.7 | 10-10 | 搜索框下拉关闭；双击与 Pop-ups 冲突再修；**导航栏沉浸**；Icon Designer 适配非标准图标；**文件夹左滑打开内部第一项**；Grace Button 可打开文件夹；**Dim Wallpaper 自定义遮罩颜色**；A-Z 列表更多自定义 |
+| v1.1.8 | 10-10 | 紧急修复：西语等语言 Hide Apps 崩溃；A-Z 列表默认设置显示错误；Grace Button 部分设备颜色/阴影问题 |
+
+参考源已通过 gh-proxy 拉取 v1.1.8 tag 并整目录替换 `GraceLauncher-src/`（506 文件，5.5MB zip）。
+
+### 9.2 影响面量化（上游 diff × 模块 118 个移植副本）
+
+- 上游 main .kt：**67 变更 + 16 新增 + 2 删除**；
+- 与模块副本交集：**55 个文件需同步**（上游累计 **+1794 / −778 行**）；
+- 16 个全新文件（约 1952 行）：PinItemActivity / PinItemViewModel / GraceSystemActions / GraceButton / GraceButtonTransition / GraceButtonIcon / LauncherListGestures / data: AlphabetAppearance / ListAppearance / ProfileSettings / ShortcutsFoldersSettings / GraceButtonIcon；settings: AlphabetSettings / ListAppearanceSettings / LabSettings / ProfileSettings / ShortcutsFoldersSettings；
+- **上游删除 PrivateSpaceSettings×2**（模块仍有副本）——合并进新 `ProfileSettings`（Private Space + Work Profile 统一 profile 模型，常量 PrivateSpaceFolderId 等迁移到 ProfileSettings.kt）；
+- 6 个上游变更文件模块无对应副本（SettingsActivity / WidgetSetupActivity / LauncherAppTheme / LauncherScreen / LauncherViewModel / LauncherSheets）——模块用自建适配层（GraceHomeViewModel / GraceLauncherRoute / GraceHomeRoot 等），其**行为变化需人工核对**（重点：LauncherViewModel 手势分发、LauncherSheets 双击冲突修复、LauncherScreen Lab 参数透传）。
+
+### 9.3 Room schema：v18 → v21（模块库零破坏，照搬三条加列 migration）
+
+| migration | 列 |
+| --- | --- |
+| 18→19 | `workProfileJson`、`homeGesturesJson` |
+| 19→20 | `fontLibraryJson`、`listAppearanceJson` |
+| 20→21 | `shortcutsFoldersJson` |
+
+全部是 launcher_settings 加列（可空/带默认值），模块侧 `LauncherSettingsRepository` 大模型 read-modify-write 增量桥兼容；`LauncherSettings` 模型新增 5 个 embedded 字段：`fontLibrary` / `homeGestures` / `listAppearance` / `shortcutsFolders` / `workProfile`。
+
+### 9.4 移植批次（建议顺序，全部遵循三角色与逐文件三方合并）
+
+| 批次 | 内容 | 关键文件（上游） | 量 | 风险点 |
+| --- | --- | --- | --- | --- |
+| **S1 数据层先行** | schema v21 + settings 5 新字段 + ProfileSettings 统一模型 | LauncherDatabase(+27) / LauncherSettings / LauncherSettingsRepository / LauncherPreferences / 新增 ProfileSettings / AlphabetAppearance / ListAppearance / ShortcutsFoldersSettings；PrivateSpaceSettings 删除迁移 | 小 | 模块 PrivateSpaceSettings 副本需同步删除/改引用 |
+| **S2 A-Z 列表增强 + 列表外观** | AlphabetRail 大改（+176/−130）、listAppearance 行内边距可调、编辑器增强 | AlphabetRail / AppSelectionScrollbar / AppDrawerScreen(+34) / HomeScreen contentPadding / AlphabetSettings / ListAppearanceSettings / AppListModel(+14) | 中 | scrubfix 自托管 Recomposer 修复保留，勿被上游覆盖 |
+| **S3 桌面手势 + Lab** | 上滑/下滑/双击手势（GraceButtonGesture 目标动作）、搜索框下拉关、动画手感实验开关 | GraceSystemActions(80 行) / LauncherListGestures(185 行) / HomeScreen 接线 onHomeGesture+observeBlankDoubleTaps / LabSettings / AppSearchScreen(+38) | 中 | 与 MIUI 手势导航冲突面；手势隔离铁律（gesture belongs only to its own View）；宿主动作（回桌面/通知栏）需宿主侧执行入口 |
+| **S4 Grace Button 重做** | 新按钮组件+过渡动画+可开文件夹+颜色阴影修复 | GraceButton / GraceButtonTransition / GraceButtonIcon / GraceButtonSettings(+93) / GraceButtonSettings.kt(settings +148) | 中 | 纯渲染+少量宿主动作 |
+| **S5 字体管理器** | 导入字体可管理/删除 | FontSettings(+204) / LauncherFonts(+94) / ClockFontStore(+8) / fontLibrary 字段 | 中 | 时钟字体跨进程 filesDir 限制（C 组降级登记项）依旧适用 |
+| **S6 Icon Designer 增强** | 图标旋转 + 非标准图标适配 | IconDesigner* 5 文件 / IconDesign / IconDesignRenderer(+51) / ItemIconStore | 中 | 纯渲染面 |
+| **S7 弹层/文件夹/外观修复** | 双击×Pop-ups 冲突、文件夹左滑开首项、dimWallpaper 自定义遮罩色、导航栏沉浸 | PopupSwipeIntent / ShortcutPopup(+45) / LauncherComponents(+117) / LauncherAppearance(+14) / Theme(+4) / LauncherLayout(+26) | 小 | Popup 子树禁 stringResource 规则沿用 |
+| **S8 PWA / pin item / Work Profile** | PWA 与应用生成 widget、pin item 支持 | PinItemActivity / PinItemViewModel / AppRepository(+26) / HomeWidgetHost(+9) / WidgetSetupActivity 行为核对 | 大 | 宿主进程适配风险最高：pin shortcut 请求 hook 面、PWA 会话查询；**缓后，独立降级开关** |
+
+顺带白拿的修复（随所属批次）：v1.1.8 A-Z 默认设置显示错误、Grace Button 颜色/阴影、多语言 Hide Apps 崩溃（strings fallback 语义）。
+
+### 9.5 移植纪律（本轮新增强化）
+
+1. **禁止整文件覆盖**：模块 55 个副本全部是裁剪+适配版（R import → com.homemode4miui、hotfix2 Popup 规则、LocalHostContext/LocalModuleContext、scrubfix 双参 retainItemSpace、裁 widget/media 分支等）。每文件走 **v1.1.4 原版 → 模块副本 → v1.1.8 原版** 三方合并，逐 hunk 决策；
+2. 上游新增文件若含宿主侧行为（filesDir/Activity/系统动作），引用点必须走 LocalHostContext（§5 风险登记第一条）；
+3. 新增设置项落 Room 走 §9.3 三条 migration，模块进程设置页经增量桥自动生效（C3 链路零改动）；
+4. 每批次独立可降级，坏了不阻塞主链路；批次完成后 commit + tag + build-fix 闭环。
