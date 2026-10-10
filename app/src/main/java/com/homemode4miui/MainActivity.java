@@ -132,9 +132,8 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView desc = new TextView(this);
-        desc.setText("\n为小米桌面（com.miui.home）新增第四种桌面模式（原生同款机制）。\n"
-                + "切换走原生链路，与三种原生模式互不干扰；"
-                + "也可在桌面设置页「实验性第四选项」切换。\n"
+        desc.setText("\n为小米桌面（com.miui.home，OS2/OS3 双版本自适应）新增第四种桌面模式。\n"
+                + "切换走原生链路，与三种原生模式互不干扰。\n"
                 + "提示：请先关闭系统「极简模式」");
         desc.setTextSize(15);
         root.addView(desc);

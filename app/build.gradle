@@ -14,8 +14,8 @@ android {
         applicationId "com.homemode4miui"
         minSdk 33          // 与宿主一致（com.miui.home minSdk 33）
         targetSdk 34
-        versionCode 53
-        versionName "2.9.20-grace-dualapp"
+        versionCode 54
+        versionName "2.9.21-grace-dualapp-os3"
     }
 
     sourceSets {
