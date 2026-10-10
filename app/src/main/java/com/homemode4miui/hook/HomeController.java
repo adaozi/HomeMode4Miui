@@ -78,6 +78,19 @@ public final class HomeController {
         }
     }
 
+    /**
+     * Launcher.onPause 同步（MainHook hook 5b 调用，perf3 功耗专项）：
+     * 通知挂载视图退后台 —— Compose 生命周期推到 STOPPED，时钟循环挂起、
+     * widget 宿主 stopListening，后台期间零周期唤醒。onPause 是主线程生命周期
+     * 回调，直接调用（无需 post）。视图未挂载/已卸载时为 no-op。
+     */
+    public static void notifyHomePaused() {
+        HomeView v = sView;
+        if (v != null) {
+            v.onHomePaused();
+        }
+    }
+
     /* ---------------- 右滑打开负一屏（自定义 UI 的可用宿主能力） ---------------- */
 
     /**

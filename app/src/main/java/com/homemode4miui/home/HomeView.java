@@ -42,6 +42,14 @@ public abstract class HomeView extends FrameLayout {
     public void onPackagesChanged() {
     }
 
+    /**
+     * Launcher 已退后台（Launcher.onPause，perf3 省电同步）：桌面 UI 在此暂停
+     * 常驻刷新（Compose 时钟循环 / widget 宿主监听等）。回前台由 onResume 路径的
+     * onHomeAttached 复用分支自动恢复。默认空实现（不支持的 UI 无感）。
+     */
+    public void onHomePaused() {
+    }
+
     /** Home 键回桌面（Launcher.onNewIntent 且为主意图）：两态 UI 在此复位回首页态 */
     public void onHomeIntent() {
     }

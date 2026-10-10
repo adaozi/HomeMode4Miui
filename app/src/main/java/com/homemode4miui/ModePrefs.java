@@ -192,7 +192,11 @@ public final class ModePrefs {
 
     public static void markGraceComposePending(Context ctx) {
         try {
-            graceSp(ctx).edit().putBoolean(KEY_GRACE_PENDING, true).commit();
+            // perf2（冷启动专项）：挂载路径主线程写盘，commit() 改 apply()。
+            // 崩溃安全性评估：pending 需要跨进程死亡存活，但进程死亡发生在首帧
+            // traversal（挂载数百 ms 后），此时 apply 的异步落盘早已完成 ——
+            // 熔断语义不受影响，主线程磁盘 IO 从关键路径移除。
+            graceSp(ctx).edit().putBoolean(KEY_GRACE_PENDING, true).apply();
         } catch (Throwable ignored) {
         }
     }

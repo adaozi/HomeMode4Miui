@@ -849,3 +849,42 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
 
 > ②（发布合规）✅ 已完成（2026-10-09 已上 GitHub）→ 剩余：③ 收尾验证穿插>   
 > → ① C 组遗留降级项 → ④ 装机回归四链路（模式切换/挂载熔断/桥广播/Room 迁移）。
+
+### perf1（v2.9.22-grace-perf1 / versionCode 55，2026-10-10）
+
+**功耗 + 冷启动专项**（用户反馈：功耗偏高、桌面重启后加载慢）。全量代码审计
+（挂载链 / 保活体系 / 常驻循环 / 监听 / SP / 每帧分配七类嫌疑逐项排查）后按
+优先级实施五项根因修复，全部带 perf1~perf5 标注：
+
+- [x] **perf1 壁纸位图异步化（冷启动单点最重）**：`GraceLauncherRoute` 的
+  壁纸模糊层原在首组合 remember{} 主线程同步取整屏壁纸 drawable + 全分辨率
+  解码（4K 屏数十 MB）。改 LaunchedEffect + Dispatchers.IO 异步加载，并按
+  屏幕分辨率重绘（toBitmap(w,h)；模糊层细节本被 blur 抹平）。视觉零回退：
+  模糊层初始 alpha=0（抽屉打开才渐入），加载完成前本不可见。
+- [x] **perf2 挂载主线程串行链消减**：① `markGraceComposePending` commit→apply
+  （崩溃安全：进程死亡在首帧 traversal，apply 异步落盘早已完成，熔断语义不变）；
+  ② 宿主 versionCode 进程级缓存（getPackageInfo 是同步 binder，复用路径零开销）；
+  ③ `GraceHomeViewModel` 构造中的 refreshShortcutAccess/refreshMediaAccess 两个
+  同步 binder 往返移入协程延后一拍（状态位到达前按"无权限"默认渲染，无视觉回退）。
+- [x] **perf3 Launcher 生命周期同步（后台零周期唤醒）**：新增 hook 5b
+  `Launcher.onPause` → `HomeController.notifyHomePaused` → `GraceHomeView`
+  生命周期推 STOP；回前台由 onResume → onHomeAttached 复用分支自动补
+  ON_START/ON_RESUME。`HomeScreen` 时钟循环与 `TimeText` 通知时长循环（每条
+  带通知的收藏行各一个 60s 循环）包 `repeatOnLifecycle(STARTED)` —— 退后台
+  整体挂起。hook 未命中的宿主版本 lifecycle 恒为 RESUMED，行为同旧版（安全降级）。
+  widget 宿主 stopListening 随 ON_STOP 生效（对齐原生桌面行为，附带走电项）。
+- [x] **perf4 root 守护脚本降频**：`hm4m_keepalive.sh` 轮询 30s→120s。
+  主保活链是 attach 时 pokeFromHost（回桌面即拉起，零延迟），root 脚本仅兜底；
+  待机期周期 fork（pidof）降 75%，兜底拉活最坏延迟 30s→120s 无实际体验差异。
+- [x] **perf5 日期格式化器缓存**：`HomeClockHeader` 的 SimpleDateFormat ×2 +
+  getBestDateTimePattern（ICU 查询）remember(locale/week) 缓存，消除时钟每分钟
+  tick 与通知/媒体重组时的重复构造。
+- [x] 审计确认无需改动：MediaSessionRepository/通知监听（纯事件驱动）、日历
+  （一次性查询）、天气（广播失效）、Room 初始化（协程内）、跨进程命令链
+  （异步广播）；`GraceBridgeEngine` 30s 看门狗仅 connected=false 时动作且进程
+  被冻结时 delay 不醒，保留原状（notif7 自愈链是解绑刚需，不弱化）。
+- [x] 构建验证：assembleRelease 通过（首 builds 复盘一处 COMPOSABLE_INVOCATION
+  —— LocalLifecycleOwner.current 不能进 produceState producer，已移至组合层）。
+- [ ] **待装机回归**：① 冷启动首帧体感（壁纸模糊层随抽屉渐入是否如常）；
+  ② 退后台后电池统计（bathtotal 曲线对比 v2.9.21）；③ 退后台 → 回桌面
+  时钟/通知时长即时恢复刷新；④ keepalive.sh 新周期生效（ps | grep hm4m）。

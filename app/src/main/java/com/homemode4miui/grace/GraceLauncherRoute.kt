@@ -279,13 +279,30 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // （0..48dp，与设置页滑杆一致），可见度跟随 wallpaperEffectAlpha —— 与原版
     // "模糊随抽屉渐入"的观感一致；静态壁纸逐像素对齐，动态壁纸降级为快照。
     // 窗口 blur 尝试保留（其他 ROM 上生效时位图层反正完全覆盖，视觉一致）。
-    val wallpaperBlurBitmap = remember(wallpaperBlurOn) {
-        if (!wallpaperBlurOn) return@remember null
-        runCatching {
-            android.app.WallpaperManager.getInstance(hostContext).drawable?.toBitmap()
-        }.onFailure {
-            ModLog.i("WallpaperBlur fallback bitmap load failed: ${it.message}")
-        }.getOrNull()
+    //
+    // perf1（功耗/冷启动专项根因修复）：原实现 remember{} 在首组合【主线程】同步
+    // 取整屏壁纸 drawable 并 toBitmap（binder + 全分辨率解码，4K 屏可达数十 MB
+    // 分配）—— 桌面每次重启的首帧最大单点阻塞，且常驻内存。改为 LaunchedEffect
+    // + Dispatchers.IO 异步加载，并按屏幕分辨率缩放（toBitmap(width,height) 内部
+    // 按目标尺寸重绘，模糊层视觉细节本被 blur 抹平，1x 屏幕分辨率足够）。
+    // 视觉零回退：模糊层初始 wallpaperEffectAlpha=0（抽屉打开才渐入），异步加载
+    // 完成前的窗口期内该层本就不可见。
+    val wallpaperBlurBitmap = remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    if (wallpaperBlurOn) {
+        LaunchedEffect(hostContext) {
+            wallpaperBlurBitmap.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val drawable = WallpaperManager.getInstance(hostContext).drawable
+                        ?: return@withContext null
+                    val dm = hostContext.resources.displayMetrics
+                    drawable.toBitmap(dm.widthPixels.coerceAtLeast(1), dm.heightPixels.coerceAtLeast(1))
+                }.onFailure {
+                    ModLog.i("WallpaperBlur fallback bitmap load failed: ${it.message}")
+                }.getOrNull()
+            }
+        }
+    } else {
+        wallpaperBlurBitmap.value = null
     }
 
     // ---- hotfix6：壁纸遮罩色（原版 LauncherScreen.kt:623-629 wallpaperTint）----
@@ -476,9 +493,9 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 手势区背后的壁纸区域。hotfix6 把两层放进了容器内部，insets 区域露出未遮罩壁纸
     // （状态栏条带观感"遮罩没盖住"）。层级与绘制顺序照搬原版：壁纸效果在最底，
     // 列表容器在其上，LauncherOverlays 再其上。
-    if (wallpaperBlurBitmap != null) {
+    wallpaperBlurBitmap.value?.let { wallpaperBlur ->
         Image(
-            bitmap = wallpaperBlurBitmap.asImageBitmap(),
+            bitmap = wallpaperBlur.asImageBitmap(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()

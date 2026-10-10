@@ -126,9 +126,14 @@ object RootKeepAlive {
     }
 
     /**
-     * 4. Magisk service.d 开机守护脚本（keep1）：开机后常驻循环，每 30s 检查
+     * 4. Magisk service.d 开机守护脚本（keep1）：开机后常驻循环，周期检查
      * 模块进程，被杀则 root 身份 am startservice 拉起（root 调用方不受后台
      * startService 限制 —— 装机实锤的「模块死在后台无人拉」的 root 侧根治）。
+     * perf4（功耗专项）：轮询周期 30s → 120s。该脚本是 root 侧兜底而非主保活
+     * 链路 —— 主链路是 HomeController.attach 的 pokeFromHost（用户回桌面即拉起，
+     * 零延迟）；用户实际感知到"模块死了"的场景几乎都发生在回到桌面时，彼时
+     * poke 已先行复活，兜底拉活延迟从最坏 30s 放宽到 120s 无实际体验差异，
+     * 换来待机期周期 fork（pidof 每次读 /proc 全量）降 75%。
      * 脚本内容经 base64 传输落盘（规避 su -c 的引号嵌套地狱）；重复安装覆盖写
      * 幂等；pkill 旧守护后 nohup 立即启动，不要求重启即生效。
      */
@@ -140,7 +145,7 @@ object RootKeepAlive {
               if ! pidof com.homemode4miui >/dev/null 2>&1; then
                 am startservice -n com.homemode4miui/com.homemode4miui.bridge.GraceKeepAliveService >/dev/null 2>&1
               fi
-              sleep 30
+              sleep 120
             done
         """.trimIndent()
         val b64 = android.util.Base64.encodeToString(script.toByteArray(), android.util.Base64.NO_WRAP)

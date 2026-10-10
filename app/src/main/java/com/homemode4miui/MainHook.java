@@ -38,6 +38,9 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *     两版本都必经的生命周期方法，不依赖"OS3 setupViews 是否仍被调用"假设
  *  4. Launcher.onLauncherModeChanged()                after  → 原生模式切换链同步 UI（同上路由）
  *  5. Launcher.onResume()                             after  → 回桌面校准 + 通知应用变更（同上路由）
+ *  5b. Launcher.onPause()                             after  → 桌面退后台省电同步：
+ *     HomeView.onHomePaused 推 Compose 生命周期到 STOPPED（时钟循环挂起/widget
+ *     宿主停听）—— perf3 功耗专项；回前台由 5.onResume 自动恢复（同上路由）
  *  9. SuperDraglayer.findActiveController             before → 手势隔离闸门：
  *     自定义模式激活时宿主手势控制器（下拉搜索/上滑抽屉/横滑负一屏/下拉通知栏）
  *     永不认领手势流，消除与挂载视图的手势互相捣乱；负一屏恒定隔离（已固化，无开关），
@@ -173,6 +176,17 @@ public class MainHook implements IXposedHookLoadPackage {
                         }
                     }
                 });
+            }
+        });
+        // perf3（功耗专项）：Launcher.onPause —— 自定义桌面退后台同步。
+        // 此前 Compose 生命周期只在 attach/detach 流转：用户打开其他 App 后组合
+        // 永不暂停，时钟 60s 循环 / widget 宿主监听在后台持续活动（周期唤醒）。
+        // hook 后经 HomeView.onHomePaused 推 STOP；回前台由 5.onResume →
+        // onHomeAttached 复用分支自动推回 RESUMED。hook 未命中只降级省电能力，
+        // 不影响功能（与全部 hook 同一隔离原则）。
+        tryHook("5b.Launcher.onPause (退后台省电同步)", new HookTask() {
+            @Override public void run() {
+                hookLauncherMethod(cl, "onPause", mLauncherPauseSync);
             }
         });
         tryHook("9.SuperDraglayer.findActiveController (手势隔离)", new HookTask() {
@@ -428,6 +442,18 @@ public class MainHook implements IXposedHookLoadPackage {
     /* ================================================================
      * ③④ Launcher UI 同步（共用回调；onResume 在 ⑤ 单独处理带刷新）
      * ================================================================ */
+
+    /** perf3：Launcher.onPause 同步回调 —— 自定义桌面退后台省电（见 hook 5b 注释） */
+    private final XC_MethodHook mLauncherPauseSync = new XC_MethodHook() {
+        @Override
+        protected void afterHookedMethod(MethodHookParam param) {
+            try {
+                HomeController.notifyHomePaused();
+            } catch (Throwable t) {
+                log("launcher pause sync callback failed: " + t);
+            }
+        }
+    };
 
     private final XC_MethodHook mLauncherUiSync = new XC_MethodHook() {
         @Override

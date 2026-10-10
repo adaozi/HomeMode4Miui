@@ -77,6 +77,16 @@ class GraceHomeView(launcher: Activity) :
     private var contentInstalled = false
     private var heartbeatReceived = false
 
+    companion object {
+        /**
+         * perf2（冷启动专项）：宿主 versionCode 进程级缓存。getPackageInfo 是
+         * 一次同步 binder 往返，挂在 Launcher.onCreate 主线程；versionCode 在
+         * 进程生命周期内不变（APK 更新必换进程），缓存后复用路径（每次
+         * Launcher.onResume 的 attach）零 binder 开销。
+         */
+        @Volatile private var sHostVersionCode: Int = -1
+    }
+
     init {
         try {
             // 组合期按视图树向上解析三 Owner（CompositionLocals 从 ComposeView 向上查，命中本类）
@@ -92,9 +102,15 @@ class GraceHomeView(launcher: Activity) :
 
     override fun onHomeAttached(launcher: Activity) {
         // ---- 复用路径幂等：只把生命周期推回 RESUMED，绝不重复挂内容 ----
+        // perf3：复用分支同时承担"退后台恢复"—— Launcher.onResume 必经此处。
+        // 此前只处理 STARTED→RESUMED；新增 CREATED（onHomePaused 推到 STOP 后）
+        // 的 ON_START 补链。状态已 RESUMED 时两次 handleLifecycleEvent 均为 no-op。
         if (contentInstalled) {
             try {
-                if (lifecycleRegistry.currentState == Lifecycle.State.STARTED) {
+                if (lifecycleRegistry.currentState == Lifecycle.State.CREATED) {
+                    lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+                }
+                if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                     lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
                 }
             } catch (t: Throwable) {
@@ -106,10 +122,15 @@ class GraceHomeView(launcher: Activity) :
         heartbeatReceived = false
 
         // ---- 持久化熔断检查（版本变更自动清零；连崩超阈值永久降级）----
+        // perf2：versionCode 走进程级缓存（同进程恒定），复用路径零 binder 开销
         val versionCode = runCatching {
-            val info = launcher.packageManager.getPackageInfo(launcher.packageName, 0)
-            @Suppress("DEPRECATION")
-            if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
+            sHostVersionCode.takeIf { it > 0 } ?: run {
+                val info = launcher.packageManager.getPackageInfo(launcher.packageName, 0)
+                @Suppress("DEPRECATION")
+                val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
+                sHostVersionCode = code
+                code
+            }
         }.getOrDefault(0)
         val failures = ModePrefs.onGraceComposeMountAttempt(launcher, versionCode)
         if (ModePrefs.isGraceComposeDead(launcher) || failures > ModePrefs.GRACE_MAX_FAILURES) {
@@ -161,6 +182,27 @@ class GraceHomeView(launcher: Activity) :
         } catch (t: Throwable) {
             ModLog.e("GraceHomeView onHomeAttached failed", t)
             onMountFailed(launcher)
+        }
+    }
+
+    /**
+     * perf3（功耗专项）：Launcher.onPause 同步 —— 自定义桌面退后台。
+     * 生命周期推到 STOPPED：HomeScreen / TimeText 的时钟循环（repeatOnLifecycle
+     * STARTED 包裹）整体挂起、widget 宿主 stopListening（rememberWidgetHost 观察
+     * ON_START/ON_STOP）—— 桌面在后台期间零周期唤醒。回桌面由 onResume 路径的
+     * onHomeAttached 复用分支推回 RESUMED（CREATED 分支补 ON_START）。
+     * hook 5b 未命中的宿主版本上本方法不会被调用，行为等同旧版（安全降级）。
+     */
+    override fun onHomePaused() {
+        try {
+            if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+            }
+            if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+            }
+        } catch (t: Throwable) {
+            ModLog.e("GraceHomeView onHomePaused failed", t)
         }
     }
 

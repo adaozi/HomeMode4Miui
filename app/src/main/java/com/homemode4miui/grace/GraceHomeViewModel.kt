@@ -251,8 +251,15 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
         refreshApps()
-        refreshShortcutAccess()
-        refreshMediaAccess()
+        // perf2（功耗/冷启动专项）：shortcut/media 权限探测各含一次【同步 binder 往返】
+        // （hasShortcutHostPermission / isNotificationListenerAccessGranted 查询），
+        // 原实现串行跑在挂载主线程（GraceHomeView.onHomeAttached 内构造本 VM），
+        // 直接计入桌面冷启动关键路径。改为协程延后一拍：首帧后立即执行，两个状态
+        // 位到达前 UI 按"无权限"默认渲染，有权限时随后点亮 —— 无视觉回退。
+        viewModelScope.launch {
+            refreshShortcutAccess()
+            refreshMediaAccess()
+        }
         refreshAgenda()
         // hotfix7：隐藏应用键跟随（与 LauncherSettingsRepository 同源 DAO；
         // 观察失败不阻塞主链路 —— 抽屉退化为不过滤）
