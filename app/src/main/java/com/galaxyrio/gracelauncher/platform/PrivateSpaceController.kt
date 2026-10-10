@@ -20,7 +20,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.homemode4miui.R
-import com.galaxyrio.gracelauncher.data.PrivateSpaceSettings
+import com.galaxyrio.gracelauncher.data.ProfileSettings
 import com.galaxyrio.gracelauncher.data.PrivateSpaceDisplay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,10 +49,10 @@ class PrivateSpaceController private constructor(private val context: Context) {
     private var generation = 0
     private var lockOnReturn = false
     private var preparedAppKey: String? = null
-    private var settings = PrivateSpaceSettings()
+    private var settings = ProfileSettings()
     private var configured = false
 
-    fun configure(value: PrivateSpaceSettings) {
+    fun configure(value: ProfileSettings) {
         val previous = settings
         settings = value
         configured = true

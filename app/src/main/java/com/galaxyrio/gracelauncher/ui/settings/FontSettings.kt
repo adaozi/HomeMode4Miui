@@ -59,7 +59,7 @@ internal fun AppFontDialog(selected: String?, onSelect: (String?) -> Unit, onDis
             } finally { importing = false }
         }
     }
-    FontPickerDialog(
+    ClockFontPickerDialog(
         fonts, selected, onSelect,
         onImport = { picker.launch(arrayOf("*/*")) }, onDismiss = { if (!importing) onDismiss() },
         builtIns = AppFont.entries, tag = "app_font", previewFonts = true, importing = importing,
@@ -68,7 +68,7 @@ internal fun AppFontDialog(selected: String?, onSelect: (String?) -> Unit, onDis
 
 /** Plain radio choices in a dialog; segmented lists remain on the settings page. */
 @Composable
-internal fun FontPickerDialog(
+internal fun ClockFontPickerDialog(
     fonts: List<ClockFontFile>, selected: String?, onSelect: (String?) -> Unit,
     onImport: () -> Unit, onDismiss: () -> Unit,
     builtIns: List<AppFont> = listOf(AppFont.Default), tag: String = "clock_font",
@@ -84,10 +84,10 @@ internal fun FontPickerDialog(
                 }
                 LazyColumn(Modifier.heightIn(max = 360.dp).selectableGroup()) {
                     items(builtIns, key = { "builtin:${it.name}" }) { font ->
-                        FontOption(appFontLabel(font.id), font.id, selected, onSelect, tag, previewFonts, enabled)
+                        ClockFontOption(appFontLabel(font.id), font.id, selected, onSelect, tag, previewFonts, enabled)
                     }
                     items(fonts, key = { it.id }) { font ->
-                        FontOption(font.name, font.id, selected, onSelect, tag, previewFonts, enabled)
+                        ClockFontOption(font.name, font.id, selected, onSelect, tag, previewFonts, enabled)
                     }
                 }
             }
@@ -104,7 +104,7 @@ internal fun FontPickerDialog(
 }
 
 @Composable
-private fun FontOption(label: String, id: String?, selected: String?, onSelect: (String?) -> Unit,
+private fun ClockFontOption(label: String, id: String?, selected: String?, onSelect: (String?) -> Unit,
     tag: String, previewFont: Boolean, enabled: Boolean) {
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("$tag:${id ?: "default"}")
         .selectable(selected == id, enabled = enabled, role = Role.RadioButton, onClick = { onSelect(id) }).padding(vertical = 8.dp),

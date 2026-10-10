@@ -25,7 +25,7 @@ import com.galaxyrio.gracelauncher.data.LauncherSettings
 import com.galaxyrio.gracelauncher.data.PopupItem
 import com.galaxyrio.gracelauncher.data.PrivateSpaceDisplay
 import com.galaxyrio.gracelauncher.data.PrivateSpaceFolderId
-import com.galaxyrio.gracelauncher.data.PrivateSpaceSettings
+import com.galaxyrio.gracelauncher.data.ProfileSettings
 import com.galaxyrio.gracelauncher.data.RecentlyInstalledFolderId
 import com.galaxyrio.gracelauncher.data.ScheduleEvent
 import com.galaxyrio.gracelauncher.data.WallpaperTextMode
@@ -83,6 +83,13 @@ data class LauncherUiState(
     val privateFolderApp: LauncherApp? = null,
     val shownShortcutKeys: Set<String> = emptySet(),
 ) {
+    // 上游同步 v1.1.8（LauncherViewModel.notificationsFor 逐字语义，落到本仓 UiState）：
+    // 通知预览按 ShortcutsFoldersSettings 的静默/普通显示策略过滤；快捷方式/文件夹/
+    // 其他 profile 行不显示预览。
+    fun notificationsFor(app: LauncherApp, expanded: Boolean): List<AppNotification> =
+        if (app.shortcut != null || app.user != null || app.folderId != null) emptyList()
+        else notifications[app.packageName].orEmpty().filter { settings.shortcutsFolders.showsNotification(it.silent, expanded) }
+
     fun findItem(key: String): LauncherApp? = apps.firstOrNull { it.key == key }
         ?: shortcutApps.firstOrNull { it.key == key && (!it.isPrivateSpace || privateContentVisible) }
             ?.let { if (it.isPrivateSpace) it.copy(showPrivateIndicator = settings.privateSpace.showIndicator) else it }

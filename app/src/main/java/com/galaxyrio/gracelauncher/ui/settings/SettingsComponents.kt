@@ -4,6 +4,13 @@ package com.galaxyrio.gracelauncher.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,12 +39,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -49,6 +58,9 @@ internal data class SettingsStorageState(val loading: Boolean = false, val loadF
 }
 
 internal val LocalSettingsStorageState = staticCompositionLocalOf { SettingsStorageState() }
+
+/** Scrollable content includes this inset; fixed bottom controls stay above it. */
+internal val LocalSettingsBottomInset = staticCompositionLocalOf { 0.dp }
 
 @Composable
 internal fun SettingsScaffold(
@@ -117,7 +129,22 @@ internal fun SettingsScaffold(
                 Text(stringResource(message), Modifier.navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp).testTag("settings_storage_status"), style = MaterialTheme.typography.bodyMedium)
             }
         },
-        content = content,
+        content = { padding ->
+            val direction = LocalLayoutDirection.current
+            val navigationBottom = minOf(padding.calculateBottomPadding(),
+                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+            val fixedBottom = padding.calculateBottomPadding() - navigationBottom
+            val viewportPadding = PaddingValues(
+                start = padding.calculateStartPadding(direction), top = padding.calculateTopPadding(),
+                end = padding.calculateEndPadding(direction), bottom = fixedBottom,
+            )
+            // Let lists draw beneath the transparent navigation bar. Keep its safe
+            // area inside scrollable content, without duplicating it above the IME.
+            val imeOverlap = (WindowInsets.ime.asPaddingValues().calculateBottomPadding() - fixedBottom).coerceAtLeast(0.dp)
+            CompositionLocalProvider(LocalSettingsBottomInset provides (navigationBottom - imeOverlap).coerceAtLeast(0.dp)) {
+                content(viewportPadding)
+            }
+        },
     )
 }
 
@@ -136,8 +163,8 @@ internal fun SettingsAppBarAction(
 @Composable
 internal fun SettingsList(padding: PaddingValues, content: LazyListScope.() -> Unit) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal = 16.dp).testTag("settings_list"),
-        contentPadding = PaddingValues(bottom = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding().padding(horizontal = 16.dp).testTag("settings_list"),
+        contentPadding = PaddingValues(bottom = 24.dp + LocalSettingsBottomInset.current),
         verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
         content = content,
     )
@@ -208,6 +235,7 @@ internal fun SettingsToggleItem(
     count: Int,
     tag: String,
     enabled: Boolean = true,
+    leading: @Composable (() -> Unit)? = null,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val shapes = ListItemDefaults.segmentedShapes(index = index, count = count)
@@ -231,6 +259,7 @@ internal fun SettingsToggleItem(
             selectedOverlineContentColor = colors.overlineContentColor,
             selectedSupportingContentColor = colors.supportingContentColor,
         ),
+        leadingContent = leading,
         content = { Text(title) },
         supportingContent = if (summary == null) null else ({ Text(summary) }),
         // The whole segmented item is the sole toggle and accessibility target.

@@ -512,4 +512,61 @@
     <string name="folder_actions">Folder actions</string>
     <string name="folder_contents_empty">Choose apps or widgets for this folder.</string>
     <string name="recently_installed">Recently Installed</string>
+
+    <!-- GraceLauncher settings strings (EN)（C 组设置全家桶搬运） -->
+    <string name="alphabet_automatic_spacing">Automatic · %1$d dp spacing</string>
+    <string name="alphabet_bottom">Lower position</string>
+    <string name="alphabet_free_movement">Free movement</string>
+    <string name="alphabet_indicator_shape">Indicator shape</string>
+    <string name="alphabet_letter_color">Letter color</string>
+    <string name="alphabet_top">Upper position</string>
+    <string name="icon_designer_pebble_roundness">Roundness</string>
+    <string name="icon_designer_rotation">Rotation</string>
+    <string name="icon_designer_suggestions">Suggestions</string>
+    <string name="list_app_spacing">App spacing</string>
+    <string name="list_color_default">Follow wallpaper text color</string>
+    <string name="list_font_color">Font color</string>
+    <string name="list_icon_name_gap">Icon and name spacing</string>
+    <string name="list_left_alphabet">Use alphabet from the left</string>
+    <string name="list_names_app_list">App list only</string>
+    <string name="list_names_both">Favorites and app list</string>
+    <string name="list_names_favorites">Favorites only</string>
+    <string name="list_show_names">Show app names</string>
+    <string name="list_side_padding">List side margins</string>
+    <string name="popup_swipe_left_first">Swipe left to open the first item</string>
+    <string name="settings_alphabet">A-Z list</string>
+    <string name="settings_favorites_app_list">Favorites &amp; app list</string>
+    <string name="settings_gestures">Gesture</string>
+    <string name="settings_wallpaper_dim_color">Overlay color</string>
+    <string name="settings_wallpaper_dim_color_auto">Automatic primary tint</string>
+    <string name="shortcuts_folders_title">Shortcuts &amp; folders</string>
+    <string name="work_profile_title">Work Profile</string>
+
+
+    <!-- GraceLauncher settings strings (EN)（C 组设置全家桶搬运） -->
+    <string name="font_add">Add font</string>
+    <string name="font_all">All fonts</string>
+    <string name="font_delete">Delete</string>
+    <string name="font_delete_summary">Delete %1$d imported fonts? Components using them will return to the default font.</string>
+    <string name="font_delete_title">Delete fonts?</string>
+    <string name="font_search">Search fonts</string>
+    <string name="icon_edit_default">Default</string>
+    <string name="icon_suggestion_add">Add</string>
+    <string name="icon_suggestion_bolt">Bolt</string>
+    <string name="icon_suggestion_list">Format List Bulleted</string>
+    <string name="icon_suggestion_notifications">Notifications</string>
+    <string name="icon_suggestion_power">Power Settings New</string>
+
+
+    <string name="alphabet_free_movement_summary">Drag beyond either end to move the alphabet. Release to return.</string>
+    <string name="icon_designer_square_corner_radius">Corner radius</string>
+    <string name="list_left_alphabet_summary">Slide along the left edge to control the alphabet on the right</string>
+
+    <string name="popup_normal_notifications">Normal notifications</string>
+    <string name="popup_notification_expanded">Expanded only</string>
+    <string name="popup_notification_hidden">Hide</string>
+    <string name="popup_notification_normal">Show normally</string>
+    <string name="popup_silent_notifications">Silent notifications</string>
+    <string name="popup_swipe_left_first_summary">Open the first shortcut, app, or widget’s app in the pop-up</string>
+    <string name="shortcuts_folders_enable">Enable app pop-ups</string>
 </resources>

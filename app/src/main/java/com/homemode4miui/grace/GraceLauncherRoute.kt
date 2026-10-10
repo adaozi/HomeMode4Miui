@@ -137,8 +137,12 @@ fun GraceLauncherRoute(viewModel: GraceHomeViewModel, hostActivity: Activity? = 
     val backDispatcherOwner = remember(hostLifecycleOwner) {
         HostBackPressedDispatcherOwner(hostLifecycleOwner.lifecycle)
     }
+    // 上游同步 v1.1.8：LocalListAppearance 全局提供（行标签字号/字体/颜色、名字可见性；
+    // 对齐上游 LauncherScreen 根 provider 位置）。
+    val listAppearanceState = viewModel.uiState.collectAsState()
     androidx.compose.runtime.CompositionLocalProvider(
-        androidx.activity.compose.LocalOnBackPressedDispatcherOwner provides backDispatcherOwner
+        androidx.activity.compose.LocalOnBackPressedDispatcherOwner provides backDispatcherOwner,
+        com.galaxyrio.gracelauncher.ui.components.LocalListAppearance provides listAppearanceState.value.settings.listAppearance
     ) {
         GraceLauncherRouteContent(viewModel, hostActivity)
     }
@@ -539,7 +543,9 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 homeLayout = state.settings.homeLayout,
                 clockEnabled = state.settings.clockEnabled,
                 clockStyle = state.settings.clockStyle,
-                hideFavoriteNames = state.settings.hideFavoriteNames,
+                // 上游同步 v1.1.8：列表外观大模型进 HomeScreen（行距/边距/字号/名字可见性）
+                listAppearance = state.settings.listAppearance,
+                shortcutsFolders = state.settings.shortcutsFolders,
                 allowHapticFeedback = true,
                 onLaunchApp = { app -> launchApp(app) },
                 onAppDetails = viewModel::openAppDetails,
@@ -620,6 +626,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         // （不绘制/不命中/无语义，等价原版 retainedPage(visible=false)）。
         if (!editingHome && !pickerOpen && searchAlpha < 1f) AlphabetRail(
             autoHide = state.settings.hideAlphabet && !drawerOpen,
+            // 上游同步 v1.1.8：A-Z 列表自定义外观（字形/间距/几何）直达桌面 rail
+            alphabet = state.settings.listAppearance.alphabet,
             letters = model.letters,
             selectedLetter = if (drawerOpen) selectedLetter else null,
             height = railHeight,

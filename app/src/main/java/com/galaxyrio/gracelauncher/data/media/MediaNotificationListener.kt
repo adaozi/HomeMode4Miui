@@ -8,6 +8,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.annotation.MainThread
 import com.galaxyrio.gracelauncher.data.notifications.appNotifications
+import com.galaxyrio.gracelauncher.data.notifications.AppNotificationRanking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -99,11 +100,18 @@ class MediaNotificationListener : NotificationListenerService() {
         appNotifications.removed(sbn.key)
     }
     override fun onNotificationRankingUpdate(rankingMap: RankingMap) { updateAppRanking(rankingMap) }
+    // 上游同步 v1.1.8：ranking 回调改返回 AppNotificationRanking（新增 silent 维度，
+    // 供 ShortcutsFoldersSettings 静默/普通通知显示策略消费）。桥挂点不变。
     private fun updateAppRanking(rankingMap: RankingMap?) {
         appNotifications.ranking { key ->
             val ranking = Ranking()
-            rankingMap == null || !rankingMap.getRanking(key, ranking) ||
-                (!ranking.isSuspended && ranking.importance != NotificationManager.IMPORTANCE_NONE)
+            if (rankingMap == null || !rankingMap.getRanking(key, ranking)) AppNotificationRanking()
+            else AppNotificationRanking(
+                visible = !ranking.isSuspended && ranking.importance != NotificationManager.IMPORTANCE_NONE,
+                // Use the system's per-notification importance, not sound/vibration or DND:
+                // muting the phone does not turn ordinary messages into silent channels.
+                silent = ranking.importance in NotificationManager.IMPORTANCE_MIN..NotificationManager.IMPORTANCE_LOW,
+            )
         }
     }
     override fun onListenerDisconnected() {

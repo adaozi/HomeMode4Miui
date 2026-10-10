@@ -15,6 +15,7 @@ internal class FavoritesReorderState(
     private val list: LazyListState,
     initialKeys: List<String>,
     private val commit: (List<String>) -> Unit,
+    private val canMove: (String, String) -> Boolean = { _, _ -> true },
     private val feedback: () -> Unit,
 ) {
     var keys by mutableStateOf(initialKeys)
@@ -66,7 +67,7 @@ internal class FavoritesReorderState(
         if (draggingKey != null) return false
         val from = keys.indexOf(key)
         val to = from + delta
-        if (from < 0 || to !in keys.indices) return false
+        if (from < 0 || to !in keys.indices || !canMove(key, keys[to])) return false
         move(from, to)
         originalKeys = keys
         commit(keys)
@@ -101,7 +102,7 @@ internal class FavoritesReorderState(
         val from = keys.indexOf(key)
         val indices = keys.mapIndexed { index, value -> itemKey(value) to index }.toMap()
         val target = list.layoutInfo.visibleItemsInfo
-            .filter { it.key in indices }
+            .filter { it.key in indices && canMove(key, keys[indices.getValue(it.key as String)]) }
             .minByOrNull { abs(center - (it.offset + it.size / 2f)) } ?: return
         val to = indices[target.key as? String ?: return] ?: return
         val targetCenter = target.offset + target.size / 2f

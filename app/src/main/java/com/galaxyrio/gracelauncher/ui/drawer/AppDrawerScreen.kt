@@ -47,11 +47,16 @@ import androidx.compose.ui.unit.sp
 import com.homemode4miui.R // P2：模块 namespace 为 com.homemode4miui，R 类随之（原版为 com.galaxyrio.gracelauncher.R）
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherFolder
+import com.galaxyrio.gracelauncher.data.ShortcutsFoldersSettings
 import com.galaxyrio.gracelauncher.data.notifications.AppNotification
 import com.galaxyrio.gracelauncher.ui.components.AppRowGestures
 import com.galaxyrio.gracelauncher.ui.components.FolderRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherAppRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherLayout
+import com.galaxyrio.gracelauncher.ui.components.LocalListAppearance
+import com.galaxyrio.gracelauncher.ui.components.startPadding
+import com.galaxyrio.gracelauncher.ui.components.endPadding
+import com.galaxyrio.gracelauncher.ui.components.listLabelStyle
 import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
 
 @Composable
@@ -72,8 +77,13 @@ fun AppDrawerScreen(
     onEditFolder: (LauncherFolder) -> Unit = {},
     // P6（B6.3）：行内通知预览（快照桥下发；空 map = 无通知/监听未授权，行自然无预览）
     notifications: Map<String, List<AppNotification>> = emptyMap(),
+    // 上游同步 v1.1.8：ShortcutsFoldersSettings（通知显示策略；swipeLeftToOpenFirst 随 S3/S7）
+    popupSettings: ShortcutsFoldersSettings = ShortcutsFoldersSettings(),
 ) {
     val appearance = LocalLauncherAppearance.current
+    // 上游同步 v1.1.8：列表外观（边距/字号/名字可见性）+ 行标签样式
+    val listAppearance = LocalListAppearance.current
+    val labelStyle = listLabelStyle()
     LazyColumn(
         state = listState,
         modifier = modifier
@@ -83,7 +93,7 @@ fun AppDrawerScreen(
         // may occupy this area after jumping to a later letter. The small, real
         // bottom inset lets LazyColumn naturally clamp sections near the end
         // without clipping scrolling rows above the navigation bar.
-        contentPadding = PaddingValues(start = LauncherLayout.Start, end = LauncherLayout.End, top = topSpace, bottom = 24.dp),
+        contentPadding = PaddingValues(start = listAppearance.startPadding, end = listAppearance.endPadding, top = topSpace, bottom = 24.dp),
         userScrollEnabled = selectedLetter == null,
     ) {
         items(
@@ -109,9 +119,9 @@ fun AppDrawerScreen(
                             .height(44.dp)
                             .padding(start = LauncherLayout.ContentInset, end = LauncherLayout.ContentInset, top = 12.dp)
                             .testTag("section:${item.section}"),
-                        color = appearance.text,
+                        color = labelStyle.color,
                         style = TextStyle(
-                            fontFamily = MaterialTheme.typography.bodyLarge.fontFamily,
+                            fontFamily = labelStyle.fontFamily,
                             fontSize = 18.sp,
                             lineHeight = 24.sp,
                             fontWeight = FontWeight.Normal,
@@ -124,7 +134,11 @@ fun AppDrawerScreen(
                         onLongClick = { onAppDetails(item.app) },
                         onSwipeRight = { onAppShortcuts(item.app, it) },
                         gestures = rowGestures,
-                        notification = notifications[item.app.packageName]?.firstOrNull(),
+                        // 上游同步 v1.1.8：名字可见性 + 通知按 shortcutsFolders 策略过滤
+                        showLabel = listAppearance.showNames(favorites = false),
+                        notification = notifications[item.app.packageName].orEmpty()
+                            .firstOrNull { popupSettings.showsNotification(it.silent, expanded = false) }
+                            .takeUnless { item.app.user != null },
                     )
                     is DrawerItem.Folder -> FolderRow(
                         folder = item.folder,

@@ -41,11 +41,11 @@ private data class AppScrollMetrics(
 )
 
 /** Estimates use app rows only, never the selected items, widget previews or headings above them. */
-private fun LazyListState.appScrollMetrics(count: Int): AppScrollMetrics? {
+private fun LazyListState.appScrollMetrics(count: Int, keyPrefix: String): AppScrollMetrics? {
     val info = layoutInfo
     if (count == 0 || info.totalItemsCount < count + 1) return null
     val first = info.totalItemsCount - count
-    val rows = info.visibleItemsInfo.filter { it.index >= first && (it.key as? String)?.startsWith("all:") == true }
+    val rows = info.visibleItemsInfo.filter { it.index >= first && (it.key as? String)?.startsWith(keyPrefix) == true }
     if (rows.isEmpty()) return null
     val rowHeight = rows.sumOf { it.size }.toFloat() / rows.size
     if (rowHeight <= 0f) return null
@@ -68,11 +68,22 @@ internal fun AppSelectionScrollbar(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     tag: String,
+) = SelectionScrollbar(state, apps.map { it.section }, enabled, modifier, tag)
+
+/** The same bounded list scrubber also serves the font manager. */
+@Composable
+internal fun SelectionScrollbar(
+    state: LazyListState,
+    labels: List<String>,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    tag: String,
+    keyPrefix: String = "all:",
 ) {
-    val metrics by remember(state, apps.size) { derivedStateOf { state.appScrollMetrics(apps.size) } }
+    val metrics by remember(state, labels.size, keyPrefix) { derivedStateOf { state.appScrollMetrics(labels.size, keyPrefix) } }
     val currentMetrics by rememberUpdatedState(metrics)
-    var dragProgress by remember(apps) { mutableStateOf<Float?>(null) }
-    var dragLetter by remember(apps) { mutableStateOf("") }
+    var dragProgress by remember(labels) { mutableStateOf<Float?>(null) }
+    var dragLetter by remember(labels) { mutableStateOf("") }
     var trackHeight by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val minThumb = with(density) { 36.dp.toPx() }
@@ -86,8 +97,8 @@ internal fun AppSelectionScrollbar(
     fun scrollTo(progress: Float, range: AppScrollMetrics) {
         val pixels = progress.coerceIn(0f, 1f) * range.scrollRange
         // Always reach the last app, even if large text makes some rows taller than others.
-        val index = if (progress >= 1f) apps.lastIndex else (pixels / range.rowHeight).toInt().coerceIn(0, apps.lastIndex)
-        dragLetter = apps[index].section
+        val index = if (progress >= 1f) labels.lastIndex else (pixels / range.rowHeight).toInt().coerceIn(0, labels.lastIndex)
+        dragLetter = labels[index]
         // Synchronous requests coalesce in the next layout, without queuing scroll coroutines.
         state.requestScrollToItem(range.firstAppIndex + index, if (progress >= 1f) 0 else (pixels - index * range.rowHeight).roundToInt())
     }
@@ -110,7 +121,7 @@ internal fun AppSelectionScrollbar(
                         if (range == null || !range.ready) false else { scrollTo(value, range); true }
                     }
                 }
-                .pointerInput(apps, state) {
+                .pointerInput(labels, state) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val range = currentMetrics ?: return@awaitEachGesture
@@ -129,7 +140,7 @@ internal fun AppSelectionScrollbar(
                         down.consume()
                         if (onThumb) {
                             dragProgress = range.progress
-                            dragLetter = apps[(range.progress * range.scrollRange / range.rowHeight).toInt().coerceIn(0, apps.lastIndex)].section
+                            dragLetter = labels[(range.progress * range.scrollRange / range.rowHeight).toInt().coerceIn(0, labels.lastIndex)]
                         } else drag(down.position.y)
                         try {
                             do {

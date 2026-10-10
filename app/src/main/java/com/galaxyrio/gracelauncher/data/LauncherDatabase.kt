@@ -1,8 +1,8 @@
 /*
  * 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
  * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/data/LauncherDatabase.kt
- * P3 移植：实体/DAO/全部 17 个 migration（schema version 18）逐字拷贝 —— 一次到位，
- *   P4 弹层/widget、P6 private space/隐藏应用直接复用，无需再补 migration。
+ * P3 移植：实体/DAO/migration 逐字拷贝。上游同步 v1.1.8（2026-10-11）：schema
+ *   v18 → v21，补 Migration18To19/19To20/20To21（launcher_settings 加列，见 §9.3）。
  * 宿主适配（唯一改动点）：getInstance 的建库路径 —— 原版落宿主 databases 根目录，
  *   本模块对齐底座"独立 DB 目录"惯例（CustomLauncherMode = databases/custom/），
  *   落 databases/custom/grace_launcher.db（Room name 传绝对路径；原版文件名已带
@@ -63,9 +63,14 @@ data class LauncherSettingsEntity(
     @ColumnInfo(defaultValue = "1") val blurWallpaper: Boolean = true,
     @ColumnInfo(defaultValue = "16") val wallpaperBlurRadius: Int = 16,
     val appFontId: String? = null,
+    val fontLibraryJson: String? = null,
+    val listAppearanceJson: String? = null,
     @ColumnInfo(defaultValue = "1") val applyFontToSettings: Boolean = true,
     val privateSpaceJson: String? = null,
+    val workProfileJson: String? = null,
+    val homeGesturesJson: String? = null,
     val searchJson: String? = null,
+    val shortcutsFoldersJson: String? = null,
 )
 
 @Entity(tableName = "hidden_apps")
@@ -122,7 +127,7 @@ abstract class LauncherSettingsDao {
     entities = [LauncherSettingsEntity::class, HiddenAppEntity::class,
         LauncherFolderEntity::class, ItemIconEntity::class,
         SavedShortcutEntity::class, AppPopupEntity::class],
-    version = 18,
+    version = 21,
     exportSchema = true,
 )
 abstract class LauncherDatabase : RoomDatabase() {
@@ -261,6 +266,27 @@ abstract class LauncherDatabase : RoomDatabase() {
             }
         }
 
+        // ---- 上游同步 v1.1.8（2026-10-11）：schema v18 → v21，三条加列 migration 逐字 ----
+        val Migration18To19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN workProfileJson TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN homeGesturesJson TEXT DEFAULT NULL")
+            }
+        }
+
+        val Migration19To20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN fontLibraryJson TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN listAppearanceJson TEXT DEFAULT NULL")
+            }
+        }
+
+        val Migration20To21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN shortcutsFoldersJson TEXT DEFAULT NULL")
+            }
+        }
+
         /**
          * 宿主适配：库文件落 databases/custom/grace_launcher.db（对齐底座独立 DB 目录惯例）。
          * hotfix1（装机 2026-10-08 实锤）：getDatabasePath("custom/x.db") 走 ContextImpl
@@ -284,7 +310,7 @@ abstract class LauncherDatabase : RoomDatabase() {
                 context.applicationContext,
                 LauncherDatabase::class.java,
                 databasePath(context),
-            ).addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18).build().also { instance = it }
+            ).addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21).build().also { instance = it }
         }
     }
 }

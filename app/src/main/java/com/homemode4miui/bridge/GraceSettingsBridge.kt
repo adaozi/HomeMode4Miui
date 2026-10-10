@@ -26,12 +26,15 @@
 package com.homemode4miui.bridge
 
 import com.galaxyrio.gracelauncher.data.FolderPlacement
+import com.galaxyrio.gracelauncher.data.FontLibrary
 import com.galaxyrio.gracelauncher.data.GraceButtonSettings
+import com.galaxyrio.gracelauncher.data.ListAppearance
+import com.galaxyrio.gracelauncher.data.ShortcutsFoldersSettings
 import com.galaxyrio.gracelauncher.data.IconDesign
 import com.galaxyrio.gracelauncher.data.ItemIcon
 import com.galaxyrio.gracelauncher.data.LauncherFolder
 import com.galaxyrio.gracelauncher.data.LauncherSettings
-import com.galaxyrio.gracelauncher.data.PrivateSpaceSettings
+import com.galaxyrio.gracelauncher.data.ProfileSettings
 import com.galaxyrio.gracelauncher.data.SearchSettings
 import com.galaxyrio.gracelauncher.data.ThemeMode
 import com.galaxyrio.gracelauncher.data.WallpaperTextMode
@@ -147,6 +150,11 @@ object GraceSettingsBridge {
         .put("appFontId", s.appFontId ?: JSONObject.NULL)
         .put("applyFontToSettings", s.applyFontToSettings)
         .put("privateSpaceJson", s.privateSpace.encode())
+        .put("workProfileJson", s.workProfile.encode())
+        .put("homeGesturesJson", s.homeGestures.encode())
+        .put("fontLibraryJson", s.fontLibrary.encode())
+        .put("listAppearanceJson", s.listAppearance.encode())
+        .put("shortcutsFoldersJson", s.shortcutsFolders.encode())
         .put("searchJson", s.search.encode())
 
     /** 行解码（模块侧快照种子）。 */
@@ -182,7 +190,12 @@ object GraceSettingsBridge {
         wallpaperBlurRadius = v.optInt("wallpaperBlurRadius", 16),
         appFontId = v.opt("appFontId") as? String,
         applyFontToSettings = v.optBoolean("applyFontToSettings", true),
-        privateSpace = PrivateSpaceSettings.decode(v.opt("privateSpaceJson") as? String),
+        privateSpace = ProfileSettings.decode(v.opt("privateSpaceJson") as? String),
+        workProfile = ProfileSettings.decode(v.opt("workProfileJson") as? String, ProfileSettings.workDefaults()),
+        homeGestures = GraceButtonSettings.decode(v.opt("homeGesturesJson") as? String, GraceButtonSettings.homeDefaults()),
+        fontLibrary = FontLibrary.decode(v.opt("fontLibraryJson") as? String, v.opt("appFontId") as? String),
+        listAppearance = ListAppearance.decode(v.opt("listAppearanceJson") as? String, v.optBoolean("hideFavoriteNames", false)),
+        shortcutsFolders = ShortcutsFoldersSettings.decode(v.opt("shortcutsFoldersJson") as? String),
         search = SearchSettings.decode(v.opt("searchJson") as? String),
     )
 
@@ -224,7 +237,12 @@ object GraceSettingsBridge {
         if (delta.has("wallpaperBlurRadius")) set { it.copy(wallpaperBlurRadius = delta.getInt("wallpaperBlurRadius")) }
         if (delta.has("appFontId")) set { it.copy(appFontId = delta.opt("appFontId") as? String) }
         if (delta.has("applyFontToSettings")) set { it.copy(applyFontToSettings = delta.getBoolean("applyFontToSettings")) }
-        if (delta.has("privateSpaceJson")) set { it.copy(privateSpace = PrivateSpaceSettings.decode(delta.optString("privateSpaceJson"))) }
+        if (delta.has("privateSpaceJson")) set { it.copy(privateSpace = ProfileSettings.decode(delta.optString("privateSpaceJson"))) }
+        if (delta.has("workProfileJson")) set { it.copy(workProfile = ProfileSettings.decode(delta.optString("workProfileJson"), ProfileSettings.workDefaults())) }
+        if (delta.has("homeGesturesJson")) set { it.copy(homeGestures = GraceButtonSettings.decode(delta.optString("homeGesturesJson"), GraceButtonSettings.homeDefaults())) }
+        if (delta.has("fontLibraryJson")) set { it.copy(fontLibrary = FontLibrary.decode(delta.optString("fontLibraryJson"), it.appFontId)) }
+        if (delta.has("listAppearanceJson")) set { it.copy(listAppearance = ListAppearance.decode(delta.optString("listAppearanceJson"), it.hideFavoriteNames)) }
+        if (delta.has("shortcutsFoldersJson")) set { it.copy(shortcutsFolders = ShortcutsFoldersSettings.decode(delta.optString("shortcutsFoldersJson"))) }
         if (delta.has("searchJson")) set { it.copy(search = SearchSettings.decode(delta.optString("searchJson"))) }
         return s
     }

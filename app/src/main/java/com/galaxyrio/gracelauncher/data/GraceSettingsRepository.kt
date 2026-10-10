@@ -104,6 +104,9 @@ class GraceSettingsRepository(context: Context) {
                     blurWallpaper = next.blurWallpaper,
                     wallpaperDimAmount = next.wallpaperDimAmount,
                     wallpaperBlurRadius = next.wallpaperBlurRadius,
+                    // 上游同步 v1.1.8（S2）：列表外观 + 弹层/通知策略列（schema v21）
+                    listAppearanceJson = next.listAppearance.encode(),
+                    shortcutsFoldersJson = next.shortcutsFolders.encode(),
                 ))
                 next
             }
@@ -146,6 +149,9 @@ class GraceSettingsRepository(context: Context) {
         blurWallpaper = settings.blurWallpaper,
         wallpaperDimAmount = settings.wallpaperDimAmount,
         wallpaperBlurRadius = settings.wallpaperBlurRadius,
+        // 上游同步 v1.1.8（S2）：新列种子
+        listAppearanceJson = settings.listAppearance.encode(),
+        shortcutsFoldersJson = settings.shortcutsFolders.encode(),
     )
 
     private fun LauncherSettingsEntity.toGraceSettings() = GraceHomeSettings.decode(
@@ -169,5 +175,8 @@ class GraceSettingsRepository(context: Context) {
         blurWallpaper = blurWallpaper,
         wallpaperDimAmount = wallpaperDimAmount,
         wallpaperBlurRadius = wallpaperBlurRadius,
+        // 上游同步 v1.1.8（S2）：新列读出
+        listAppearanceJson = listAppearanceJson,
+        shortcutsFoldersJson = shortcutsFoldersJson,
     )
 }

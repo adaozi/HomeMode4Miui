@@ -44,6 +44,14 @@ class FavoritesStore internal constructor(private val preferences: SharedPrefere
         return updated
     }
 
+    /** External pin requests add an item; repeating a request must never toggle it off. */
+    @Synchronized
+    fun add(appKey: String, apps: List<LauncherApp>): List<String> {
+        val updated = (favoritesFor(apps) + appKey).distinct()
+        save(updated)
+        return updated
+    }
+
     fun reorder(requested: List<String>, current: List<String>): List<String> {
         // Only reorder existing members. The editor omits hidden/uninstalled apps;
         // leave their slots intact so unhiding or reinstalling restores them.

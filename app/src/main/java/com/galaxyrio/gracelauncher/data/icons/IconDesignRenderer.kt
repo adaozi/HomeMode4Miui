@@ -43,13 +43,20 @@ internal class IconLayers(
     @Synchronized
     fun symbol(foregroundColor: Int?, themeUnsupported: Boolean, invertBackgroundDetection: Boolean = false): Bitmap {
         if (foregroundColor == null || (monochrome == null && !themeUnsupported)) return foreground
-        val key = Triple(foregroundColor, themeUnsupported, invertBackgroundDetection)
+        // Adaptive artwork already supplies the symbol's coverage. Luminance
+        // extraction (and inversion) is only needed for flattened images.
+        val invert = !layered && monochrome == null && invertBackgroundDetection
+        val key = Triple(foregroundColor, themeUnsupported, invert)
         if (tintedKey == key) tinted?.let { return it }
         val result = createBitmap(original.width, original.height).also {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
                 colorFilter = PorterDuffColorFilter(foregroundColor, PorterDuff.Mode.SRC_IN)
             }
-            val mask = monochrome ?: if (invertBackgroundDetection) invertedMonochrome else normalizedMonochrome
+            val mask = monochrome ?: when {
+                layered -> foreground
+                invert -> invertedMonochrome
+                else -> normalizedMonochrome
+            }
             Canvas(it).drawBitmap(mask, 0f, 0f, paint)
         }
         tintedKey = key
@@ -89,7 +96,7 @@ internal fun renderDesignedIcon(layers: IconLayers, design: IconDesign, dynamicB
     val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     val mask = if (style.shape == IconShape.None) layers.originalMask ?: if (style.addTray)
         iconShapePath(IconShape.Circle, size = side.toFloat()) else null
-        else iconShapePath(style.shape, style.cookieSides, side.toFloat())
+        else iconShapePath(style.shape, style.cookieSides, side.toFloat(), style.pebbleRoundness, style.squareCornerRadius)
     mask?.let(canvas::clipPath)
     val canTheme = style.themeIcons && (layers.monochrome != null || style.themeUnsupportedIcons)
     val background = style.background?.resolve(dynamicBackground, themeBackground)
@@ -108,8 +115,11 @@ internal fun renderDesignedIcon(layers: IconLayers, design: IconDesign, dynamicB
     val centerX = side * (0.5f + style.x / 100f)
     val centerY = side * (0.5f + style.y / 100f)
     val half = side * scale / 2f
+    canvas.save()
+    canvas.rotate(style.rotation, centerX, centerY)
     canvas.drawBitmap(layers.symbol(foreground, style.themeUnsupportedIcons, style.invertBackgroundDetection), null,
         RectF(centerX - half, centerY - half, centerX + half, centerY + half), paint)
+    canvas.restore()
     return output
 }
 
@@ -119,47 +129,48 @@ private fun hasVisibleSymbol(bitmap: Bitmap): Boolean {
     return pixels.count { Color.alpha(it) > 32 } >= pixels.size / 100
 }
 
-/** A normalized grayscale surface becomes an alpha mask, tinted like a native monochrome layer. */
+/** Extract dark ink from a flat image; invert selects light ink instead. */
 internal fun normalizedMonochrome(bitmap: Bitmap, invert: Boolean = false): Bitmap {
-    val grayscale = recolorGrayscale(bitmap, Color.BLACK, Color.WHITE)
-    val pixels = IntArray(bitmap.width * bitmap.height)
-    grayscale.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-    grayscale.recycle()
-    for (index in pixels.indices) {
-        val pixel = pixels[index]
-        val foreground = if (invert) 255 - Color.red(pixel) else Color.red(pixel)
-        pixels[index] = Color.argb(Color.alpha(pixel) * foreground / 255, 255, 255, 255)
-    }
-    return Bitmap.createBitmap(pixels, bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-}
-
-/** Normalize only visible pixels; transparent padding must not compress the luminance range. */
-internal fun recolorGrayscale(bitmap: Bitmap, start: Int, end: Int): Bitmap {
     val pixels = IntArray(bitmap.width * bitmap.height)
     bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-    fun luminance(color: Int): Float = .2126f * Color.red(color) + .7152f * Color.green(color) + .0722f * Color.blue(color)
+    return Bitmap.createBitmap(monochromeMaskPixels(pixels, invert), bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+}
+
+/** ARGB-in/alpha-mask-out, kept independent of Bitmap for pixel-level regression tests. */
+internal fun monochromeMaskPixels(pixels: IntArray, invert: Boolean = false): IntArray {
+    val peakAlpha = pixels.maxOfOrNull { it ushr 24 } ?: 0
+    if (peakAlpha == 0) return IntArray(pixels.size)
+    fun luminance(color: Int): Float = .2126f * ((color ushr 16) and 255) +
+        .7152f * ((color ushr 8) and 255) + .0722f * (color and 255)
     var low = 255f
     var high = 0f
-    for (color in pixels) if (Color.alpha(color) > 0) {
+    // Unpremultiplying almost-transparent edge pixels can produce extreme RGB
+    // values. Using them as endpoints leaves the real background partly opaque.
+    // Most-opaque samples provide stable endpoints, also for translucent images.
+    for (color in pixels) if (color ushr 24 == peakAlpha) {
         val gray = luminance(color)
         low = minOf(low, gray); high = maxOf(high, gray)
     }
     val span = high - low
-    fun channel(from: Int, to: Int, amount: Float) = (from + (to - from) * amount).roundToInt().coerceIn(0, 255)
-    for (index in pixels.indices) {
+    return IntArray(pixels.size) { index ->
         val color = pixels[index]
-        if (Color.alpha(color) == 0) continue
-        val amount = if (span > .001f) ((luminance(color) - low) / span).coerceIn(0f, 1f) else 1f
-        pixels[index] = Color.argb(Color.alpha(color),
-            channel(Color.red(start), Color.red(end), amount),
-            channel(Color.green(start), Color.green(end), amount),
-            channel(Color.blue(start), Color.blue(end), amount))
+        // With no contrast to separate, preserve the source silhouette. Keep
+        // continuous coverage for antialiasing; do not threshold the symbol edge.
+        val coverage = if (span <= .001f) 1f else {
+            val light = ((luminance(color) - low) / span).coerceIn(0f, 1f)
+            if (invert) light else 1f - light
+        }
+        val alpha = ((color ushr 24) * coverage).roundToInt().coerceIn(0, 255)
+        if (alpha == 0) 0 else (alpha shl 24) or 0x00ffffff
     }
-    return Bitmap.createBitmap(pixels, bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
 }
 
-/** Native Material expressive Gem/Cookie paths, with a continuous Samsung-style squircle. */
-internal fun iconShapePath(shape: IconShape, sides: Int = 4, size: Float = 1f): Path {
+/** The superellipse exponent moves from 6 (boxy) to 2 (circular). */
+internal fun pebbleShapePower(roundness: Int): Double = 2.0 / (6.0 - roundness.coerceIn(0, 100) / 25.0)
+
+/** One parameterized mask for rendered icons, picker swatches and the Grace button surface. */
+internal fun iconShapePath(shape: IconShape, sides: Int = 4, size: Float = 1f,
+    pebbleRoundness: Int = IconDesign.DefaultPebbleRoundness, squareCornerRadius: Int = 0): Path {
     val path = when (shape) {
         IconShape.Gem -> MaterialShapes.Gem.toPath()
         IconShape.Cookie -> when (sides) {
@@ -168,16 +179,20 @@ internal fun iconShapePath(shape: IconShape, sides: Int = 4, size: Float = 1f): 
             else -> MaterialShapes.Cookie4Sided
         }.toPath()
         IconShape.Pebble -> Path().apply {
+            val power = pebbleShapePower(pebbleRoundness)
             repeat(128) { index ->
                 val angle = index * Math.PI * 2 / 128
-                fun squircle(value: Double) = (abs(value).pow(.5) * if (value < 0) -1 else 1).toFloat()
+                fun squircle(value: Double) = (abs(value).pow(power) * if (value < 0) -1 else 1).toFloat()
                 val x = .5f + .5f * squircle(cos(angle))
                 val y = .5f + .5f * squircle(sin(angle))
                 if (index == 0) moveTo(x, y) else lineTo(x, y)
             }
             close()
         }
-        IconShape.Square -> Path().apply { addRect(0f, 0f, 1f, 1f, Path.Direction.CW) }
+        IconShape.Square -> Path().apply {
+            val radius = squareCornerRadius.coerceIn(0, 100) / 200f
+            addRoundRect(0f, 0f, 1f, 1f, radius, radius, Path.Direction.CW)
+        }
         IconShape.None, IconShape.Circle -> Path().apply { addCircle(.5f, .5f, .5f, Path.Direction.CW) }
     }
     path.transform(Matrix().apply { setScale(size, size) })

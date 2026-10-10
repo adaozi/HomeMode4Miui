@@ -76,6 +76,14 @@ internal fun ClockPresetFont.family(context: Context): FontFamily {
     return FontFamily(typeface)
 }
 
+// 上游同步 v1.1.8（S2/S5 前置）：字体库 CompositionLocal。上游在 LauncherAppTheme 以
+// settings.fontLibrary 提供值；本模块 S5 字体管理器批次前保持空默认值 ——
+// rememberAppFontFamily(id) 单参语义不变，新设置页（Alphabet/ListAppearance 预览）
+// 对 LocalFontLibrary 的引用可编译。
+internal val LocalFontLibrary = androidx.compose.runtime.staticCompositionLocalOf {
+    com.galaxyrio.gracelauncher.data.FontLibrary()
+}
+
 @Composable
 internal fun rememberAppFontFamily(id: String?): FontFamily = remember(id) {
     when (id) {

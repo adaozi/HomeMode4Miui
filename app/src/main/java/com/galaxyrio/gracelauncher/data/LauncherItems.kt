@@ -38,7 +38,7 @@ data class ItemIcon(val kind: String, val source: String = "", val name: String 
             val value = JSONObject(json)
             ItemIcon(value.getString("kind"), value.optString("source"), value.optString("name"),
                 IconDesign.decode(value.optJSONObject("design")))
-                .takeIf { it.kind in setOf("system", "theme", "pack", "image") }
+                .takeIf { it.kind in setOf("system", "theme", "pack", "image", "symbol") }
         }.getOrNull()
     }
 }

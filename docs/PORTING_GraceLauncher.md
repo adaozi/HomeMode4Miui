@@ -971,3 +971,33 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
 2. 上游新增文件若含宿主侧行为（filesDir/Activity/系统动作），引用点必须走 LocalHostContext（§5 风险登记第一条）；
 3. 新增设置项落 Room 走 §9.3 三条 migration，模块进程设置页经增量桥自动生效（C3 链路零改动）；
 4. 每批次独立可降级，坏了不阻塞主链路；批次完成后 commit + tag + build-fix 闭环。
+
+### sync118（v2.9.24-grace-sync118 / versionCode 57，2026-10-11）—— §9 落地：S1 数据层 + S2 A-Z 列表/列表外观
+
+- [x] **S1 数据层**：Room schema v18→v21（Migration18To19/19To20/20To21 照搬，launcher_settings 加 5 列，装机零破坏）；
+  LauncherSettings 增 fontLibrary/listAppearance/shortcutsFolders/workProfile/homeGestures 5 字段 + gestureSettings/withGestureSettings 助手；
+  GraceButtonSettings 数据模型全量升级 v1.1.8（GraceButtonGesture 七手势 + GraceButtonAction 扩展 + homeDefaults）；
+  PrivateSpaceSettings×2 删除 → ProfileSettings 统一模型（encode 字节级兼容，privateSpaceJson 旧数据无损）；
+  LauncherApp +isWorkProfile/showWorkIndicator；LauncherShortcut.asApp 透传；LauncherItems item_icons 接受 "symbol" kind；
+  FavoritesStore.add()（pin 语义）；LauncherPreferences themedIcons 默认 false；
+  桥三面（encodeRow/decodeRow/applyDelta）+ GraceHomeSettings（listAppearance/shortcutsFolders 字段，SP key 落 grace_launcher_settings）+
+  GraceSettingsRepository（mutate/seed/toGraceSettings 三路径）全链贯通。
+- [x] **S2 A-Z 列表 + 列表外观**：AlphabetRail v1.1.8（+176/−130）整文件同步，桌面 rail 挂 `alphabet = settings.listAppearance.alphabet`
+  （字形/间距/几何自定义直达桌面；leftTouchEnabled 左缘滑动随 S3）；LauncherLayout v1.1.8
+  （LocalListAppearance + startPadding/endPadding + listLabelStyle；默认 36/56dp 与旧 LauncherLayout.Start/End 数值相等，视觉零回退）；
+  LauncherComponents v1.1.8 整文件同步（行拉拽反馈 leftPull、popupsEnabled、work/private 角标——顺带补齐模块 P1 裁剪掉
+  的私有空间角标块）；AppDrawerScreen/HomeScreen listAppearance 接线（contentPadding/showNames/labelStyle/通知过滤）；
+  LauncherRow 通知条件 `app.user == null`；PopupSwipeIntent v1.1.8（opensFirst/firstItemPullDistance/resistedPopupPull，S3/S7 消费）；
+  AppNotificationStore/AppNotificationRanking（+silent 维度）+ MediaNotificationListener ranking 回调适配（桥挂点不变）；
+  设置面：AlphabetSettings/ListAppearanceSettings/ShortcutsFoldersSettingsScreen/FontLibrarySettings（v1.1.8 原版 + R 换名）注册进
+  LauncherSettingsScreen（透明背景路由列表同步）；ThemeSettings v1.1.8（字体/隐藏行迁移到新页）；模块时钟字体选择器
+  改名 ClockFontPickerDialog/ClockFontOption 共存；GraceButton 页面旧结构 + withTarget(gesture) 适配（S4 整页升级）；
+  LocalFontLibrary 占位定义（S5 接管）；LauncherFonts themedIcons 默认对齐；ProductivitySettings 索引重排
+  （WorkProfile/Gestures 行随 S8/S3 恢复）；strings EN/zh 各 +46 条；drawables +9（ms_gesture/ms_work 等）。
+- [x] 构建验证：assembleRelease 通过，7.84MB（R8 后），versionCode 57。
+- [ ] **装机回归清单**：① A-Z rail 自定义（字形/自由移动）实时生效；② 列表外观（行距/边距/字号/名字可见性）即时刷新；
+  ③ favorites/抽屉行标签可见性切换；④ 通知预览按 shortcutsFolders 策略过滤（含 silent 通道）；⑤ Room v18→v21 迁移
+  （重启桌面后设置全保留）；⑥ 抽屉行 press/pull 反馈与弹层 reveal 不回归（scrubfix 帧时序修复保留完好）。
+- [ ] **降级登记**：① Gestures/WorkProfile 两行暂缺（S3/S8 恢复）；② Fonts 页行点击暂无跳转（S5 恢复，页本体
+  FontLibrarySettings 已就位）；③ 新页预览的 LocalFontLibrary 为空默认（字体库选择不影响预览字体，S5 接管）；
+  ④ 左缘 A-Z 滑动控制（leftTouchEnabled）随 S3；⑤ wallpaperTint 仅数据/模型就位，宿主 dimWallpaper 渲染消费随 S7。

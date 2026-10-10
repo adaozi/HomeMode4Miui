@@ -64,7 +64,7 @@ internal fun IconDesignerPreview(
                     ) {
                         LauncherIcon(LauncherSymbol.Plus, Modifier.size(32.dp), MaterialTheme.colorScheme.onPrimaryContainer)
                     }
-                } else DesignerPreviewIcon(selectedApp, layers, design, dynamicColors, 80.dp * (design.iconSize / 100f),
+                } else DesignerPreviewIcon(selectedApp, layers, design, dynamicColors, 160.dp * (design.iconSize / 100f),
                     Modifier.testTag("icon_designer_selected_app"), draggable = enabled, onChange = onChange, themeColors = themeColors)
             }
         }

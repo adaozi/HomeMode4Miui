@@ -58,6 +58,7 @@ import androidx.navigation.navArgument
 import com.homemode4miui.R
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.GraceButtonAction
+import com.galaxyrio.gracelauncher.data.GraceButtonGesture
 import com.galaxyrio.gracelauncher.data.GraceButtonTarget
 import com.galaxyrio.gracelauncher.ui.components.ShortcutPickerScreen
 import com.galaxyrio.gracelauncher.ui.LauncherActions
@@ -75,6 +76,8 @@ internal enum class SettingsPage {
     Root, Productivity, Clock, ClockStyle, Calendar, Weather, Themes, Advanced, About, HiddenApps, Folders, FolderEditor,
     Changelog, Licenses, AppLicense, IconPacks, IconDesigner, IconDesignerApp, PrivateSpace, PrivateSpaceEditor, Search,
     MediaPlayer, GraceButton, GraceTapApp, GraceLongApp, GraceTapShortcut, GraceLongShortcut,
+    // 上游同步 v1.1.8（S2）：A-Z 列表 + 列表外观设置页（Fonts 页随 S5 批次补）
+    ListAppearance, Alphabet, ShortcutsFolders,
 }
 
 /** Navigation owns each page's saved state and seekable predictive-back transition. */
@@ -151,7 +154,7 @@ fun LauncherSettingsScreen(
         modifier = modifier.fillMaxSize().testTag("settings_navigation").graphicsLayer {
             alpha = 1f - rootExit.value
             translationX = distance * direction * rootExit.value
-        }.background(if (currentEntry?.destination?.route in listOf(SettingsPage.ClockStyle.name, SettingsPage.IconDesigner.name))
+        }.background(if (currentEntry?.destination?.route in listOf(SettingsPage.ClockStyle.name, SettingsPage.IconDesigner.name, SettingsPage.ListAppearance.name, SettingsPage.Alphabet.name))
             Color.Transparent else MaterialTheme.colorScheme.surfaceContainer),
         enterTransition = { settingsEnter(distance) },
         exitTransition = { settingsExit(distance) },
@@ -196,7 +199,10 @@ fun LauncherSettingsScreen(
                         AppSelectionSettings(uiState, actions, back, title = stringResource(R.string.grace_button_open_app),
                             tag = "grace_button_app", selectedKey = target.itemKey.takeIf { target.action == GraceButtonAction.App }, excludeOwnApp = false,
                             onSelect = { key -> if (isCurrent() && key != null) {
-                                actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(longClick, GraceButtonTarget(GraceButtonAction.App, key))) }
+                                // 上游同步 v1.1.8：withTarget(gesture, ...)
+                                actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(
+                                    if (longClick) GraceButtonGesture.LongPress else GraceButtonGesture.Tap,
+                                    GraceButtonTarget(GraceButtonAction.App, key))) }
                                 back()
                             } })
                     }
@@ -211,7 +217,8 @@ fun LauncherSettingsScreen(
                                 pickerScope.launch {
                                     try {
                                         if (actions.rememberShortcut(app) && isCurrent()) {
-                                            actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(longClick,
+                                            actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(
+                                                if (longClick) GraceButtonGesture.LongPress else GraceButtonGesture.Tap,
                                                 GraceButtonTarget(GraceButtonAction.Shortcut, app.key))) }
                                             back()
                                         }
@@ -220,8 +227,14 @@ fun LauncherSettingsScreen(
                             })
                     }
                     SettingsPage.Weather -> WeatherSettings(uiState, actions, back)
+                    SettingsPage.ListAppearance -> ListAppearanceSettings(uiState, actions, back) { }
+                    SettingsPage.ShortcutsFolders -> ShortcutsFoldersSettingsScreen(uiState, actions, back)
+                    SettingsPage.Alphabet -> AlphabetSettings(uiState, actions, back) { }
                     SettingsPage.Themes -> ThemeSettings(uiState, actions, back,
-                        onClockStyle = { navigate(SettingsPage.ClockStyle) }, onIconPacks = { navigate(SettingsPage.IconPacks) })
+                        onClockStyle = { navigate(SettingsPage.ClockStyle) }, onIconPacks = { navigate(SettingsPage.IconPacks) },
+                        // Fonts 页随 S5 字体管理器批次补齐，先挂空导航（页面行仍显示，点击无跳转）
+                        onFonts = { }, onListAppearance = { navigate(SettingsPage.ListAppearance) },
+                        onAlphabet = { navigate(SettingsPage.Alphabet) })
                     SettingsPage.ClockStyle -> ClockStyleSettings(uiState, actions, back)
                     SettingsPage.IconPacks -> IconPackSettings(uiState, actions, back) { navigate(SettingsPage.IconDesigner) }
                     SettingsPage.IconDesigner -> {

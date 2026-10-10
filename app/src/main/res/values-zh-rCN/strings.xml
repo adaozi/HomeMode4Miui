@@ -387,4 +387,65 @@
     <string name="folder_actions">文件夹操作</string>
     <string name="folder_contents_empty">为此文件夹选择应用或小组件。</string>
     <string name="recently_installed">最近安装</string>
+
+    <!-- GraceLauncher settings strings (zh-CN)（C 组设置全家桶搬运） -->
+    <string name="alphabet_automatic_spacing">自动排列 · %1$d dp 间距</string>
+    <string name="alphabet_bottom">下限位置</string>
+    <string name="alphabet_free_movement">字母表自由移动</string>
+    <string name="alphabet_indicator_shape">指示器形状</string>
+    <string name="alphabet_letter_color">字母颜色</string>
+    <string name="alphabet_scroller">字母快速索引</string>
+    <string name="alphabet_top">上限位置</string>
+    <string name="back_home">返回主屏幕</string>
+    <string name="icon_designer_pebble_roundness">圆滑度</string>
+    <string name="icon_designer_rotation">旋转</string>
+    <string name="icon_designer_suggestions">建议</string>
+    <string name="jump_to_letter">%1$s 开头的应用</string>
+    <string name="jump_to_section">跳转到 %1$s</string>
+    <string name="list_app_spacing">应用间距</string>
+    <string name="list_color_default">跟随壁纸文字颜色</string>
+    <string name="list_font_color">字体颜色</string>
+    <string name="list_icon_name_gap">图标与名称间距</string>
+    <string name="list_left_alphabet">从左侧使用字母表</string>
+    <string name="list_names_app_list">仅应用列表</string>
+    <string name="list_names_both">收藏与应用列表</string>
+    <string name="list_names_favorites">仅收藏</string>
+    <string name="list_show_names">显示应用名称</string>
+    <string name="list_side_padding">列表两侧边距</string>
+    <string name="popup_swipe_left_first">左滑打开第一项</string>
+    <string name="settings_alphabet">A-Z 字母表</string>
+    <string name="settings_favorites_app_list">收藏与应用列表</string>
+    <string name="settings_gestures">手势</string>
+    <string name="settings_wallpaper_dim_color">遮罩颜色</string>
+    <string name="settings_wallpaper_dim_color_auto">自动使用主题色调</string>
+    <string name="shortcuts_folders_title">快捷方式与文件夹</string>
+    <string name="work_profile_title">工作资料</string>
+
+
+    <!-- GraceLauncher settings strings (zh-CN)（C 组设置全家桶搬运） -->
+    <string name="font_add">添加字体</string>
+    <string name="font_all">所有字体</string>
+    <string name="font_delete">删除</string>
+    <string name="font_delete_summary">删除 %1$d 个导入的字体？使用这些字体的组件将恢复为默认字体。</string>
+    <string name="font_delete_title">删除字体？</string>
+    <string name="font_search">搜索字体</string>
+    <string name="icon_edit_default">默认图标</string>
+    <string name="icon_suggestion_add">添加</string>
+    <string name="icon_suggestion_bolt">闪电</string>
+    <string name="icon_suggestion_list">项目列表</string>
+    <string name="icon_suggestion_notifications">通知</string>
+    <string name="icon_suggestion_power">电源</string>
+
+
+    <string name="alphabet_free_movement_summary">滑过任一端点时带动字母表平移，松手后回到起始位置</string>
+    <string name="icon_designer_square_corner_radius">圆角大小</string>
+    <string name="list_left_alphabet_summary">沿左侧边缘滑动，操作右侧的字母表</string>
+
+    <string name="popup_normal_notifications">普通通知</string>
+    <string name="popup_notification_expanded">仅展开时显示</string>
+    <string name="popup_notification_hidden">不显示</string>
+    <string name="popup_notification_normal">正常显示</string>
+    <string name="popup_silent_notifications">静默通知</string>
+    <string name="popup_swipe_left_first_summary">打开弹出窗口中的第一个快捷方式、应用或小组件所属应用</string>
+    <string name="shortcuts_folders_enable">启用应用弹出窗口</string>
 </resources>

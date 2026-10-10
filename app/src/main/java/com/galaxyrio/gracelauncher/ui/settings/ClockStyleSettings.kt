@@ -97,7 +97,7 @@ internal fun ClockStyleSettings(uiState: LauncherUiState, actions: LauncherActio
         }
     }
     if (dialog == "font" && draft.layout.allowsCustomFont) {
-        FontPickerDialog(fonts, face.fontId,
+        ClockFontPickerDialog(fonts, face.fontId,
             onSelect = { id -> changeFace { it.copy(fontId = id) }; dialog = null },
             onImport = { dialog = null; picker.launch(arrayOf("*/*")) }, onDismiss = { dialog = null })
     }

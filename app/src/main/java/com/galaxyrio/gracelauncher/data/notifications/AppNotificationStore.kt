@@ -23,7 +23,10 @@ data class AppNotification(
     val canDismiss: Boolean,
     val canOpen: Boolean,
     val icon: Icon? = null,
+    val silent: Boolean = false,
 )
+
+internal data class AppNotificationRanking(val visible: Boolean = true, val silent: Boolean = false)
 
 @MainThread
 internal class AppNotificationStore {
@@ -36,21 +39,23 @@ internal class AppNotificationStore {
     )
     private val entries = linkedMapOf<String, Entry>()
     private var cancel: ((String) -> Boolean)? = null
-    private var visible: (String) -> Boolean = { true }
+    private var classification: (String) -> AppNotificationRanking = { AppNotificationRanking() }
     private var revision = 0L
     private val _state = MutableStateFlow<Map<String, List<AppNotification>>>(emptyMap())
     val state = _state.asStateFlow()
 
-    fun connected(notifications: List<StatusBarNotification>, cancelNotification: (String) -> Boolean) {
+    fun connected(notifications: List<StatusBarNotification>,
+        ranking: (String) -> AppNotificationRanking = { AppNotificationRanking() }, cancelNotification: (String) -> Boolean) {
         entries.clear()
         cancel = cancelNotification
-        visible = { true }
+        classification = ranking
         notifications.forEach { sbn -> parse(sbn)?.let { entries[sbn.key] = it } }
         publish()
     }
 
-    fun posted(sbn: StatusBarNotification) {
+    fun posted(sbn: StatusBarNotification, ranking: (String) -> AppNotificationRanking = classification) {
         if (cancel == null) return
+        classification = ranking
         val entry = parse(sbn)
         if (entry == null) entries.remove(sbn.key) else entries[sbn.key] = entry
         publish()
@@ -58,21 +63,21 @@ internal class AppNotificationStore {
 
     fun removed(key: String) { if (entries.remove(key) != null) publish() }
 
-    fun ranking(isVisible: (String) -> Boolean) { visible = isVisible; publish() }
+    fun ranking(ranking: (String) -> AppNotificationRanking) { classification = ranking; publish() }
 
     fun disconnected() {
-        cancel = null; visible = { true }; entries.clear(); _state.value = emptyMap()
+        cancel = null; classification = { AppNotificationRanking() }; entries.clear(); _state.value = emptyMap()
     }
 
     fun dismiss(key: String, revision: Long): Boolean {
-        val entry = entries[key]?.takeIf { it.display.revision == revision && it.display.canDismiss && visible(key) } ?: return false
+        val entry = entries[key]?.takeIf { it.display.revision == revision && it.display.canDismiss && classification(key).visible } ?: return false
         // Wait for onNotificationRemoved; the system owns dismissal, including deleteIntent.
         // In particular, do not cancel an app-wide group when swiping just one child.
         return cancel?.invoke(entry.display.key) == true
     }
 
     fun open(context: Context, key: String, revision: Long): Boolean {
-        val entry = entries[key]?.takeIf { it.display.revision == revision && visible(key) } ?: return false
+        val entry = entries[key]?.takeIf { it.display.revision == revision && classification(key).visible } ?: return false
         val intent = entry.contentIntent ?: return false
         return runCatching {
             intent.send(context, 0, null, null, null, null, mediaPlayerLaunchOptions().toBundle())
@@ -81,7 +86,10 @@ internal class AppNotificationStore {
     }
 
     private fun publish() {
-        val eligible = entries.values.filter { visible(it.display.key) }
+        val eligible = entries.values.mapNotNull { entry ->
+            val ranking = classification(entry.display.key)
+            if (ranking.visible) entry.copy(display = entry.display.copy(silent = ranking.silent)) else null
+        }
         val groupsWithChildren = eligible.filterNot { it.summary }.map { it.display.packageName to it.groupKey }.toSet()
         _state.value = eligible.filterNot { it.summary && (it.display.packageName to it.groupKey) in groupsWithChildren }
             .map { it.display }.sortedByDescending { it.postedAt }.groupBy { it.packageName }

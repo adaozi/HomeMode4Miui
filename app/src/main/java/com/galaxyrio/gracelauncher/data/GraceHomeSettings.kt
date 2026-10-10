@@ -1,7 +1,7 @@
 /*
  * P1 精简设置模型（新建文件，非搬运）—— PORTING_GraceLauncher.md B1.4 偏好落地。
  *
- * 原版 LauncherSettings（data/LauncherSettings.kt）依赖 ItemIcon / PrivateSpaceSettings /
+ * 原版 LauncherSettings（data/LauncherSettings.kt）依赖 ItemIcon / ProfileSettings /
  * SearchSettings / GraceButtonSettings 等 P4/P6 资产，且由 Room（LauncherSettingsRepository）
  * 持久化——整体留待 P3。本类只承载首页渲染面用到的字段，走 SP 持久化：
  *   - clockStyle 用原版 ClockStyle.encode()/decode() JSON 格式落盘，P3 切 Room 时
@@ -48,7 +48,7 @@ data class GraceHomeSettings(
     /** B6.4：启用的图标包（fallback 顺序；原版 iconPackPackages JSON 列）。 */
     val iconPackPackages: List<String> = emptyList(),
     /** B6.5：Private Space 设置（JSON 列 privateSpaceJson；完整 UI 载体等 folders 阶段）。 */
-    val privateSpace: PrivateSpaceSettings = PrivateSpaceSettings(),
+    val privateSpace: ProfileSettings = ProfileSettings(),
     // ---- C 组（hotfix3）：外观字段接通宿主渲染（原版 LauncherSettings 同名列）----
     /** 原版 hideStatusBar：状态栏 autoHide（hotfix6 接通，LauncherSystemBars）。 */
     val hideStatusBar: Boolean = true,
@@ -62,6 +62,11 @@ data class GraceHomeSettings(
     val wallpaperDimAmount: Int = 20,
     /** 原版 wallpaperBlurRadius：模糊半径（默认 16）。 */
     val wallpaperBlurRadius: Int = 16,
+    // ---- 上游同步 v1.1.8（S2）：列表外观 + 弹层/文件夹/通知显示策略 ----
+    /** 原版 listAppearance：行距/边距/字号/名字可见性/A-Z rail 外观（JSON 列 listAppearanceJson）。 */
+    val listAppearance: ListAppearance = ListAppearance(),
+    /** 原版 shortcutsFolders：弹层/文件夹设置 + 通知显示策略（JSON 列 shortcutsFoldersJson）。 */
+    val shortcutsFolders: ShortcutsFoldersSettings = ShortcutsFoldersSettings(),
 ) {
     /** 对齐原版 LauncherSettings.enabledIconPackPackages：空列表 = 系统图标。 */
     val enabledIconPackPackages: List<String>
@@ -78,7 +83,9 @@ data class GraceHomeSettings(
                    hideStatusBar: Boolean = true,
                    hideAlphabet: Boolean = false, dimWallpaper: Boolean = false,
                    blurWallpaper: Boolean = true, wallpaperDimAmount: Int = 20,
-                   wallpaperBlurRadius: Int = 16) = GraceHomeSettings(
+                   wallpaperBlurRadius: Int = 16,
+                   listAppearanceJson: String? = null,
+                   shortcutsFoldersJson: String? = null) = GraceHomeSettings(
             clockEnabled = clockEnabled,
             clockStyle = ClockStyle.decode(clockStyleJson),
             hideFavoriteNames = hideFavoriteNames,
@@ -92,13 +99,15 @@ data class GraceHomeSettings(
             weatherEnabled = weatherEnabled,
             weatherForecastDays = weatherForecastDays.coerceIn(1, 14),
             iconPackPackages = decodeStringList(iconPackPackagesJson),
-            privateSpace = PrivateSpaceSettings.decode(privateSpaceJson),
+            privateSpace = ProfileSettings.decode(privateSpaceJson),
             hideStatusBar = hideStatusBar,
             hideAlphabet = hideAlphabet,
             dimWallpaper = dimWallpaper,
             blurWallpaper = blurWallpaper,
             wallpaperDimAmount = wallpaperDimAmount.coerceIn(0, 100),
             wallpaperBlurRadius = wallpaperBlurRadius.coerceIn(0, 64),
+            listAppearance = ListAppearance.decode(listAppearanceJson, hideFavoriteNames),
+            shortcutsFolders = ShortcutsFoldersSettings.decode(shortcutsFoldersJson),
         )
 
         /** 原版 LauncherSettingsRepository.settingsJson 同构：字符串列表 JSON。 */
@@ -138,6 +147,8 @@ class GraceHomeSettingsStore(context: Context) {
         blurWallpaper = preferences.getBoolean(KEY_BLUR_WALLPAPER, true),
         wallpaperDimAmount = preferences.getInt(KEY_WALLPAPER_DIM, 20),
         wallpaperBlurRadius = preferences.getInt(KEY_WALLPAPER_BLUR_RADIUS, 16),
+        listAppearanceJson = preferences.getString(KEY_LIST_APPEARANCE, null),
+        shortcutsFoldersJson = preferences.getString(KEY_SHORTCUTS_FOLDERS, null),
     )
 
     fun save(settings: GraceHomeSettings) = preferences.edit {
@@ -161,6 +172,8 @@ class GraceHomeSettingsStore(context: Context) {
         putBoolean(KEY_BLUR_WALLPAPER, settings.blurWallpaper)
         putInt(KEY_WALLPAPER_DIM, settings.wallpaperDimAmount)
         putInt(KEY_WALLPAPER_BLUR_RADIUS, settings.wallpaperBlurRadius)
+        putString(KEY_LIST_APPEARANCE, settings.listAppearance.encode())
+        putString(KEY_SHORTCUTS_FOLDERS, settings.shortcutsFolders.encode())
     }
 
     private companion object {
@@ -185,5 +198,7 @@ class GraceHomeSettingsStore(context: Context) {
         const val KEY_BLUR_WALLPAPER = "blur_wallpaper"
         const val KEY_WALLPAPER_DIM = "wallpaper_dim_amount"
         const val KEY_WALLPAPER_BLUR_RADIUS = "wallpaper_blur_radius"
+        const val KEY_LIST_APPEARANCE = "list_appearance"
+        const val KEY_SHORTCUTS_FOLDERS = "shortcuts_folders"
     }
 }

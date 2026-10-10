@@ -1,21 +1,14 @@
 /*
- * P1 裁剪版 —— 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
- * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/ui/components/LauncherComponents.kt
- *
- * 裁剪说明（恢复节点见 PORTING_GraceLauncher.md）：
- *   - folders 阶段：恢复 FolderIcon / FolderRow / AppIcon folderId 兜底分支（原版逐字，
- *     Private Space 指示器仍随 P6 Private Space 阶段）
- *   - P6（B6.3）恢复 LauncherRow notification 分支（AppNotification 桥通道就位）：
- *     label 后缀通知时间 + 正文预览两行 + 行尾 Chevron 快捷方式箭头（原版逐字）
- *   - AppIcon 的 launcherAnimationTarget 挂点 P5 恢复（B5.2）
- *   - 保留 monochromeIcon 渲染分支（模型字段已就位，P1 恒 null 自然走原图）
- *   - 保留 AppRowGestures / 横向拖拽识别（P4 弹层只接回调，无需改结构）
+ * 移植自 GraceLauncher v1.1.8（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
+ * 上游同步 2026-10-11（PORTING_GraceLauncher.md §9）：按上游 v1.1.8 逐字更新。
  */
 package com.galaxyrio.gracelauncher.ui.components
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -31,39 +24,44 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -72,10 +70,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
-import com.homemode4miui.R // P1：模块 namespace 为 com.homemode4miui，R 类随之（原版为 com.galaxyrio.gracelauncher.R）
+import com.homemode4miui.R
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherFolder
 import com.galaxyrio.gracelauncher.data.PrivateSpaceFolderId
+import com.galaxyrio.gracelauncher.data.WorkProfileFolderId
 import com.galaxyrio.gracelauncher.data.RecentlyInstalledFolderId
 import com.galaxyrio.gracelauncher.data.notifications.AppNotification
 import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
@@ -87,9 +86,6 @@ internal val LocalLauncherInputEnabled = staticCompositionLocalOf { true }
 @Composable
 fun AppIcon(app: LauncherApp, modifier: Modifier = Modifier, size: Dp = 38.dp, applyDisplaySize: Boolean = true) {
     val displaySize = size * if (applyDisplaySize) LocalLauncherAppearance.current.iconSize / 100f else 1f
-    // P5（B5.2）：恢复原版动画目标挂点 —— 每个应用图标注册 LauncherIconTarget，
-    // 启动时 capture 真实渲染 artwork 做 thumbnail scale-up（home 标记由
-    // LocalHomeAnimationTarget 提供，仅首页为 true）。
     val iconModifier = if (app.folderId == null) modifier.launcherAnimationTarget(listOf(app.componentName)) else modifier
     Box(iconModifier.size(displaySize)) {
         if (LocalLauncherAppearance.current.themedIcons && app.monochromeIcon != null) {
@@ -105,9 +101,9 @@ fun AppIcon(app: LauncherApp, modifier: Modifier = Modifier, size: Dp = 38.dp, a
         } else if (app.icon != null) {
             Image(bitmap = app.icon, contentDescription = null, modifier = Modifier.size(displaySize))
         } else if (app.folderId != null) {
-            // folders 阶段：恢复原版 folderId 兜底（folder 行/收藏文件夹项的占位图标）
             FolderIcon(Modifier, displaySize, when (app.folderId) {
                 PrivateSpaceFolderId -> LauncherSymbol.Lock
+                WorkProfileFolderId -> LauncherSymbol.Work
                 RecentlyInstalledFolderId -> LauncherSymbol.History2
                 else -> LauncherSymbol.Folder
             })
@@ -127,6 +123,15 @@ fun AppIcon(app: LauncherApp, modifier: Modifier = Modifier, size: Dp = 38.dp, a
                     fontSize = (displaySize.value * 0.43f).sp,
                     fontWeight = FontWeight.Medium,
                 )
+            }
+        }
+        if ((app.isPrivateSpace && app.showPrivateIndicator) || (app.isWorkProfile && app.showWorkIndicator)) {
+            val badgeSize = displaySize * 0.42f
+            Box(Modifier.align(Alignment.BottomEnd).size(badgeSize).testTag("${if (app.isWorkProfile) "work" else "private"}_indicator:${app.key}")
+                .background(MaterialTheme.colorScheme.surface, CircleShape)
+                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f), CircleShape), contentAlignment = Alignment.Center) {
+                LauncherIcon(if (app.isWorkProfile) LauncherSymbol.Work else LauncherSymbol.Encrypted,
+                    Modifier.size(badgeSize * 0.68f), MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -167,16 +172,17 @@ fun LauncherAppRow(
         onPrepare = { gestures.onPrepare(app) },
         onDrag = { bounds, expanded -> gestures.onDrag(app, bounds, expanded) },
         onDragEnd = gestures.onDragEnd,
+        popupsEnabled = gestures.popupsEnabled,
+        onSwipeLeft = gestures.onOpenFirst?.let { open -> { bounds -> open(app, bounds) } },
         openDescription = stringResource(R.string.app_shortcuts),
         detailsDescription = stringResource(R.string.app_actions),
         modifier = modifier,
         highlighted = highlighted,
-        notification = notification.takeIf { app.shortcut == null && !app.isPrivateSpace },
+        notification = notification.takeIf { app.shortcut == null && app.user == null },
         showLabel = showLabel,
     ) { iconModifier -> AppIcon(app, modifier = iconModifier, size = 40.dp) }
 }
 
-/** folders 阶段：恢复原版 FolderRow（LauncherComponents.kt:172-203 逐字）。 */
 @Composable
 fun FolderRow(
     folder: LauncherFolder,
@@ -185,6 +191,7 @@ fun FolderRow(
     modifier: Modifier = Modifier,
     onDrag: (Rect, Boolean) -> Unit = { _, _ -> },
     onDragEnd: (Boolean) -> Unit = {},
+    onSwipeLeft: ((Rect) -> Unit)? = null,
     highlighted: Boolean = false,
     showLabel: Boolean = true,
     app: LauncherApp = folder.asApp(),
@@ -199,6 +206,7 @@ fun FolderRow(
         onPrepare = {},
         onDrag = onDrag,
         onDragEnd = onDragEnd,
+        onSwipeLeft = onSwipeLeft,
         openDescription = stringResource(R.string.open_folder),
         detailsDescription = stringResource(R.string.folder_actions),
         modifier = modifier,
@@ -226,6 +234,8 @@ private fun LauncherRow(
     detailsDescription: String,
     modifier: Modifier,
     highlighted: Boolean,
+    popupsEnabled: Boolean = true,
+    onSwipeLeft: ((Rect) -> Unit)? = null,
     notification: AppNotification? = null,
     showLabel: Boolean = true,
     trailing: (@Composable () -> Unit)? = null,
@@ -233,52 +243,75 @@ private fun LauncherRow(
 ) {
     val appearance = LocalLauncherAppearance.current
     val inputEnabled = LocalLauncherInputEnabled.current
+    val list = LocalListAppearance.current
+    val labelStyle = listLabelStyle()
+    val openFirstDescription = stringResource(R.string.popup_swipe_left_first)
     val currentPrepare by rememberUpdatedState(onPrepare)
     val currentDrag by rememberUpdatedState(onDrag)
     val currentDragEnd by rememberUpdatedState(onDragEnd)
+    val currentSwipeLeft by rememberUpdatedState(onSwipeLeft)
     var bounds by remember { mutableStateOf(Rect.Zero) }
-    var iconBounds by remember { mutableStateOf(Rect.Zero) }
+    var iconCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // Query at activation time: a graphics-layer translation need not trigger layout.
+    fun iconBounds(): Rect = iconCoordinates?.takeIf { it.isAttached }?.boundsInWindow() ?: Rect.Zero
+    var dragging by remember(rowKey) { mutableStateOf(false) }
+    var leftPull by remember(rowKey) { mutableFloatStateOf(0f) }
+    val resistanceDistance = with(LocalDensity.current) { 72.dp.toPx() }
+    val pullOffset by animateFloatAsState(
+        targetValue = resistedPopupPull(leftPull, resistanceDistance),
+        animationSpec = if (dragging) snap() else spring(dampingRatio = 0.58f, stiffness = 420f),
+        label = "launcherRowPull",
+    )
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val highlight by animateColorAsState(
-        // Press feedback comes from Material ripple. Only a selected details
-        // row retains a subtle state layer after the pointer has been released.
-        if (highlighted) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f) else Color.Transparent,
+        // Keep the long-press state layer while a left action is being pulled.
+        if (highlighted || leftPull > 0f) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f) else Color.Transparent,
         animationSpec = tween(100), label = "launcherRowPressSurface",
     )
-    Row(
+    // The hit area stays still; only the surface below follows the finger.
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = LauncherLayout.RowMinHeight)
+            .heightIn(min = 48.dp)
             .testTag(rowKey)
             .onGloballyPositioned { bounds = it.boundsInWindow() }
-            .clip(LauncherLayout.RowShape)
-            .background(highlight)
-            .pointerInput(rowKey, inputEnabled) {
-                if (!inputEnabled) return@pointerInput
+            .pointerInput(rowKey, inputEnabled, popupsEnabled) {
+                if (!inputEnabled || !popupsEnabled) return@pointerInput
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     currentPrepare()
                 }
             }
-            .pointerInput(rowKey, inputEnabled) {
-                if (!inputEnabled) return@pointerInput
-                val swipe = PopupSwipeIntent(reversalSlop = 8.dp.toPx())
-                detectHorizontalDragGestures(
-                    onDragStart = { swipe.reset() },
-                    onDragCancel = {
-                        if (swipe.revealed) currentDragEnd(false)
-                        swipe.reset()
-                    },
-                    onDragEnd = {
-                        if (swipe.revealed) currentDragEnd(swipe.expanded)
-                        swipe.reset()
-                    },
-                ) { change, amount ->
-                    change.consume()
-                    swipe.drag(amount)?.let { expanded ->
-                        currentDrag(iconBounds, expanded)
+            .pointerInput(rowKey, inputEnabled, popupsEnabled, onSwipeLeft != null) {
+                if (!inputEnabled || !popupsEnabled) return@pointerInput
+                val swipe = PopupSwipeIntent(reversalSlop = 8.dp.toPx(),
+                    firstItemSlop = if (currentSwipeLeft != null) 40.dp.toPx() else Float.POSITIVE_INFINITY)
+                fun resetPull() { dragging = false; leftPull = 0f }
+                try {
+                    detectHorizontalDragGestures(
+                        onDragStart = { swipe.reset(); leftPull = 0f; dragging = true },
+                        onDragCancel = {
+                            if (swipe.revealed) currentDragEnd(false)
+                            swipe.reset()
+                            resetPull()
+                        },
+                        onDragEnd = {
+                            if (swipe.revealed) currentDragEnd(swipe.expanded)
+                            else if (swipe.opensFirst) currentSwipeLeft?.invoke(iconBounds())
+                            swipe.reset()
+                            resetPull()
+                        },
+                    ) { change, amount ->
+                        change.consume()
+                        swipe.drag(amount)?.let { expanded ->
+                            currentDrag(iconBounds(), expanded)
+                        }
+                        leftPull = swipe.firstItemPullDistance
                     }
+                } finally {
+                    // Covering the page or disabling the gesture must never leave a row displaced.
+                    resetPull()
                 }
             }
             .semantics {
@@ -287,52 +320,59 @@ private fun LauncherRow(
                 if (!showLabel) contentDescription = label
                 selected = pressed || highlighted
                 customActions = buildList {
-                    add(CustomAccessibilityAction(openDescription) { onOpen(iconBounds); true })
+                    if (popupsEnabled) add(CustomAccessibilityAction(openDescription) { onOpen(iconBounds()); true })
+                    if (popupsEnabled && onSwipeLeft != null) add(CustomAccessibilityAction(openFirstDescription) { onSwipeLeft(iconBounds()); true })
                     if (onLongClick != null) add(CustomAccessibilityAction(detailsDescription) { onLongClick(); true })
                 }
             }
             .combinedClickable(
                 enabled = inputEnabled,
-                interactionSource = interactionSource, indication = ripple(bounded = true, color = appearance.text),
-                onClick = { onClick(bounds, iconBounds) },
+                interactionSource = interactionSource, indication = null,
+                onClick = { onClick(bounds, iconBounds()) },
                 onLongClick = onLongClick,
-            )
-            .padding(LauncherLayout.ContentInset),
-        verticalAlignment = Alignment.CenterVertically,
+            ),
     ) {
-        icon(Modifier.testTag("$rowKey:icon").onGloballyPositioned { iconBounds = it.boundsInWindow() })
-        Spacer(Modifier.width(LauncherLayout.IconLabelGap))
-        Column(Modifier.weight(1f)) {
-            if (showLabel) Text(
-                text = label + (notification?.let { " · ${notificationAge(it.postedAt)}" } ?: ""),
-                modifier = Modifier.testTag("$rowKey:label"),
-                style = MaterialTheme.typography.bodyLarge.merge(
-                    TextStyle(fontWeight = FontWeight.Normal, letterSpacing = 0.2.sp, shadow = appearance.textShadow),
-                ),
-                color = appearance.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (notification != null) {
-                if (showLabel) Spacer(Modifier.height(2.dp))
-                listOf(notification.title, notification.text.replace('\n', ' ')).filter { it.isNotBlank() }.forEach { line ->
-                    Text(line, color = appearance.text.copy(alpha = 0.88f),
-                        style = MaterialTheme.typography.bodyMedium.copy(shadow = appearance.textShadow),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .graphicsLayer { translationX = pullOffset }
+                .testTag("$rowKey:surface")
+                .clip(LauncherLayout.RowShape)
+                .background(highlight)
+                .indication(interactionSource, ripple(bounded = true, color = appearance.text))
+                .padding(horizontal = LauncherLayout.ContentInset, vertical = (list.appSpacing / 2f).dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            icon(Modifier.testTag("$rowKey:icon").onGloballyPositioned { iconCoordinates = it })
+            Spacer(Modifier.width(list.iconNameGap.dp))
+            Column(Modifier.weight(1f)) {
+                if (showLabel) Text(
+                    text = label + (notification?.let { " · ${notificationAge(it.postedAt)}" } ?: ""),
+                    modifier = Modifier.testTag("$rowKey:label"),
+                    style = labelStyle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (notification != null) {
+                    if (showLabel) Spacer(Modifier.height(2.dp))
+                    listOf(notification.title, notification.text.replace('\n', ' ')).filter { it.isNotBlank() }.forEach { line ->
+                        Text(line, color = labelStyle.color.copy(alpha = 0.88f),
+                            style = labelStyle.copy(fontSize = (list.fontSize - 2).sp),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
-        }
-        trailing?.invoke()
-        if (notification != null) {
-            IconButton(
-                onClick = { onPrepare(); onOpen(iconBounds) },
-                enabled = inputEnabled,
-                modifier = Modifier.size(48.dp).testTag("notification_arrow:$rowKey")
-                    .semantics { contentDescription = openDescription },
-            ) {
-                LauncherIcon(LauncherSymbol.Chevron,
-                    Modifier.rotate(if (LocalLayoutDirection.current == LayoutDirection.Ltr) -90f else 90f),
-                    tint = appearance.text)
+            trailing?.invoke()
+            if (notification != null) {
+                IconButton(
+                    onClick = { onPrepare(); onOpen(iconBounds()) },
+                    enabled = inputEnabled,
+                    modifier = Modifier.size(48.dp).testTag("notification_arrow:$rowKey")
+                        .semantics { contentDescription = openDescription },
+                ) {
+                    LauncherIcon(LauncherSymbol.Chevron,
+                        Modifier.rotate(if (LocalLayoutDirection.current == LayoutDirection.Ltr) -90f else 90f),
+                        tint = appearance.text)
+                }
             }
         }
     }
@@ -343,4 +383,6 @@ data class AppRowGestures(
     val onDrag: (LauncherApp, Rect, Boolean) -> Unit = { _, _, _ -> },
     val onDragEnd: (Boolean) -> Unit = {},
     val onLaunchAt: ((LauncherApp, Rect) -> Unit)? = null,
+    val popupsEnabled: Boolean = true,
+    val onOpenFirst: ((LauncherApp, Rect) -> Unit)? = null,
 )

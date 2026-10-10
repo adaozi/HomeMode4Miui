@@ -83,6 +83,8 @@ import com.galaxyrio.gracelauncher.data.HomeLayout
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherFolder
 import com.galaxyrio.gracelauncher.data.ClockStyle
+import com.galaxyrio.gracelauncher.data.ListAppearance
+import com.galaxyrio.gracelauncher.data.ShortcutsFoldersSettings
 import com.galaxyrio.gracelauncher.data.ScheduleEvent
 import com.galaxyrio.gracelauncher.data.nextVisibleEvent
 import com.galaxyrio.gracelauncher.data.media.MediaCommand
@@ -93,6 +95,8 @@ import com.galaxyrio.gracelauncher.ui.components.AppRowGestures
 import com.galaxyrio.gracelauncher.ui.components.FolderRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherAppRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherLayout
+import com.galaxyrio.gracelauncher.ui.components.startPadding
+import com.galaxyrio.gracelauncher.ui.components.endPadding
 import com.galaxyrio.gracelauncher.ui.components.eventRemainingText
 import com.galaxyrio.gracelauncher.ui.components.stableStatusBarInset
 import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
@@ -119,7 +123,9 @@ fun HomeScreen(
     homeLayout: HomeLayout,
     clockEnabled: Boolean,
     clockStyle: ClockStyle,
-    hideFavoriteNames: Boolean,
+    // 上游同步 v1.1.8：hideFavoriteNames 并入 listAppearance（names 可见性 + 内边距/字号）
+    listAppearance: ListAppearance,
+    shortcutsFolders: ShortcutsFoldersSettings = ShortcutsFoldersSettings(),
     allowHapticFeedback: Boolean,
     onLaunchApp: (LauncherApp) -> Unit,
     onAppDetails: (LauncherApp) -> Unit,
@@ -220,7 +226,7 @@ fun HomeScreen(
             .testTag("home_content"),
         // The row's 8dp inset keeps icons aligned at 44dp while giving its
         // rounded touch surface breathing room around the icon.
-        contentPadding = PaddingValues(start = LauncherLayout.Start, end = LauncherLayout.End, top = resolvedTop, bottom = 72.dp + bottomInset),
+        contentPadding = PaddingValues(start = listAppearance.startPadding, end = listAppearance.endPadding, top = resolvedTop, bottom = 72.dp + bottomInset),
         userScrollEnabled = !editingLayout,
         // Feed the native effect at both boundaries even when every row fits.
         // LazyColumn's own effect is disabled to avoid stretching twice.
@@ -265,15 +271,18 @@ fun HomeScreen(
                 app = app,
                 onOpen = { onOpenFolder(folder, it) },
                 onLongClick = { onEditFolder(folder) },
-                showLabel = !hideFavoriteNames,
+                showLabel = listAppearance.showNames(favorites = true),
             ) else LauncherAppRow(
                 app = app,
                 onClick = { onLaunchApp(app) },
                 onLongClick = { onAppDetails(app) },
                 onSwipeRight = { onAppShortcuts(app, it) },
                 gestures = rowGestures,
-                notification = notifications[app.packageName]?.firstOrNull(),
-                showLabel = !hideFavoriteNames,
+                // 上游同步 v1.1.8：通知预览按 shortcutsFolders 显示策略过滤（原 notificationsFor 语义内联）
+                notification = notifications[app.packageName].orEmpty()
+                    .filter { shortcutsFolders.showsNotification(it.silent, expanded = false) }
+                    .firstOrNull().takeUnless { app.shortcut != null || app.user != null || app.folderId != null },
+                showLabel = listAppearance.showNames(favorites = true),
             )
         }
     }
@@ -282,7 +291,7 @@ fun HomeScreen(
     // Overlay the handles in the viewport, not outside a lazy item's bounds:
     // both halves of each circular control must remain inside its hit-test area.
     if (editingLayout) {
-        val handleModifier = Modifier.padding(start = LauncherLayout.Start, end = LauncherLayout.End)
+        val handleModifier = Modifier.padding(start = listAppearance.startPadding, end = listAppearance.endPadding)
         HomeEditHandle(
             label = stringResource(R.string.widget_move_home), changed = topOffset != 0f, tag = "home_position_handle",
             onReset = { topOffset = 0f; onTopOffsetChange(0f) },

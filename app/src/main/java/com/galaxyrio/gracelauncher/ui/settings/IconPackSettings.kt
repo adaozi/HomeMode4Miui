@@ -88,7 +88,7 @@ internal fun IconPackSettings(uiState: LauncherUiState, actions: LauncherActions
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
                 .padding(horizontal = 16.dp).testTag("icon_pack_list"),
-            state = list, contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp), userScrollEnabled = reorder.draggingKey == null,
+            state = list, contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp + LocalSettingsBottomInset.current), userScrollEnabled = reorder.draggingKey == null,
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
         ) {
             item(key = "designer") {

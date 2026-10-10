@@ -12,7 +12,7 @@ class LauncherPreferences(context: Context) {
         get() = WallpaperTextMode.entries.firstOrNull { it.name == preferences.getString("text_mode", null) }
             ?: WallpaperTextMode.Auto
 
-    val themedIcons: Boolean get() = preferences.getBoolean("themed_icons", true)
+    val themedIcons: Boolean get() = preferences.getBoolean("themed_icons", false)
 
     fun textMode(mode: WallpaperTextMode) = preferences.edit { putString("text_mode", mode.name) }
     fun themedIcons(enabled: Boolean) = preferences.edit { putBoolean("themed_icons", enabled) }

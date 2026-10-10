@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
@@ -15,10 +16,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,11 +35,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
@@ -69,96 +74,95 @@ internal fun ProductivitySettings(
     navigate: (SettingsPage) -> Unit,
 ) {
     val settings = uiState.settings
-    var showMediaAccessDialog by rememberSaveable { mutableStateOf(false) }
     SettingsScaffold(stringResource(R.string.settings_productivity), "settings_productivity", onBack) { padding ->
         SettingsList(padding) {
             item { SettingsHeading(stringResource(R.string.settings_instant_access)) }
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_clock), clockAppSummary(uiState),
-                    0, 6, "settings_clock",
+                    0, 8, "settings_clock",
+                    leading = { LauncherIcon(LauncherSymbol.Clock) },
                 ) { navigate(SettingsPage.Clock) }
             }
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_calendar_agenda), stringResource(R.string.settings_calendar_agenda_summary),
-                    1, 6, "calendar_agenda",
+                    1, 8, "calendar_agenda",
+                    leading = { LauncherIcon(LauncherSymbol.Calendar) },
                 ) { navigate(SettingsPage.Calendar) }
             }
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_weather),
                     stringResource(if (settings.weatherEnabled) R.string.weather_settings_enabled_summary else R.string.weather_settings_disabled_summary),
-                    2, 6, "settings_weather",
+                    2, 8, "settings_weather",
+                    leading = { LauncherIcon(LauncherSymbol.Weather) },
                 ) { navigate(SettingsPage.Weather) }
             }
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_media_player), stringResource(R.string.media_player_summary),
-                    3, 6, "settings_media_player",
+                    3, 8, "settings_media_player",
+                    leading = { LauncherIcon(LauncherSymbol.Music) },
                 ) { navigate(SettingsPage.MediaPlayer) }
             }
             item {
                 SettingsActionItem(stringResource(R.string.settings_search), stringResource(R.string.search_settings_summary),
-                    4, 6, "settings_open_search") { navigate(SettingsPage.Search) }
+                    4, 8, "settings_open_search", leading = { LauncherIcon(LauncherSymbol.Search) }) { navigate(SettingsPage.Search) }
             }
             item {
                 SettingsActionItem(stringResource(R.string.settings_grace_button), null,
-                    5, 6, "settings_grace_button") { navigate(SettingsPage.GraceButton) }
+                    5, 8, "settings_grace_button", leading = {
+                        // Remove the adaptive icon's transparent safe-zone inset;
+                        // keep the same 24dp leading slot as Material Symbols.
+                        Icon(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null,
+                            modifier = Modifier.size(24.dp).graphicsLayer { scaleX = 2.25f; scaleY = 2.25f })
+                    }) { navigate(SettingsPage.GraceButton) }
+            }
+            item {
+                SettingsActionItem(stringResource(R.string.shortcuts_folders_title), null, 6, 8, "settings_shortcuts_folders",
+                    leading = { LauncherIcon(LauncherSymbol.Outbound) }) { navigate(SettingsPage.ShortcutsFolders) }
+            }
+            item {
+                SettingsActionItem(stringResource(R.string.widget_add), null, 7, 8, "settings_add_widget",
+                    leading = { LauncherIcon(LauncherSymbol.Widgets) }, onClick = actions.addWidget)
             }
             item {
                 Spacer(Modifier.height(12.dp))
-                SettingsActionItem(stringResource(R.string.settings_move_widget), null, 0, 1, "settings_move_widget", onClick = actions.moveWidget)
+                SettingsActionItem(stringResource(R.string.settings_move_widget), null, 0, 1, "settings_move_widget",
+                    leading = { LauncherIcon(LauncherSymbol.Move) }, onClick = actions.moveWidget)
             }
             item { SettingsHeading(stringResource(R.string.settings_app_organization)) }
-            if (!uiState.media.hasAccess) item {
-                SettingsActionItem(stringResource(R.string.notification_allow), stringResource(R.string.media_access_required),
-                    0, 1, "notifications_access") { showMediaAccessDialog = true }
-                Spacer(Modifier.height(12.dp))
-            }
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_hide_apps), pluralStringResource(R.plurals.settings_hidden_count, uiState.hiddenAppKeys.size, uiState.hiddenAppKeys.size),
                     0, 3, "settings_open_hidden_apps",
+                    leading = { LauncherIcon(LauncherSymbol.VisibilityOff) },
                 ) { navigate(SettingsPage.HiddenApps) }
             }
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_folders), pluralStringResource(R.plurals.settings_folder_count, uiState.folders.size, uiState.folders.size),
                     1, 3, "settings_open_folders",
+                    leading = { LauncherIcon(LauncherSymbol.Folder) },
                 ) { navigate(SettingsPage.Folders) }
             }
+            // 上游同步裁剪：Work Profile 行随 S8 批次恢复（ProfileSettings 页 + 宿主 workFolder 载体）
             item {
                 SettingsActionItem(stringResource(R.string.private_space_title), stringResource(R.string.private_space_summary),
-                    2, 3, "settings_open_private_space") { navigate(SettingsPage.PrivateSpace) }
+                    2, 3, "settings_open_private_space", leading = { LauncherIcon(LauncherSymbol.Lock) }) { navigate(SettingsPage.PrivateSpace) }
             }
             item { SettingsHeading(stringResource(R.string.settings_advanced)) }
-            item {
-                SettingsActionItem(stringResource(R.string.widget_add), null, 0, 2, "settings_add_widget", onClick = actions.addWidget)
-            }
+            // 上游同步裁剪：Gestures 行随 S3 桌面手势批次恢复（GraceButtonSettingsScreen home 面）
             item {
                 SettingsToggleItem(
                     stringResource(R.string.settings_allow_haptics), stringResource(R.string.settings_allow_haptics_summary),
-                    settings.allowHapticFeedback, 1, 2, "allow_haptics",
+                    settings.allowHapticFeedback, 0, 1, "allow_haptics",
+                    leading = { LauncherIcon(LauncherSymbol.Vibration) },
                 ) { value -> actions.updateSettings { current -> current.copy(allowHapticFeedback = value) } }
             }
         }
     }
-    if (showMediaAccessDialog) AlertDialog(
-        onDismissRequest = { showMediaAccessDialog = false },
-        title = { Text(stringResource(R.string.media_allow_controls)) },
-        text = { Text(stringResource(R.string.media_access_explanation)) },
-        confirmButton = {
-            TextButton(onClick = { showMediaAccessDialog = false; actions.requestMediaAccess() }, modifier = Modifier.testTag("media_access_continue")) {
-                Text(stringResource(R.string.media_open_settings))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { showMediaAccessDialog = false }, modifier = Modifier.testTag("media_access_cancel")) {
-                Text(stringResource(R.string.settings_cancel))
-            }
-        },
-    )
 }
 
 @Composable
@@ -239,6 +243,7 @@ internal fun FavoriteFoldersScreen(uiState: LauncherUiState, actions: LauncherAc
 internal fun FolderSettings(
     uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit,
     selectedIds: Set<String>? = null, onToggle: (String) -> Unit = {}, enabled: Boolean = true,
+    singleChoice: Boolean = false,
     onEdit: (String) -> Unit,
 ) {
     var creating by rememberSaveable { mutableStateOf(false) }
@@ -267,7 +272,8 @@ internal fun FolderSettings(
                 itemsIndexed(uiState.folders, key = { _, folder -> folder.id }) { index, folder ->
                     val count = uiState.popups[folder.key]?.size ?: folder.appKeys.size
                     val checked = selectedIds?.contains(folder.id)
-                    val placement = if (checked == null) folder.placement else folder.placement.withFavorites(checked)
+                    // An action selects a target, not whether the folder belongs in favorites.
+                    val placement = if (checked == null || singleChoice) folder.placement else folder.placement.withFavorites(checked)
                     SettingsActionItem(
                         folder.name,
                         pluralStringResource(R.plurals.settings_folder_summary, count, count, placement.label()),
@@ -275,14 +281,23 @@ internal fun FolderSettings(
                         enabled = enabled,
                         modifier = Modifier.semantics {
                             if (checked != null) {
-                                role = Role.Checkbox
-                                toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
+                                if (singleChoice) {
+                                    role = Role.RadioButton
+                                    selected = checked
+                                } else {
+                                    role = Role.Checkbox
+                                    toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
+                                }
                             }
                         },
                         leading = {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                if (checked != null) Checkbox(checked, onCheckedChange = null,
-                                    enabled = enabled && LocalSettingsStorageState.current.canEdit)
+                                if (checked != null) {
+                                    if (singleChoice) RadioButton(checked, onClick = null,
+                                        enabled = enabled && LocalSettingsStorageState.current.canEdit)
+                                    else Checkbox(checked, onCheckedChange = null,
+                                        enabled = enabled && LocalSettingsStorageState.current.canEdit)
+                                }
                                 AppIcon(uiState.folderItem(folder), size = 32.dp)
                             }
                         },

@@ -12,7 +12,8 @@ import com.homemode4miui.R
 
 enum class LauncherSymbol {
     Star, Info, Hourglass, Category, Delete, Chevron, Settings, Launch, Outbound, Android,
-    Plus, Edit, Apps, Check, Palette, Home, Search, Folder, Clock, Calendar, Weather, Move, Resize, DesignServices, Lock, Encrypted, History2
+    Plus, Edit, Apps, Check, Palette, Home, Search, Folder, Clock, Calendar, Weather, Move, Resize, DesignServices, Lock, Work, Encrypted, History2,
+    Music, Widgets, Notifications, VisibilityOff, Gesture, Vibration
 }
 
 /** Official Material Symbols Outlined: optical size 24, weight 400, grade 0, fill 0. */
@@ -45,6 +46,7 @@ fun LauncherIcon(
                 LauncherSymbol.Folder -> R.drawable.ms_folder
                 LauncherSymbol.History2 -> R.drawable.ms_history_2
                 LauncherSymbol.Lock -> R.drawable.ms_lock
+                LauncherSymbol.Work -> R.drawable.ms_work
                 LauncherSymbol.Encrypted -> R.drawable.ms_encrypted
                 LauncherSymbol.Clock -> R.drawable.ms_schedule
                 LauncherSymbol.Calendar -> R.drawable.ms_calendar_month
@@ -52,6 +54,12 @@ fun LauncherIcon(
                 LauncherSymbol.Move -> R.drawable.ms_unfold_more
                 LauncherSymbol.Resize -> R.drawable.ms_crop
                 LauncherSymbol.DesignServices -> R.drawable.ms_design_services
+                LauncherSymbol.Music -> R.drawable.ms_music_note
+                LauncherSymbol.Widgets -> R.drawable.ms_widgets
+                LauncherSymbol.Notifications -> R.drawable.ms_notifications
+                LauncherSymbol.VisibilityOff -> R.drawable.ms_visibility_off
+                LauncherSymbol.Gesture -> R.drawable.ms_gesture
+                LauncherSymbol.Vibration -> R.drawable.ms_vibration
             },
         ),
         // These icons decorate parent-labelled actions, which own accessibility semantics.

@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.homemode4miui.R
+import com.galaxyrio.gracelauncher.ui.settings.LocalSettingsBottomInset
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherAppOrder
 import com.galaxyrio.gracelauncher.data.appSortKey
@@ -56,7 +57,7 @@ internal fun AppSelectionList(
     Box(modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag(listTag).then(if (singleChoice) Modifier.selectableGroup() else Modifier), state = state,
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp + LocalSettingsBottomInset.current),
             userScrollEnabled = userScrollEnabled,
         ) {
             beforeApps()
@@ -77,7 +78,7 @@ internal fun AppSelectionList(
         }
         if (showApps) AppSelectionScrollbar(
             state, filtered, enabled = userScrollEnabled,
-            modifier = Modifier.align(Alignment.CenterEnd), tag = "${listTag}_scrollbar",
+            modifier = Modifier.align(Alignment.CenterEnd).padding(bottom = LocalSettingsBottomInset.current), tag = "${listTag}_scrollbar",
         )
     }
 }

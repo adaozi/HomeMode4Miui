@@ -1,7 +1,6 @@
 /*
- * 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
- * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/ui/components/LauncherLayout.kt
- * P1 移植：逐字拷贝，未改动。
+ * 移植自 GraceLauncher v1.1.8（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
+ * 上游同步 2026-10-11（PORTING_GraceLauncher.md §9）：按上游 v1.1.8 逐字更新。
  */
 package com.galaxyrio.gracelauncher.ui.components
 
@@ -11,6 +10,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
@@ -22,6 +23,30 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import com.galaxyrio.gracelauncher.data.ListAppearance
+import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
+import com.galaxyrio.gracelauncher.ui.theme.rememberAppFontFamily
+
+internal val LocalListAppearance = staticCompositionLocalOf { ListAppearance() }
+
+// Keep the original 20dp rail clearance on the right; the control moves both edges together.
+internal val ListAppearance.startPadding: Dp get() = (sidePadding - 8).coerceAtLeast(0).dp
+internal val ListAppearance.endPadding: Dp get() = (sidePadding + 12).dp
+
+@Composable
+internal fun listLabelStyle(onWallpaper: Boolean = true): TextStyle {
+    val list = LocalListAppearance.current
+    val wallpaper = LocalLauncherAppearance.current
+    val color = list.fontColor?.resolve(wallpaper.text.toArgb(), MaterialTheme.colorScheme.primary.toArgb())?.let(::Color)
+        ?: if (onWallpaper) wallpaper.text else MaterialTheme.colorScheme.onSurface
+    return MaterialTheme.typography.bodyLarge.copy(fontFamily = rememberAppFontFamily(list.fontId),
+        fontSize = list.fontSize.sp, lineHeight = (list.fontSize * 1.5f).sp, fontWeight = FontWeight.Normal,
+        color = color, letterSpacing = 0.2.sp, shadow = if (onWallpaper) wallpaper.textShadow else null)
+}
 
 /** Shared desktop columns, including the otherwise invisible touch surfaces. */
 internal object LauncherLayout {

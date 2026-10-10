@@ -70,9 +70,14 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
             blurWallpaper = settings.blurWallpaper,
             wallpaperBlurRadius = settings.wallpaperBlurRadius.coerceIn(0, 48),
             appFontId = settings.appFontId,
+            fontLibraryJson = settings.fontLibrary.encode(),
+            listAppearanceJson = settings.listAppearance.encode(),
             applyFontToSettings = settings.applyFontToSettings,
             privateSpaceJson = settings.privateSpace.encode(),
+            workProfileJson = settings.workProfile.encode(),
+            homeGesturesJson = settings.homeGestures.encode(),
             searchJson = settings.search.encode(),
+            shortcutsFoldersJson = settings.shortcutsFolders.encode(),
         ))
     }
 
@@ -166,9 +171,14 @@ private fun LauncherSettingsEntity.toSettings() = LauncherSettings(
     blurWallpaper = blurWallpaper,
     wallpaperBlurRadius = wallpaperBlurRadius.coerceIn(0, 48),
     appFontId = appFontId,
+    fontLibrary = FontLibrary.decode(fontLibraryJson, appFontId),
+    listAppearance = ListAppearance.decode(listAppearanceJson, hideFavoriteNames),
     applyFontToSettings = applyFontToSettings,
-    privateSpace = PrivateSpaceSettings.decode(privateSpaceJson),
+    privateSpace = ProfileSettings.decode(privateSpaceJson),
+    workProfile = ProfileSettings.decode(workProfileJson, ProfileSettings.workDefaults()),
+    homeGestures = GraceButtonSettings.decode(homeGesturesJson, GraceButtonSettings.homeDefaults()),
     search = SearchSettings.decode(searchJson),
+    shortcutsFolders = ShortcutsFoldersSettings.decode(shortcutsFoldersJson),
 )
 
 private fun decodeIconPackOrder(json: String?): List<String> = runCatching {

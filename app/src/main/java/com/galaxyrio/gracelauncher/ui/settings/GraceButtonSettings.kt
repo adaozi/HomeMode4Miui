@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.homemode4miui.R
 import com.galaxyrio.gracelauncher.data.GraceButtonAction
+import com.galaxyrio.gracelauncher.data.GraceButtonGesture
 import com.galaxyrio.gracelauncher.data.GraceButtonTarget
 import com.galaxyrio.gracelauncher.ui.LauncherActions
 import com.galaxyrio.gracelauncher.ui.LauncherUiState
@@ -31,6 +32,9 @@ internal fun GraceButtonSettingsScreen(uiState: LauncherUiState, actions: Launch
                             GraceButtonAction.App -> R.string.grace_button_open_app
                             GraceButtonAction.Shortcut -> R.string.grace_button_open_shortcut
                             GraceButtonAction.Disabled -> R.string.grace_button_disabled
+                            // 上游同步 v1.1.8：枚举扩展项（Folder/Website/系统动作等）S4 批次接入，
+                            // 旧页面先归入禁用文案避免 when 非穷举编译错
+                            else -> R.string.grace_button_disabled
                         }), if (action == selected.action && action in listOf(GraceButtonAction.App, GraceButtonAction.Shortcut))
                             selected.itemKey?.let { uiState.findItem(it)?.label } ?: stringResource(R.string.popup_item_unavailable) else null,
                             index, options.size, "grace_${if (longClick) "long" else "tap"}_${action.name}",
@@ -38,7 +42,11 @@ internal fun GraceButtonSettingsScreen(uiState: LauncherUiState, actions: Launch
                         ) {
                             if (action == GraceButtonAction.App || action == GraceButtonAction.Shortcut)
                                 onChooseTarget(longClick, action == GraceButtonAction.Shortcut)
-                            else actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(longClick, GraceButtonTarget(action))) }
+                            else {
+                            // 上游同步 v1.1.8：withTarget(longClick) → withTarget(gesture)
+                            val gesture = if (longClick) GraceButtonGesture.LongPress else GraceButtonGesture.Tap
+                            actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(gesture, GraceButtonTarget(action))) }
+                        }
                         }
                     }
                 }
