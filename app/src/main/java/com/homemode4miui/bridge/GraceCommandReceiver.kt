@@ -64,6 +64,17 @@ class GraceCommandReceiver : BroadcastReceiver() {
                 GraceBridgeEngine.start(context)
                 GraceBridgeEngine.refreshSnapshots()
             }
+            // 上游同步 v1.1.8 S3：锁屏/拉通知栏/拉快捷设置 —— 无障碍服务在【本模块进程】，
+            // 宿主手势动作跨进程委派（GraceAccessibilityService.perform 幂等，未连接安全返回 false）
+            GraceBridge.Cmd.SYSTEM_ACTION -> {
+                val action = runCatching {
+                    com.galaxyrio.gracelauncher.data.GraceButtonAction.valueOf(
+                        intent.getStringExtra(GraceBridge.EXTRA_ARG1) ?: "")
+                }.getOrNull()
+                if (action != null) {
+                    com.galaxyrio.gracelauncher.platform.GraceAccessibilityService.perform(action)
+                }
+            }
         }
     }
 

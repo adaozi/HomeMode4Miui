@@ -569,4 +569,37 @@
     <string name="popup_silent_notifications">Silent notifications</string>
     <string name="popup_swipe_left_first_summary">Open the first shortcut, app, or widget’s app in the pop-up</string>
     <string name="shortcuts_folders_enable">Enable app pop-ups</string>
+
+    <string name="edit_icon">Edit icon</string>
+    <string name="grace_accessibility_explanation">These actions need Android accessibility access, not root. In system settings, enable Grace Launcher under installed apps or downloaded services. Grace only performs the action you trigger; it does not read screen content or monitor your activity. You can revoke access at any time.</string>
+    <string name="grace_accessibility_required">Requires accessibility access for system actions.</string>
+    <string name="grace_accessibility_title">Allow system actions</string>
+    <string name="grace_action_unavailable">This action is unavailable on this device.</string>
+    <string name="grace_button_agenda">Open agenda and weather</string>
+    <string name="grace_button_assistant">Open voice assistant</string>
+    <string name="grace_button_double_tap">Double tap</string>
+    <string name="grace_button_lock_screen">Turn off screen</string>
+    <string name="grace_button_notifications">Open notifications</string>
+    <string name="grace_button_open_app_list">Open app list</string>
+    <string name="grace_button_open_website">Open website</string>
+    <string name="grace_button_quick_settings">Open control center</string>
+    <string name="grace_button_swipe_down">Swipe down</string>
+    <string name="grace_button_swipe_left">Swipe left</string>
+    <string name="grace_button_swipe_right">Swipe right</string>
+    <string name="grace_button_swipe_up">Swipe up</string>
+    <string name="grace_button_url">Website address</string>
+    <string name="grace_button_url_error">Enter a valid HTTP or HTTPS website address.</string>
+    <string name="grace_button_url_hint">example.com or https://example.com</string>
+    <string name="home_gesture_double_tap">Double tap empty space</string>
+    <string name="home_gestures_enable">Enable gestures</string>
+    <string name="lab_animation">Animation</string>
+    <string name="lab_double_tap_interval">Double-tap interval</string>
+    <string name="lab_double_tap_interval_summary">Maximum time between taps on empty home-screen space. A longer interval makes double-tapping easier.</string>
+    <string name="lab_milliseconds">%1$d ms</string>
+    <string name="lab_percentage">%1$d%%</string>
+    <string name="lab_swipe_sensitivity">Swipe sensitivity</string>
+    <string name="lab_swipe_sensitivity_summary">Higher values make home-screen swipes and swiping down to close search easier to trigger. 100% keeps the default distance and speed thresholds.</string>
+    <string name="settings_lab">Lab</string>
+
+    <string name="grace_accessibility_description">Use Grace button or home screen gestures to lock the screen or open notifications and control center. No screen content is read or stored.</string>
 </resources>

@@ -793,6 +793,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ---- 命令上行（宿主 → 模块 App 进程；命令在持有 token 的进程内执行）----
 
+    /** 上游同步 v1.1.8 S3：无障碍系统动作（锁屏/拉通知栏/拉快捷设置）跨进程委派
+     *  —— 服务在模块 App 进程，宿主进程手势经 GRACE 桥触发（幂等，未连接安全丢弃）。 */
+    fun sendSystemAction(action: com.galaxyrio.gracelauncher.data.GraceButtonAction) {
+        sendBridgeCommand(com.homemode4miui.bridge.GraceBridge.Cmd.SYSTEM_ACTION, arg1 = action.name)
+    }
+
     private fun sendBridgeCommand(cmd: String, arg1: String? = null, arg2: String? = null) {
         runCatching {
             getApplication<Application>().sendBroadcast(GraceBridge.command(cmd, arg1, arg2))

@@ -58,6 +58,12 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.foundation.overscroll
+import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.galaxyrio.gracelauncher.data.GraceButtonGesture
+import com.galaxyrio.gracelauncher.ui.components.observeListGestures
+import com.galaxyrio.gracelauncher.ui.components.rememberLauncherListGestureConnection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
@@ -93,6 +99,9 @@ internal fun AppSearchScreen(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     enterAlpha: Float = 1f,
+    // 上游同步 v1.1.8 S3：下拉关闭灵敏度与桌面共享（上游经 uiState.settings 透传，
+    // 本模块搜索屏为裁剪签名，改为显式参数由 Route 传入）
+    swipeSensitivity: Int = 100,
     queryState: TextFieldState = rememberTextFieldState(),
 ) {
     val query = queryState.text.toString().trim()
@@ -124,6 +133,14 @@ internal fun AppSearchScreen(
         onLaunch(app, bounds)
     }
     val list = rememberLazyListState()
+    // 上游同步 v1.1.8 S3（v1.1.7 特性）：结果列表顶部下拉关闭搜索页；
+    // 与桌面共享 Lab 的 swipeSensitivity/距离/释放速度阈值。零消费观察，不抢行内手势。
+    val searchOverscroll = rememberOverscrollEffect()
+    val searchScrollConnection = rememberLauncherListGestureConnection(
+        searchOverscroll, list, swipeSensitivity,
+        canTrigger = { it == GraceButtonGesture.SwipeDown },
+        onGesture = { keyboard?.hide(); onDismiss() },
+    )
     LaunchedEffect(query) { list.requestScrollToItem(0) }
     val density = LocalDensity.current
     var searchBarHeight by remember { mutableStateOf(56.dp) }
@@ -132,14 +149,16 @@ internal fun AppSearchScreen(
     // so rows can draw behind the bar and still scroll fully above it.
     val bottomInset = WindowInsets.safeDrawing.exclude(WindowInsets.ime).asPaddingValues().calculateBottomPadding()
     // Wallpaper tint and window blur are owned by the route, exactly as for the app list.
-    Box(modifier.fillMaxSize().testTag("app_search").graphicsLayer {
+    Box(modifier.fillMaxSize().testTag("app_search")
+        .nestedSearchGestures(searchScrollConnection)
+        .graphicsLayer {
         alpha = enterAlpha
     }.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
         .padding(top = stableStatusBarInset())
         .imePadding().padding(horizontal = 16.dp)) {
         // Clip at the field's widest part, where the overlaid pill conceals the
         // entire edge. Content padding preserves the first result's resting gap.
-        LazyColumn(Modifier.fillMaxSize().padding(top = listTop), state = list,
+        LazyColumn(Modifier.fillMaxSize().padding(top = listTop).overscroll(searchOverscroll), state = list,
             contentPadding = PaddingValues(top = searchBarHeight / 2 + 16.dp, bottom = 24.dp + bottomInset)) {
             if (query.isNotEmpty() && results.isEmpty()) item {
                 Text(stringResource(R.string.search_no_results), Modifier.padding(20.dp), color = appearance.text)
@@ -179,3 +198,8 @@ private fun SearchResultRow(label: String, key: String, first: Boolean, onClick:
         }
     }
 }
+
+// 上游同步 v1.1.8 S3：搜索页手势观察挂点（上游在 LauncherScreen 组合；本模块收进本文件）。
+// nestedScroll 供连接器读取边界剩余动量；observeListGestures 负责手势开始/取消的武装与解除。
+private fun Modifier.nestedSearchGestures(connection: com.galaxyrio.gracelauncher.ui.components.LauncherListGestureConnection): Modifier =
+    this.nestedScroll(connection).observeListGestures(connection)

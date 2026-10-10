@@ -414,6 +414,60 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         else start(AppLaunchTransition.fromIcon(launchView, bounds.toAndroidRect()))
     }
 
+    // 上游同步 v1.1.8 S3：手势/按钮动作分发（原版 LauncherScreen.performGestureAction 语义，
+    // 模块适配：① GraceButtonTransition 英雄动画随 S4；② 无障碍三动作（锁屏/通知栏/快捷设置）
+    // 走 GRACE 桥 Cmd.SYSTEM_ACTION 跨进程委派给模块 App 进程的 GraceAccessibilityService；
+    // Website/Assistant 宿主进程内直接 startActivity（无需无障碍）。
+    fun performGestureAction(target: com.galaxyrio.gracelauncher.data.GraceButtonTarget) {
+        if (!target.active) return
+        when (target.action) {
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Search -> {
+                searchQuery.clearText(); searchOpen = true
+            }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Settings ->
+                openGraceSettingsInModule(context, "")
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.App,
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Shortcut -> {
+                // GraceHomeUiState 无 findItem：apps + savedShortcutApps 双池按键解析
+                // （savedShortcutApps = P4 长按弹层保存的快捷方式项，与 Shortcut 动作对应）
+                val app = target.itemKey?.let { key ->
+                    state.apps.firstOrNull { it.key == key }
+                        ?: state.savedShortcutApps.firstOrNull { it.key == key }
+                }
+                if (app != null) launchApp(app)
+                else android.widget.Toast.makeText(context, context.getString(
+                    com.homemode4miui.R.string.app_unavailable), android.widget.Toast.LENGTH_SHORT).show()
+            }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Folder -> {
+                val folder = state.folders.firstOrNull { it.key == target.itemKey }
+                if (folder != null) overlay = LauncherOverlay.Folder(folder, lastFolderAnchor ?: Rect.Zero)
+                else android.widget.Toast.makeText(context, context.getString(
+                    com.homemode4miui.R.string.folder_unavailable), android.widget.Toast.LENGTH_SHORT).show()
+            }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.AppList -> {
+                selectedLetter = null
+                drawerState.requestScrollToItem(0)
+                drawerOpen = true
+            }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Agenda -> {
+                viewModel.refreshWeather(); viewModel.refreshAgenda()
+                overlay = LauncherOverlay.Agenda
+            }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Website,
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Assistant,
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen,
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Notifications,
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.QuickSettings -> {
+                val done = com.galaxyrio.gracelauncher.platform.GraceSystemActions.perform(context, target)
+                if (!done && target.action.requiresAccessibility) {
+                    // 无障碍服务在模块进程：经桥委派（服务未连接时由服务侧安全丢弃）
+                    viewModel.sendSystemAction(target.action)
+                }
+            }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.Disabled -> Unit
+        }
+    }
+
     /** 对齐原版 LauncherRoute.launchShortcut：弹层快捷方式启动同享图标动画。 */
     fun launchShortcut(shortcut: LauncherShortcut, bounds: Rect? = null) {
         val start: (AppLaunchTransition?) -> Unit = { transition ->
@@ -546,6 +600,13 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 // 上游同步 v1.1.8：列表外观大模型进 HomeScreen（行距/边距/字号/名字可见性）
                 listAppearance = state.settings.listAppearance,
                 shortcutsFolders = state.settings.shortcutsFolders,
+                // 上游同步 v1.1.8 S3：桌面手势（空闲且无弹层/非编辑态时才触发）
+                homeGestures = state.settings.homeGestures,
+                onHomeGesture = { gesture, position ->
+                    if (!drawerOpen && overlay == null && !editingHome) {
+                        performGestureAction(state.settings.homeGestures.target(gesture))
+                    }
+                },
                 allowHapticFeedback = true,
                 onLaunchApp = { app -> launchApp(app) },
                 onAppDetails = viewModel::openAppDetails,
@@ -656,6 +717,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         // ---- 搜索浮层（P2）：FAB 入口 ----
         if (searchOpen || searchAlpha > 0f) {
             AppSearchScreen(
+                // 上游同步 v1.1.8 S3：搜索页下拉关闭与桌面共享 Lab 灵敏度
+                swipeSensitivity = state.settings.homeGestures.swipeSensitivity,
                 apps = state.apps,
                 recentAppKeys = state.settings.searchSettings.recentAppKeys,
                 fuzzy = state.settings.searchSettings.fuzzy,

@@ -20,6 +20,13 @@ import android.text.format.DateFormat
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.overscroll
 import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.positionInWindow
+import com.galaxyrio.gracelauncher.data.GraceButtonGesture
+import com.galaxyrio.gracelauncher.data.GraceButtonSettings
+import com.galaxyrio.gracelauncher.ui.components.observeBlankDoubleTaps
+import com.galaxyrio.gracelauncher.ui.components.observeListGestures
+import com.galaxyrio.gracelauncher.ui.components.rememberLauncherListGestureConnection
 import androidx.compose.foundation.OverscrollEffect
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -56,6 +63,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.draw.clip
@@ -126,6 +134,9 @@ fun HomeScreen(
     // 上游同步 v1.1.8：hideFavoriteNames 并入 listAppearance（names 可见性 + 内边距/字号）
     listAppearance: ListAppearance,
     shortcutsFolders: ShortcutsFoldersSettings = ShortcutsFoldersSettings(),
+    // 上游同步 v1.1.8 S3：桌面手势（上滑/下滑/双击；homeGestures 配置面 = Lab 页）
+    homeGestures: GraceButtonSettings = GraceButtonSettings(),
+    onHomeGesture: (GraceButtonGesture, Offset) -> Unit = { _, _ -> },
     allowHapticFeedback: Boolean,
     onLaunchApp: (LauncherApp) -> Unit,
     onAppDetails: (LauncherApp) -> Unit,
@@ -200,9 +211,39 @@ fun HomeScreen(
     val bottomInset = WindowInsets.safeDrawing.asPaddingValues().calculateBottomPadding()
     LaunchedEffect(editingLayout) { if (editingLayout) listState.scrollToItem(0) }
     val overscroll = rememberOverscrollEffect()
-    val scrollConnection = remember(overscroll) { HomeOverscrollConnection(overscroll) }
+    // 上游同步 v1.1.8 S3：HomeOverscrollConnection → LauncherListGestureConnection
+    // （原 overscroll 转发逻辑并入连接器；边界剩余动量驱动的上滑/下滑手势，零消费不抢行内拖拽）
+    val gesturesEnabled = widgetInputEnabled && !editingLayout && homeGestures.enabled
+    val doubleTapEnabled = gesturesEnabled && homeGestures.doubleTap.active
+    val latestGestures by rememberUpdatedState(homeGestures)
+    val latestEnabled by rememberUpdatedState(gesturesEnabled)
+    val latestOnGesture by rememberUpdatedState(onHomeGesture)
+    val context = LocalContext.current
+    val doubleTapSlop = remember(context, density) {
+        android.view.ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat()
+    }
+    var windowOffset by remember { mutableStateOf(Offset.Zero) }
+    var pointerPosition by remember { mutableStateOf(Offset.Zero) }
+    val scrollConnection = rememberLauncherListGestureConnection(
+        overscroll, listState, homeGestures.swipeSensitivity,
+        canTrigger = { latestEnabled && latestGestures.target(it).active },
+        onGesture = { latestOnGesture(it, windowOffset + pointerPosition) },
+    )
+    LaunchedEffect(gesturesEnabled) { if (!gesturesEnabled) scrollConnection.cancelGesture() }
 
-    BoxWithConstraints(modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier.fillMaxSize()
+        .onGloballyPositioned { windowOffset = it.positionInWindow() }
+        .observeListGestures(scrollConnection) { pointerPosition = it }
+        // 弹层禁用手势时保持节点挂载：移除 pointer-input 祖先会连坐取消后代，
+        // 导致 app/folder 行刚拉起的弹层被打断 —— 仅重启本观察器即可清掉未决 tap。
+        .pointerInput(doubleTapEnabled, doubleTapSlop, latestGestures.doubleTapIntervalMs) {
+            if (!doubleTapEnabled) return@pointerInput
+            observeBlankDoubleTaps(doubleTapSlop, latestGestures.doubleTapIntervalMs) { position ->
+                if (latestEnabled && latestGestures.doubleTap.active) {
+                    latestOnGesture(GraceButtonGesture.DoubleTap, windowOffset + position)
+                }
+            }
+        }) {
     val availableHeight = (maxHeight - bottomInset).coerceAtLeast(0.dp)
     val headerHeight = with(density) { headerHeightPx.toDp() }
     // Only content ABOVE the calendar anchor constrains its position. Agenda,
@@ -315,28 +356,7 @@ fun HomeScreen(
     }
 }
 
-/** Route unconsumed motion to Android's native stretch/glow, including a short list. */
-private class HomeOverscrollConnection(private val effect: OverscrollEffect?) : NestedScrollConnection {
-    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-        if (effect?.isInProgress != true) return Offset.Zero
-        // Relax an existing stretch first; leave ordinary scrolling to LazyColumn.
-        var forwarded = Offset.Zero
-        val consumed = effect.applyToScroll(Offset(0f, available.y), source) { delta ->
-            forwarded = delta
-            delta
-        }
-        return consumed - forwarded
-    }
-
-    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
-        effect?.applyToScroll(Offset(0f, available.y), source) { Offset.Zero } ?: Offset.Zero
-
-    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-        val overscroll = effect ?: return Velocity.Zero
-        overscroll.applyToFling(Velocity(0f, available.y)) { Velocity.Zero }
-        return Velocity(0f, available.y)
-    }
-}
+// 上游同步 v1.1.8 S3：HomeOverscrollConnection 已被 LauncherListGestureConnection 取代（ui/components/LauncherListGestures.kt）。
 
 @Composable
 internal fun HomeClockHeader(

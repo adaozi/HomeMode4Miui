@@ -153,11 +153,15 @@ internal fun ProductivitySettings(
                     2, 3, "settings_open_private_space", leading = { LauncherIcon(LauncherSymbol.Lock) }) { navigate(SettingsPage.PrivateSpace) }
             }
             item { SettingsHeading(stringResource(R.string.settings_advanced)) }
-            // 上游同步裁剪：Gestures 行随 S3 桌面手势批次恢复（GraceButtonSettingsScreen home 面）
+            // 上游同步 v1.1.8 S3：Gestures 行恢复（桌面手势目标编辑，GraceButtonSettingsScreen home 面）
+            item {
+                SettingsActionItem(stringResource(R.string.settings_gestures), null, 0, 2, "settings_gestures",
+                    leading = { LauncherIcon(LauncherSymbol.Gesture) }) { navigate(SettingsPage.Gestures) }
+            }
             item {
                 SettingsToggleItem(
                     stringResource(R.string.settings_allow_haptics), stringResource(R.string.settings_allow_haptics_summary),
-                    settings.allowHapticFeedback, 0, 1, "allow_haptics",
+                    settings.allowHapticFeedback, 1, 2, "allow_haptics",
                     leading = { LauncherIcon(LauncherSymbol.Vibration) },
                 ) { value -> actions.updateSettings { current -> current.copy(allowHapticFeedback = value) } }
             }

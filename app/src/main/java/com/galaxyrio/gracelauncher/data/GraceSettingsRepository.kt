@@ -107,6 +107,7 @@ class GraceSettingsRepository(context: Context) {
                     // 上游同步 v1.1.8（S2）：列表外观 + 弹层/通知策略列（schema v21）
                     listAppearanceJson = next.listAppearance.encode(),
                     shortcutsFoldersJson = next.shortcutsFolders.encode(),
+                    homeGesturesJson = next.homeGestures.encode(),
                 ))
                 next
             }
@@ -152,6 +153,7 @@ class GraceSettingsRepository(context: Context) {
         // 上游同步 v1.1.8（S2）：新列种子
         listAppearanceJson = settings.listAppearance.encode(),
         shortcutsFoldersJson = settings.shortcutsFolders.encode(),
+        homeGesturesJson = settings.homeGestures.encode(),
     )
 
     private fun LauncherSettingsEntity.toGraceSettings() = GraceHomeSettings.decode(
@@ -178,5 +180,6 @@ class GraceSettingsRepository(context: Context) {
         // 上游同步 v1.1.8（S2）：新列读出
         listAppearanceJson = listAppearanceJson,
         shortcutsFoldersJson = shortcutsFoldersJson,
+        homeGesturesJson = homeGesturesJson,
     )
 }

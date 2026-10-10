@@ -75,9 +75,12 @@ import kotlinx.coroutines.withContext
 internal enum class SettingsPage {
     Root, Productivity, Clock, ClockStyle, Calendar, Weather, Themes, Advanced, About, HiddenApps, Folders, FolderEditor,
     Changelog, Licenses, AppLicense, IconPacks, IconDesigner, IconDesignerApp, PrivateSpace, PrivateSpaceEditor, Search,
-    MediaPlayer, GraceButton, GraceTapApp, GraceLongApp, GraceTapShortcut, GraceLongShortcut,
+    MediaPlayer, GraceButton,
     // 上游同步 v1.1.8（S2）：A-Z 列表 + 列表外观设置页（Fonts 页随 S5 批次补）
     ListAppearance, Alphabet, ShortcutsFolders,
+    // 上游同步 v1.1.8（S3）：手势目标编辑 + Lab；旧 GraceTap*/GraceLong* 四页被
+    // GraceAction/{gesture}?home={home} 参数化路由取代
+    GraceAction, GraceApp, GraceShortcut, GraceFolder, Gestures, LabGraceButton, LabGesture,
 }
 
 /** Navigation owns each page's saved state and seekable predictive-back transition. */
@@ -163,9 +166,20 @@ fun LauncherSettingsScreen(
       ) {
         SettingsPage.entries.forEach { page ->
             val isEditor = page == SettingsPage.FolderEditor
+            // 上游同步 v1.1.8 S3：手势目标编辑页参数化路由（gesture + home 双参数）
+            val isGraceAction = page in listOf(SettingsPage.GraceAction, SettingsPage.GraceApp, SettingsPage.GraceShortcut, SettingsPage.GraceFolder)
             composable(
-                route = if (isEditor) "FolderEditor/{folderId}" else page.name,
-                arguments = if (isEditor) listOf(navArgument("folderId") { type = NavType.StringType }) else emptyList(),
+                route = when {
+                    isEditor -> "FolderEditor/{folderId}"
+                    isGraceAction -> "${page.name}/{gesture}?home={home}"
+                    else -> page.name
+                },
+                arguments = when {
+                    isEditor -> listOf(navArgument("folderId") { type = NavType.StringType })
+                    isGraceAction -> listOf(navArgument("gesture") { type = NavType.StringType },
+                        navArgument("home") { type = NavType.BoolType; defaultValue = false })
+                    else -> emptyList()
+                },
             ) { entry ->
                 // Ignore double taps and clicks on an outgoing/predictively revealed page.
                 fun isCurrent() = navController.currentBackStackEntry === entry &&
@@ -188,27 +202,62 @@ fun LauncherSettingsScreen(
                     SettingsPage.Clock -> ClockSettings(uiState, actions, back)
                     SettingsPage.Search -> SearchSettingsScreen(uiState, actions, back)
                     SettingsPage.MediaPlayer -> MediaPlayerSettings(uiState, actions, back)
-                    SettingsPage.GraceButton -> GraceButtonSettingsScreen(uiState, actions, back) { longClick, shortcut ->
-                        navigate(if (shortcut) {
-                            if (longClick) SettingsPage.GraceLongShortcut else SettingsPage.GraceTapShortcut
-                        } else if (longClick) SettingsPage.GraceLongApp else SettingsPage.GraceTapApp)
+                    SettingsPage.GraceButton, SettingsPage.Gestures -> GraceButtonSettingsScreen(uiState, actions, back,
+                        // 上游同步 v1.1.8 S3：home = 手势面（homeGestures 模型）；按钮图标设计随 IconDesigner
+                        home = page == SettingsPage.Gestures,
+                        onEditIcon = {
+                            if (isCurrent()) {
+                                navController.navigate(SettingsPage.IconDesigner.name)
+                                navController.currentBackStackEntry?.savedStateHandle?.set("icon_designer_app",
+                                    com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key)
+                            }
+                        }) { gesture ->
+                        if (isCurrent()) navController.navigate(
+                            "${SettingsPage.GraceAction.name}/${gesture.name}?home=${page == SettingsPage.Gestures}") { launchSingleTop = true }
                     }
-                    SettingsPage.GraceTapApp, SettingsPage.GraceLongApp -> {
-                        val longClick = page == SettingsPage.GraceLongApp
-                        val target = if (longClick) uiState.settings.graceButton.longPress else uiState.settings.graceButton.tap
+                    SettingsPage.GraceAction -> {
+                        val gesture = GraceButtonGesture.entries.firstOrNull { it.name == entry.arguments?.getString("gesture") } ?: GraceButtonGesture.Tap
+                        val home = entry.arguments?.getBoolean("home") == true
+                        GraceButtonActionSettings(gesture, uiState, actions, back, home) { action ->
+                            val destination = when (action) {
+                                GraceButtonAction.Folder -> SettingsPage.GraceFolder
+                                GraceButtonAction.Shortcut -> SettingsPage.GraceShortcut
+                                else -> SettingsPage.GraceApp
+                            }
+                            if (isCurrent()) navController.navigate("${destination.name}/${gesture.name}?home=$home") { launchSingleTop = true }
+                        }
+                    }
+                    SettingsPage.GraceApp -> {
+                        val gesture = GraceButtonGesture.entries.firstOrNull { it.name == entry.arguments?.getString("gesture") } ?: GraceButtonGesture.Tap
+                        val home = entry.arguments?.getBoolean("home") == true
+                        val target = uiState.settings.gestureSettings(home).target(gesture)
                         AppSelectionSettings(uiState, actions, back, title = stringResource(R.string.grace_button_open_app),
                             tag = "grace_button_app", selectedKey = target.itemKey.takeIf { target.action == GraceButtonAction.App }, excludeOwnApp = false,
                             onSelect = { key -> if (isCurrent() && key != null) {
-                                // 上游同步 v1.1.8：withTarget(gesture, ...)
-                                actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(
-                                    if (longClick) GraceButtonGesture.LongPress else GraceButtonGesture.Tap,
-                                    GraceButtonTarget(GraceButtonAction.App, key))) }
+                                actions.updateSettings { it.withGestureSettings(home) { settings -> settings.withTarget(gesture, GraceButtonTarget(GraceButtonAction.App, key)) } }
                                 back()
                             } })
                     }
-                    SettingsPage.GraceTapShortcut, SettingsPage.GraceLongShortcut -> {
-                        val longClick = page == SettingsPage.GraceLongShortcut
-                        val target = if (longClick) uiState.settings.graceButton.longPress else uiState.settings.graceButton.tap
+                    SettingsPage.GraceFolder -> {
+                        val gesture = GraceButtonGesture.entries.firstOrNull { it.name == entry.arguments?.getString("gesture") } ?: GraceButtonGesture.Tap
+                        val home = entry.arguments?.getBoolean("home") == true
+                        val target = uiState.settings.gestureSettings(home).target(gesture)
+                        val selectedFolder = uiState.folders.firstOrNull { target.action == GraceButtonAction.Folder && it.key == target.itemKey }
+                        FolderSettings(uiState, actions, back, selectedIds = setOfNotNull(selectedFolder?.id), singleChoice = true,
+                            onToggle = { id ->
+                                val folder = uiState.folders.firstOrNull { it.id == id }
+                                if (isCurrent() && folder != null) {
+                                    actions.updateSettings { it.withGestureSettings(home) { settings -> settings.withTarget(gesture,
+                                        GraceButtonTarget(GraceButtonAction.Folder, folder.key)) } }
+                                    back()
+                                }
+                            },
+                            onEdit = { id -> if (isCurrent()) navController.navigate("FolderEditor/${android.net.Uri.encode(id)}") })
+                    }
+                    SettingsPage.GraceShortcut -> {
+                        val gesture = GraceButtonGesture.entries.firstOrNull { it.name == entry.arguments?.getString("gesture") } ?: GraceButtonGesture.Tap
+                        val home = entry.arguments?.getBoolean("home") == true
+                        val target = uiState.settings.gestureSettings(home).target(gesture)
                         val pickerScope = rememberCoroutineScope()
                         var saving by remember { mutableStateOf(false) }
                         ShortcutPickerScreen(uiState, actions, setOfNotNull(target.itemKey.takeIf { target.action == GraceButtonAction.Shortcut }),
@@ -217,9 +266,8 @@ fun LauncherSettingsScreen(
                                 pickerScope.launch {
                                     try {
                                         if (actions.rememberShortcut(app) && isCurrent()) {
-                                            actions.updateSettings { it.copy(graceButton = it.graceButton.withTarget(
-                                                if (longClick) GraceButtonGesture.LongPress else GraceButtonGesture.Tap,
-                                                GraceButtonTarget(GraceButtonAction.Shortcut, app.key))) }
+                                            actions.updateSettings { it.withGestureSettings(home) { settings -> settings.withTarget(gesture,
+                                                GraceButtonTarget(GraceButtonAction.Shortcut, app.key)) } }
                                             back()
                                         }
                                     } finally { saving = false }
@@ -227,6 +275,8 @@ fun LauncherSettingsScreen(
                             })
                     }
                     SettingsPage.Weather -> WeatherSettings(uiState, actions, back)
+                    SettingsPage.LabGraceButton -> LabGraceButtonSettings(uiState, actions, back)
+                    SettingsPage.LabGesture -> LabGestureSettings(uiState, actions, back)
                     SettingsPage.ListAppearance -> ListAppearanceSettings(uiState, actions, back) { }
                     SettingsPage.ShortcutsFolders -> ShortcutsFoldersSettingsScreen(uiState, actions, back)
                     SettingsPage.Alphabet -> AlphabetSettings(uiState, actions, back) { }
@@ -255,19 +305,8 @@ fun LauncherSettingsScreen(
                         },
                     )
                     SettingsPage.Calendar -> CalendarSettings(uiState, actions, back)
-                    SettingsPage.Advanced -> SettingsScaffold(stringResource(R.string.settings_advanced), "settings_advanced", back) { padding ->
-                        Box(
-                            Modifier.fillMaxSize().padding(padding).padding(24.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                stringResource(R.string.settings_coming_soon),
-                                Modifier.testTag("settings_advanced_coming_soon"),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    // 上游同步 v1.1.8 S3：Advanced 页 = Lab 入口（原 coming-soon 占位移除）
+                    SettingsPage.Advanced -> AdvancedSettings(back, navigate)
                     SettingsPage.About -> AboutSettings(back, navigate)
                     SettingsPage.HiddenApps -> HiddenAppsSettings(uiState, actions, back)
                     SettingsPage.PrivateSpace -> PrivateSpaceSettings(uiState, actions, back) { navigate(SettingsPage.PrivateSpaceEditor) }

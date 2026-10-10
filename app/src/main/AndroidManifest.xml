@@ -57,6 +57,23 @@
             </intent-filter>
         </service>
 
+        <!-- 上游同步 v1.1.8 S3：Grace 无障碍服务（无事件订阅/无窗口内容读取/无手势注入，
+             仅 performGlobalAction 三个动作：锁屏/拉通知栏/拉快捷设置）。
+             服务落模块 App 进程；宿主 com.miui.home 进程的手势/按钮动作经 GRACE 桥
+             Cmd.SYSTEM_ACTION 跨进程触发（GraceCommandReceiver → GraceAccessibilityService）。 -->
+        <service
+            android:name="com.galaxyrio.gracelauncher.platform.GraceAccessibilityService"
+            android:exported="false"
+            android:label="HomeMode4Miui system actions"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/grace_accessibility_service" />
+        </service>
+
         <!-- keep1：进程保活入口。宿主 com.miui.home（常驻前台）在桌面挂载/首页
              交互时跨包 startService 拉起模块进程（引擎幂等）；Magisk service.d
              守护脚本亦经此入口拉起。exported=true 仅暴露"幂等启动引擎"一个

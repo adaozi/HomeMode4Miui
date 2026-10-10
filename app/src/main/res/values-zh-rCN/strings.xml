@@ -448,4 +448,37 @@
     <string name="popup_silent_notifications">静默通知</string>
     <string name="popup_swipe_left_first_summary">打开弹出窗口中的第一个快捷方式、应用或小组件所属应用</string>
     <string name="shortcuts_folders_enable">启用应用弹出窗口</string>
+
+    <string name="edit_icon">修改图标</string>
+    <string name="grace_accessibility_explanation">这些操作需要 Android 无障碍权限，不需要 root。请在系统设置的已安装应用或已下载服务中启用 Grace Launcher。Grace 只执行您主动触发的操作，不读取屏幕内容，也不监控您的活动。您可随时撤销权限。</string>
+    <string name="grace_accessibility_required">执行系统操作需要无障碍权限。</string>
+    <string name="grace_accessibility_title">允许执行系统操作</string>
+    <string name="grace_action_unavailable">此操作在当前设备上不可用。</string>
+    <string name="grace_button_agenda">打开日程和天气小组件</string>
+    <string name="grace_button_assistant">打开语音助手</string>
+    <string name="grace_button_double_tap">双击</string>
+    <string name="grace_button_lock_screen">关闭屏幕</string>
+    <string name="grace_button_notifications">下拉通知栏</string>
+    <string name="grace_button_open_app_list">打开应用列表</string>
+    <string name="grace_button_open_website">打开网址</string>
+    <string name="grace_button_quick_settings">打开控制中心</string>
+    <string name="grace_button_swipe_down">向下滑动</string>
+    <string name="grace_button_swipe_left">向左滑动</string>
+    <string name="grace_button_swipe_right">向右滑动</string>
+    <string name="grace_button_swipe_up">向上滑动</string>
+    <string name="grace_button_url">网址</string>
+    <string name="grace_button_url_error">请输入有效的 HTTP 或 HTTPS 网址。</string>
+    <string name="grace_button_url_hint">example.com 或 https://example.com</string>
+    <string name="home_gesture_double_tap">双击空白区域</string>
+    <string name="home_gestures_enable">启用手势</string>
+    <string name="lab_animation">动画</string>
+    <string name="lab_double_tap_interval">双击识别间隔</string>
+    <string name="lab_double_tap_interval_summary">桌面空白区域两次点击之间允许的最长时间。间隔越长，双击越容易识别。</string>
+    <string name="lab_milliseconds">%1$d 毫秒</string>
+    <string name="lab_percentage">%1$d%%</string>
+    <string name="lab_swipe_sensitivity">滑动灵敏度</string>
+    <string name="lab_swipe_sensitivity_summary">数值越高，桌面上下划和下划关闭搜索越容易触发。100% 使用默认的距离和速度阈值。</string>
+    <string name="settings_lab">实验室</string>
+
+    <string name="grace_accessibility_description">通过 Grace 按钮或主页手势锁屏或打开通知栏、控制中心，不读取或存储屏幕内容。</string>
 </resources>

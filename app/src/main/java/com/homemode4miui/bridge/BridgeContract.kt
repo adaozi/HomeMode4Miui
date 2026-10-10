@@ -80,6 +80,9 @@ object GraceBridge {
         // notif1：宿主挂载拉取快照（无参数）。引擎指纹去重是持久单例 —— 宿主桌面重启后
         // （装新 APK / 桌面进程被杀），重启前发出的通知/媒体快照不会重发，必须显式拉取。
         const val SNAPSHOT_REFRESH = "snapshot_refresh"
+        // 上游同步 v1.1.8 S3：宿主手势/按钮 → 模块进程无障碍服务执行
+        // 锁屏/拉通知栏/拉快捷设置（arg1 = GraceButtonAction.name）
+        const val SYSTEM_ACTION = "system_action"
     }
 
     // ================= 媒体快照 =================
