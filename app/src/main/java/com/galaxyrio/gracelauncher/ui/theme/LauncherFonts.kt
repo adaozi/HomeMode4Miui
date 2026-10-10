@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import com.galaxyrio.gracelauncher.data.AppFont
 import com.galaxyrio.gracelauncher.data.ClockFontStore
+import com.galaxyrio.gracelauncher.data.FontLibrary
 import com.galaxyrio.gracelauncher.data.ClockPresetFont
 import com.homemode4miui.util.ModLog
 import kotlinx.coroutines.Dispatchers
@@ -85,12 +86,72 @@ internal val LocalFontLibrary = androidx.compose.runtime.staticCompositionLocalO
 }
 
 @Composable
-internal fun rememberAppFontFamily(id: String?): FontFamily = remember(id) {
-    when (id) {
-        null -> LauncherFontFamily
-        AppFont.System.id -> FontFamily.Default
-        else -> LauncherFontFamily
+internal fun rememberAppFontFamily(id: String?, library: FontLibrary = LocalFontLibrary.current): FontFamily {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember(id, library) {
+        when {
+            id == null -> LauncherFontFamily
+            id == AppFont.System.id -> FontFamily.Default
+            else -> {
+                // 上游同步 v1.1.8 S5：请求字体优先，其后字体库 selected 顺序逐级回退
+                // （上游 v1.1.8 rememberAppFontFamily 语义；assets 架构定制版 —— 见 libraryChainTypeface）。
+                val ids = (listOfNotNull(id) + library.selected).distinct()
+                libraryChainTypeface(context, ids, 400)?.let(::FontFamily) ?: LauncherFontFamily
+            }
+        }
     }
+}
+
+/** 上游同步 v1.1.8 S5：字体库来源 —— preset/主字体走 assets，导入字体走 clock_fonts 文件。 */
+private sealed interface LibraryFontSource {
+    data class Asset(val path: String) : LibraryFontSource
+    data class Imported(val file: java.io.File) : LibraryFontSource
+}
+
+private fun libraryFontSource(context: Context, id: String): LibraryFontSource? = when {
+    id == com.galaxyrio.gracelauncher.data.FontLibrary.Josefin -> LibraryFontSource.Asset(PRIMARY_FONT_ASSET)
+    id == AppFont.System.id -> null
+    else -> ClockPresetFont.entries.firstOrNull { it.assetFile == id }
+        ?.let { LibraryFontSource.Asset("fonts/" + it.assetFile + ".ttf") }
+        ?: ClockFontStore(context).file(id)?.let { LibraryFontSource.Imported(it) }
+}
+
+// 缓冲区缓存：同源多权重共享 native buffer（对齐 NotoFallbackApi29 的 baseFonts 策略）。
+private val libraryAssetBases = mutableMapOf<String, PlatformFont>()
+private val libraryFileBases = mutableMapOf<String, PlatformFont>()
+
+/**
+ * v1.1.8 字体库回退链：ids 顺序 = CustomFallbackBuilder 逐级 fallback。
+ * 链上任何一环失败整体回落 null（调用方回 LauncherFontFamily，绝不让桌面进程死亡）。
+ */
+internal fun libraryChainTypeface(context: Context, ids: List<String>, weight: Int): Typeface? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+    val sources = ids.mapNotNull { libraryFontSource(context, it) }
+    if (sources.isEmpty()) return null
+    return runCatching {
+        fun family(source: LibraryFontSource): PlatformFontFamily {
+            val base = when (source) {
+                is LibraryFontSource.Asset -> libraryAssetBases.getOrPut(source.path) {
+                    PlatformFont.Builder(context.assets, source.path).build()
+                }
+                is LibraryFontSource.Imported -> libraryFileBases.getOrPut(source.file.absolutePath) {
+                    PlatformFont.Builder(source.file).build()
+                }
+            }
+            val font = PlatformFont.Builder(base.buffer)
+                .setTtcIndex(base.ttcIndex)
+                .setFontVariationSettings("'wght' $weight")
+                .setWeight(weight)
+                .setSlant(PlatformFontStyle.FONT_SLANT_UPRIGHT)
+                .build()
+            return PlatformFontFamily.Builder(font).build()
+        }
+        val builder = Typeface.CustomFallbackBuilder(family(sources.first()))
+        sources.drop(1).forEach { builder.addCustomFallback(family(it)) }
+        builder.setStyle(PlatformFontStyle(weight, PlatformFontStyle.FONT_SLANT_UPRIGHT))
+            .setSystemFallback("sans-serif")
+            .build()
+    }.onFailure { ModLog.e("font library chain build failed, fallback to Josefin", it) }.getOrNull()
 }
 
 /** Async per-weight faces keep imported variable fonts responsive without losing bold roles. */

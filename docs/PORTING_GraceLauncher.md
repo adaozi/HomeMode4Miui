@@ -1143,7 +1143,7 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
 
 ### ② GitHub 发布准备 —— ✅ 已完成（2026-10-09）
 
-- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\*\\\*（Public，GPL-3.0），>
+- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\\\\\*\\\\\\\*（Public，GPL-3.0），>
 
   首次入库 commit `b5fb742`（255 文件 / 31536 行），分支 main，tag
 
@@ -1321,64 +1321,49 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
 
 ### gestures1（v2.9.25-grace-gestures1 / versionCode 58，2026-10-11）—— §9 落地：S3 桌面手势 + Lab
 
-- [x] **手势检测**：LauncherListGestures.kt v1.1.8 整文件（LauncherListGestureConnection 取代
-  HomeOverscrollConnection，原生 stretch 效果保留；零消费观察，行内拖拽/widget/滚动不被打断）；
-  HomeScreen 接线 onHomeGesture + observeBlankDoubleTaps（双击；弹层禁用时保持节点挂载防连坐取消）；
+- [x] **手势检测**：LauncherListGestures.kt v1.1.8 整文件（LauncherListGestureConnection 取代  
+  HomeOverscrollConnection，原生 stretch 效果保留；零消费观察，行内拖拽/widget/滚动不被打断）；  
+  HomeScreen 接线 onHomeGesture + observeBlankDoubleTaps（双击；弹层禁用时保持节点挂载防连坐取消）；  
   AppSearchScreen 顶部下拉关闭（v1.1.7 特性；swipeSensitivity 显式参数由 Route 透传）。
-- [x] **动作分发**：Route performGestureAction（上游 performGestureAction 语义裁剪版）——
-  Search/AppList/App/Shortcut/Folder/Agenda/Settings 宿主进程内直达；
+- [x] **动作分发**：Route performGestureAction（上游 performGestureAction 语义裁剪版）——  
+  Search/AppList/App/Shortcut/Folder/Agenda/Settings 宿主进程内直达；  
   GraceHomeUiState apps + savedShortcutApps 双池按键解析。
-- [x] **系统动作跨进程**：GraceSystemActions.kt（Website/Assistant 宿主进程直接 startActivity）；
-  LockScreen/Notifications/QuickSettings 走 **GRACE 桥 Cmd.SYSTEM_ACTION**（arg1=action.name）→
-  模块 App 进程 GraceAccessibilityService.perform（manifest 注册服务 + xml 配置，无事件订阅/无窗口
+- [x] **系统动作跨进程**：GraceSystemActions.kt（Website/Assistant 宿主进程直接 startActivity）；  
+  LockScreen/Notifications/QuickSettings 走 **GRACE 桥 Cmd.SYSTEM_ACTION**（arg1=action.name）→  
+  模块 App 进程 GraceAccessibilityService.perform（manifest 注册服务 + xml 配置，无事件订阅/无窗口  
   内容读取/无手势注入，仅 performGlobalAction 三动作）。
-- [x] **设置面**：GraceButtonSettings 页 v1.1.8（home 双面：按钮/手势；GraceButtonActionSettings
-  目标编辑：App/Shortcut/Folder/Website/系统动作 + GraceSystemAccessDialog 引导）；
-  参数化路由 GraceAction/{gesture}?home={home}（旧 GraceTap*/GraceLong* 四页移除）；
-  LabSettings（Advanced 页 = Lab 入口：动画时长/滑动灵敏度/双击间隔，带重置）；
+- [x] **设置面**：GraceButtonSettings 页 v1.1.8（home 双面：按钮/手势；GraceButtonActionSettings  
+  目标编辑：App/Shortcut/Folder/Website/系统动作 + GraceSystemAccessDialog 引导）；  
+  参数化路由 GraceAction/{gesture}?home={home}（旧 GraceTap\*/GraceLong* 四页移除）；  
+  LabSettings（Advanced 页 = Lab 入口：动画时长/滑动灵敏度/双击间隔，带重置）；  
   ProductivitySettings Gestures 行恢复（S2 降级登记 ① 消除）。
 - [x] 构建：assembleRelease 通过，7.92MB（R8 后），versionCode 58。
-- [ ] **装机回归**：① 桌面上滑/下滑/双击触发（homeDefaults：上滑=搜索、下滑=通知栏、双击默认关）；
-  ② 无障碍服务授权后锁屏/通知栏/快捷设置三动作跨进程生效（设置 → 更多设置 → 已下载的无障碍服务）；③
+- [ ] **装机回归**：① 桌面上滑/下滑/双击触发（homeDefaults：上滑=搜索、下滑=通知栏、双击默认关）；  
+  ② 无障碍服务授权后锁屏/通知栏/快捷设置三动作跨进程生效（设置 → 更多设置 → 已下载的无障碍服务）；③  
   搜索页顶部下拉关闭；④ Lab 灵敏度/双击间隔调节实时生效；⑤ 行内拖拽弹层/桌面滚动与手势零冲突。
-- [ ] **降级登记**：① 无障碍服务未授权时三系统动作静默失效（bridge 侧安全丢弃，UI 引导随
-  GraceButton 页 GraceSystemAccessDialog，需用户手动到系统设置开启）；② GraceButtonTransition
-  英雄动画（搜索/抽屉/锁屏过渡）随 S4 接线，当前手势动作瞬时直达；③ GraceButton 按钮本体渲染
+- [ ] **降级登记**：① 无障碍服务未授权时三系统动作静默失效（bridge 侧安全丢弃，UI 引导随  
+  GraceButton 页 GraceSystemAccessDialog，需用户手动到系统设置开启）；② GraceButtonTransition  
+  英雄动画（搜索/抽屉/锁屏过渡）随 S4 接线，当前手势动作瞬时直达；③ GraceButton 按钮本体渲染  
   尚未挂上桌面（组件与动画已就位，随 S4）。
 
-### button1（v2.9.26-grace-button1 / versionCode 59，2026-10-11）—— §9 落地：S4 Grace Button 重做
+### fonts1（v2.9.28-grace-fonts1 / versionCode 61，2026-10-11）—— §9 落地：S5 字体管理器（S6 随 S2 已就位）
 
-- [x] **按钮本体挂载**：GraceButton 组件 v1.1.8 渲染于首页右下（BottomEnd，end=LauncherLayout.End /
-  bottom=22dp+bottomInset，对齐 LauncherScreen.kt:1052-1060）；编辑态显示 + onFinishEditing 完成键；
-  tap/长按/双击/四向滑动 → performGestureAction（origin=按钮当前姿态，hero 动画圆心）。
-- [x] **过渡状态机**：buttonTransition + instantButtonEntrance + 生命周期观察（ON_PAUSE 清未决/锁屏黑场保留、
-  ON_RESUME 清残留）+ LaunchedEffect 动画执行；searchAlpha snap 揭幕（过渡期全透明等待遮罩揭开）；
-  GraceButtonTransitionOverlay 根级渲染（hero 圆形展开 / 锁屏黑场遮罩）；Search/AppList 动画时长走 Lab 设置
-  （100–1500ms）；锁屏末帧提交 + 1.5s isInteractive/isKeyguardLocked 启发式撤罩（OEM 接受不执行兜底），
-  锁屏动作经桥 Cmd.SYSTEM_ACTION 跨进程委派。
-- [x] **宿主视图**：GraceHomeSettings +graceButton 字段（SP grace_launcher_settings + Room mutate/seed/read
-  三路径贯通；graceButtonJson 列 schema v17 已有，零 migration）。
-- [x] 构建：assembleRelease 通过，7.97MB（R8 后），versionCode 59。
-- [ ] **装机回归**：① 按钮右下渲染 + 点按/长按动作触发；② 搜索/AppList 英雄过渡（Lab 动画时长生效、
-  动画关 = 瞬时直达）；③ 锁屏动作：遮罩黑场 → 锁屏 → 亮屏无残留遮罩；④ 编辑态按钮拖拽定位 + 完成键；
-  ⑤ 无障碍三动作（锁屏/通知栏/快捷设置）跨进程生效。
-- [ ] **降级登记**：① 按钮图标设计器自定义 artwork/design 面随 itemIcons 进宿主 UI 后接入（当前
-  GraceButtonIcon.defaults）；② graceReveal rail 揭幕联动未接（drawerTransition 只驱动遮罩）；
-  ③ LocalLauncherInputEnabled 全局门控未提供（按钮自带 enabled 门控，风险面已覆盖）。
-
-### fix1（v2.9.27-grace-fix1 / versionCode 60，2026-10-11）—— §9 落地：S7 弹层/文件夹/外观修复（小批）
-
-- [x] **Dim Wallpaper 自定义遮罩色**（v1.1.7 特性）：route 的 hotfix6 手写 tone 版改走上游
-  `appearance.wallpaperTint(primary, settings.listAppearance.wallpaperDimColor)` 扩展（IconColor.resolve，
-  automatic 兜底语义一致）；遮罩色设置项在 ListAppearance 页（S2 已就位）即时生效。
-- [x] **文件夹左滑打开内部第一项**（v1.1.7 特性）：Route `openFirstItem`（模块文件夹版 = appKeys 首个应用
-  直启；上游弹层首项版依赖宿主 popups 模型，随 P5 弹层批次扩展）+ rowGestures
-  `popupsEnabled`/`onOpenFirst`（开关 = ShortcutsFoldersSettings.swipeLeftToOpenFirst，设置页 S2 已就位）；
-  收藏区/抽屉 FolderRow onSwipeLeft 双挂点接通。
-- [x] 构建：assembleRelease 通过，7.97MB，versionCode 60。
-- [ ] **装机回归**：① ListAppearance 页自定义遮罩色 → 抽屉/搜索壁纸遮罩即时变色；② ShortcutsFolders 页
-  开"左滑打开首项" → 收藏/抽屉文件夹行左滑直启第一个应用；③ 关闭弹层（shortcutsFolders.enabled=false）
-  时行内拖拽不再唤出弹层（popupsEnabled 门控）。
-- [ ] **降级登记**：① 弹层首项版 openFirstItem（含快捷方式兜底/冷却校验）随 P5 popups 模型进宿主 UI；
-  ② ShortcutPopup 双击冲突修复（上游 +45 行）未搬——模块 ShortcutPopup 裁剪版 197 行差异，随 P4 弹层
-  同步批次；③ 导航栏沉浸：模块列表本就延伸到导航栏之后（windowInsetsPadding 仅横向），视为已满足。
+- [x] **字体库回退链（assets 架构定制版）**：rememberAppFontFamily(id, library) 升级 v1.1.8 语义 ——
+  请求字体优先 + library.selected 顺序 CustomFallbackBuilder 逐级回退（libraryChainTypeface，
+  PlatformFont buffer 缓冲复用同 NotoFallbackApi29 策略）；来源解析：Josefin/主字体走 assets、
+  AppFont preset 走 assets/fonts、导入字体走 clock_fonts 文件（ClockFontStore.file(id)）；
+  链构建 runCatching 全兜底回落 LauncherFontFamily（桌面零崩溃铁律）。
+- [x] **Fonts 管理页**：FontLibrarySettings.kt（S2 已拷）注册进 LauncherSettingsScreen + ThemeSettings
+  onFonts 接通（S2 降级登记 ② 消除）；删除导入字体 = actions.deleteFonts → ClockFontStore.delete
+  （file 校验 + cache.evictAll），SettingsViewModel 接线。
+- [x] **宿主视图**：GraceHomeSettings +fontLibrary 字段（SP/Room 三路径）；Route 根 provider 增
+  LocalFontLibrary provides settings.fontLibrary（桌面回退链 + 设置页预览共用）。
+- [x] S6 IconDesigner：旋转/非标准图标/GraceButtonIcon 设计面已随 S2 整文件就位（无遗留项）。
+- [x] 构建：assembleRelease 通过，8.02MB（R8 后），versionCode 61。
+- [ ] **装机回归**：① Fonts 页（Themes → 字体）导入/排序/删除字体；② 字体库 selected 字体应用于桌面
+  文本（ListAppearance 字体 + 字体库链）；③ A-Z/ListAppearance 设置页预览随字体库实时变化；
+  ④ 导入字体删除后相关界面不崩（缓存清空 + 回退链收窄）；⑤ Room v21 fontLibraryJson 持久化。
+- [ ] **降级登记**：① API 29 以下无 CustomFallbackBuilder（minSdk 28 设备回落 LauncherFontFamily，
+  宿主 HyperOS 均为 Q+，无实际影响面）；② appFontId 旧单选列不再直接生效（并入字体库迁移语义，
+  FontLibrary.decode legacy 参数保留）；③ ListAppearance.fontId 指向导入字体已支持（libraryFontSource
+  按文件解析），preset 显示名沿用 appFontLabel。

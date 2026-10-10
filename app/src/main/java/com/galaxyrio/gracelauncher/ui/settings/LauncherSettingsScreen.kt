@@ -77,7 +77,7 @@ internal enum class SettingsPage {
     Changelog, Licenses, AppLicense, IconPacks, IconDesigner, IconDesignerApp, PrivateSpace, PrivateSpaceEditor, Search,
     MediaPlayer, GraceButton,
     // 上游同步 v1.1.8（S2）：A-Z 列表 + 列表外观设置页（Fonts 页随 S5 批次补）
-    ListAppearance, Alphabet, ShortcutsFolders,
+    ListAppearance, Alphabet, ShortcutsFolders, Fonts,
     // 上游同步 v1.1.8（S3）：手势目标编辑 + Lab；旧 GraceTap*/GraceLong* 四页被
     // GraceAction/{gesture}?home={home} 参数化路由取代
     GraceAction, GraceApp, GraceShortcut, GraceFolder, Gestures, LabGraceButton, LabGesture,
@@ -275,6 +275,7 @@ fun LauncherSettingsScreen(
                             })
                     }
                     SettingsPage.Weather -> WeatherSettings(uiState, actions, back)
+                    SettingsPage.Fonts -> FontSettings(uiState, actions, back)
                     SettingsPage.LabGraceButton -> LabGraceButtonSettings(uiState, actions, back)
                     SettingsPage.LabGesture -> LabGestureSettings(uiState, actions, back)
                     SettingsPage.ListAppearance -> ListAppearanceSettings(uiState, actions, back) { }
@@ -282,8 +283,7 @@ fun LauncherSettingsScreen(
                     SettingsPage.Alphabet -> AlphabetSettings(uiState, actions, back) { }
                     SettingsPage.Themes -> ThemeSettings(uiState, actions, back,
                         onClockStyle = { navigate(SettingsPage.ClockStyle) }, onIconPacks = { navigate(SettingsPage.IconPacks) },
-                        // Fonts 页随 S5 字体管理器批次补齐，先挂空导航（页面行仍显示，点击无跳转）
-                        onFonts = { }, onListAppearance = { navigate(SettingsPage.ListAppearance) },
+                        onFonts = { navigate(SettingsPage.Fonts) }, onListAppearance = { navigate(SettingsPage.ListAppearance) },
                         onAlphabet = { navigate(SettingsPage.Alphabet) })
                     SettingsPage.ClockStyle -> ClockStyleSettings(uiState, actions, back)
                     SettingsPage.IconPacks -> IconPackSettings(uiState, actions, back) { navigate(SettingsPage.IconDesigner) }

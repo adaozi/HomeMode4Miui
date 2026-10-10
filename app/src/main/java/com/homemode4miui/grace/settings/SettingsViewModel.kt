@@ -270,6 +270,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             send(GraceSettingsBridge.Cmd.DELETE_ICON_DESIGNS, json = JSONArray(keys.toList()).toString())
             true
         },
+        // 上游同步 v1.1.8 S5：字体管理器删除导入字体（ClockFontStore.delete，typeface 缓存同步清空）
+        deleteFonts = { ids ->
+            runCatching {
+                com.galaxyrio.gracelauncher.data.ClockFontStore(getApplication()).delete(ids)
+                true
+            }.getOrDefault(false)
+        },
         setHiddenApps = { keys ->
             _uiState.update { it.copy(hiddenAppKeys = keys) }
             send(GraceSettingsBridge.Cmd.SET_HIDDEN_APPS, json = JSONArray(keys.toList()).toString())

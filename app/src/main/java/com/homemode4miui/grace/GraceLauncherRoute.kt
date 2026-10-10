@@ -143,7 +143,9 @@ fun GraceLauncherRoute(viewModel: GraceHomeViewModel, hostActivity: Activity? = 
     val listAppearanceState = viewModel.uiState.collectAsState()
     androidx.compose.runtime.CompositionLocalProvider(
         androidx.activity.compose.LocalOnBackPressedDispatcherOwner provides backDispatcherOwner,
-        com.galaxyrio.gracelauncher.ui.components.LocalListAppearance provides listAppearanceState.value.settings.listAppearance
+        com.galaxyrio.gracelauncher.ui.components.LocalListAppearance provides listAppearanceState.value.settings.listAppearance,
+        // 上游同步 v1.1.8 S5：字体库全局提供（桌面文本回退链 + 设置页预览共用）
+        com.galaxyrio.gracelauncher.ui.theme.LocalFontLibrary provides listAppearanceState.value.settings.fontLibrary
     ) {
         GraceLauncherRouteContent(viewModel, hostActivity)
     }

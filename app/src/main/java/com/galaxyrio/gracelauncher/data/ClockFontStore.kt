@@ -87,6 +87,15 @@ class ClockFontStore(context: Context) {
         }.getOrNull()?.also { synchronized(cache) { cache.put(key, CachedTypeface(it, file.length().toInt().coerceAtLeast(1))) } }
     }
 
+    /** 上游同步 v1.1.8 S5：仅私有导入字体可解析为文件（bundled preset 永不落此目录）。 */
+    fun file(id: String): File? = if (validId(id)) File(directory, id).takeIf { it.isFile } else null
+
+    /** 上游同步 v1.1.8 S5：删除导入字体并清空 typeface 缓存（FontSettings 管理页消费）。 */
+    suspend fun delete(ids: Set<String>) = withContext(Dispatchers.IO) {
+        ids.forEach { id -> file(id)?.let { target -> check(target.delete()) { "Unable to delete imported font" } } }
+        synchronized(cache) { cache.evictAll() }
+    }
+
     companion object {
         fun displayName(id: String): String? = id.takeIf(::validId)?.substringAfter('_')?.substringBeforeLast('.')
 
