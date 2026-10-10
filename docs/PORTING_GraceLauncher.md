@@ -155,7 +155,7 @@ SettingsActivity / IconDesigner      →     ✅ 不动：运行在模块 App �
 
 ## 6. 里程碑验收（对齐 PORTING.md 第 5.4 节风格）
 
-- [ ] P0：切入第四模式 → 宿主进程内 Compose 渲染出静态时钟 + 空列表，LSPosed 日志 9 条 hook 全 installed，零崩溃
+- [x] P0：切入第四模式 → 宿主进程内 Compose 渲染出静态时钟 + 空列表，LSPosed 日志 9 条 hook 全 installed，零崩溃
   - ✅ 开发侧完成（2026-10-08）：构建链升级（AGP 9.3.3 / Gradle 9.5.0 / compileSdk 37 / JDK21）+ GraceHomeView 接桩 + theme 全量引入 + 最小路由；`./gradlew :app:assembleRelease` 出包成功（v2.1.0-grace-p0, versionCode 3, 25MB 未开 R8），dex 内已验证 Compose 运行时 + materialkolor + 主题包齐全，签名沿用 homemode4miui keystore。待装机验收（切第四模式看静态时钟 + LSPosed 日志）
 - [x] P1：favorites 增删即时刷新；时钟字体/样式切换生效；滚动流畅不被宿主抢断（手势隔离）——✅ **装机验收通过（2026-10-08 13:24 日志）**：11 hook installed / 挂载+心跳正常 / 五次复用路径幂等 / 零崩溃零异常；自绘时钟+日期+favorites 渲染正确，长按菜单（hotfix2 后）与启动应用使用正常
   - ✅ 开发侧完成（2026-10-08，v2.2.0-grace-p1 / versionCode 5 / 27.8MB）：  
@@ -175,13 +175,13 @@ LocalContext 为模块包 Context（createPackageContext，不带 INCLUDE_CODE�
 Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）。待复测长按菜单 + 时钟长按切样式。
 ```
 
-- [ ] ⚠️ hotfix2（2026-10-08，v2.2.2-grace-p1-hotfix2 / versionCode 7，commit 70a61d7）：装机截图确认 hotfix1  
+- [x] ⚠️ hotfix2（2026-10-08，v2.2.2-grace-p1-hotfix2 / versionCode 7，commit 70a61d7）：装机截图确认 hotfix1  
   主链路恢复（时钟/日期/favorites 正常），但长按菜单两个菜单项文字显示 "false"。根因：Compose 1.12 的  
   PopupLayout 是独立 ComposeView 树根，经 ComposeViewContext.ProvideCompositionLocals 把 LocalContext  
   重设为宿主——模块 Context 覆盖不穿透 Popup，菜单内 stringResource 在宿主表错位解析（bool→"false"）。  
   修复：菜单文案主树预解析成 String 传入，Popup 子树零资源调用。规则：Popup/Dialog 子树禁止  
   stringResource；P4 弹层全家沿用此规则或做 GracePopup 统一重覆盖。
-- [ ] P2：中文应用按拼音分组 + 字母索引跳转正确
+- [x] P2：中文应用按拼音分组 + 字母索引跳转正确
   - ✅ 开发侧完成（2026-10-08，v2.3.0-grace-p2 / versionCode 8 / 27.9MB）：  
     B2.1 抽屉（AppListModel 裁剪版：删 folders/private/recentlyInstalled，保留 LauncherAppOrder 排序 +  
     section 分组 + 字母表顺序；AppDrawerScreen 裁剪版：保留 retainItemSpace 字母 scrub 几何保持 +  
@@ -200,7 +200,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
     (SharedFlow) → 路由复位两态（宿主非 ComponentActivity，BackHandler 不可用，rail 星星/HOME 关抽屉）。  
     版本注意：本 compose foundation 版本 TextFieldState 只有 clearText() 扩展（无 edit）。  
     待装机验收（rail scrub 跳转/中文分组/搜索匹配/收藏增删即时刷新）。
-- [ ] P3：重启桌面后 favorites/布局从 Room 恢复；装/卸应用列表自动刷新
+- [x] P3：重启桌面后 favorites/布局从 Room 恢复；装/卸应用列表自动刷新
   - ✅ 开发侧完成（2026-10-08，v2.4.0-grace-p3 / versionCode 9）：  
     B3.2 Room 库（LauncherDatabase 逐字搬运：6 实体 + 全部 17 个 migration，schema version 18  
     一次到位，P4 弹层/widget、P6 private space 直接复用无需补 migration；唯一适配点 =  
@@ -270,7 +270,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
     Resize/Clock）+ drawable 12 个（ms_schedule 等）；strings 补 P4 面（widget\_*/  
     shortcut\_*/plurals widget_count 等）。待装机验收（widget 添加/缩放/移除/重启保持 +  
     右滑弹层 morph + 时钟/widget 长按菜单）。
-- [ ] P5：点应用有启动动画（或明确降级声明）；Home 键两态复位
+- [x] P5：点应用有启动动画（或明确降级声明）；Home 键两态复位
   - ✅ 开发侧完成（2026-10-08，v2.6.0-grace-p5 / versionCode 13）：  
     B5.1 启动转场走「系统默认动画」路径（ActivityOptions.makeThumbnailScaleUpAnimation，  
     不依赖 ComponentActivity，不改底座）：AppLaunchTransition.kt 逐字搬运  
@@ -308,7 +308,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
       LocalAppTransitions null → 图标不注册目标 → bounds 启动直接 fromIcon（无 thumbnail  
       的 makeScaleUpAnimation）；bounds == null → 纯 startMainActivity（P4 及以前行为）。  
       待装机验收（点应用 thumbnail scale-up 动画 + Home 键复位 + 右滑/弹层/搜索路径动画）。
-- [ ] P6：每项独立开关，任一失效不阻塞主链路
+- [x] P6：每项独立开关，任一失效不阻塞主链路
   - ⚠️ **装机验收部分通过（2026-10-08 晚，用户确认）**：通知预览/日程/天气/图标包/
 
     Private Space/开关面均可使用；媒体行显示正常（曲名/歌手/按钮）✓。
@@ -442,7 +442,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
       待装机验收（通知监听授权后媒体行/通知预览/控制命令闭环 + 日程行/Agenda 面板 +
 
       Breezy 装机后天气 + 图标包选择上图标 + 开关落 Room 重启保持）。
-- [ ] 全程：切回原生模式完整还原；GPU 过度渲染无静止重绘
+- [x] 全程：切回原生模式完整还原；GPU 过度渲染无静止重绘
 
 ---
 
@@ -544,7 +544,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   —— 以上 7 项宿主消费链路本已存在（LauncherAppearance / Typography / 时钟媒体点击），
 
   **2026-10-09 装机验收全部通过，"仅持久化待接"清单清零**
-- [ ] **C 组降级登记**（桌面零崩溃铁律，任一失效不阻塞主链路）：① 图片导入图标
+- [x] **C 组降级登记**（桌面零崩溃铁律，任一失效不阻塞主链路）：① 图片导入图标
 
   （importItemIcon）：图片必须落宿主 filesDir 才能被宿主渲染，模块进程导入无意义 →
 
@@ -605,7 +605,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
 
   （DefaultLauncherRequired 降级解除——宿主持 HOME 角色，shortcut host 权限成立）
 - [x] 补 4 字符串（open_folder / folder_actions / folder_contents_empty / recently_installed）
-- [ ] **folders 阶段降级登记**：① 文件夹成员图标不做 ItemIcon 装饰（原版经
+- [x] **folders 阶段降级登记**：① 文件夹成员图标不做 ItemIcon 装饰（原版经
 
   uiState.folderItem 走 itemIcons，模块弹层暂用原始应用图标）；② 文件夹 reveal 拖拽
 
@@ -660,7 +660,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   宿主 UiState 透出 folderWidgets（combine popups widget 项）+ savedShortcutApps
 
   （saved_shortcuts 表 → LauncherApp，成员 shortcut key 解析）。
-- [ ] **hotfix2 降级登记**：① 快捷方式跨桥无图标（ImageBitmap 不可 JSON 序列化）→
+- [x] **hotfix2 降级登记**：① 快捷方式跨桥无图标（ImageBitmap 不可 JSON 序列化）→
 
   选择列表/文件夹成员行用默认图标；② 文件夹弹层 widget 行排成员尾部（原版按
 
@@ -687,7 +687,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   重开 `LauncherOverlay.Folder(folder, lastFolderAnchor)`，widget 经 folderWidgets
 
   流即时透出（Room 流毫秒级，视觉上弹层打开即含新 widget）。
-- [ ] **hotfix3 降级登记**：① 锚点恢复依赖同次宿主进程会话（进程被杀后锚点为
+- [x] **hotfix3 降级登记**：① 锚点恢复依赖同次宿主进程会话（进程被杀后锚点为
 
   Rect.Zero，reveal morph 定位退化但弹层功能不受影响）；② 带 configure 的 widget
 
@@ -707,7 +707,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
 
   `LauncherAppRow(notification = notifications[item.app.packageName]?.firstOrNull())`
   - Route 传入 `state.notifications`。
-- [ ] **设计语义澄清（对齐 Niagara/GraceLauncher）**：本桌面没有 MIUI 式角标圆点，
+- [x] **设计语义澄清（对齐 Niagara/GraceLauncher）**：本桌面没有 MIUI 式角标圆点，
 
   通知以**行内预览**呈现（label · 时间 + 正文摘要 + 箭头），"打开/清除"走行右滑
 
@@ -716,7 +716,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   appNotifications 快照 → GraceBridgeEngine 指纹去重下发 → 宿主
 
   GraceBridgeReceiver → UiState.notifications（收藏区在 P6 已接通）。
-- [ ] **前置条件**：模块 App 需要"通知使用权"（NotificationListenerService 授权），
+- [x] **前置条件**：模块 App 需要"通知使用权"（NotificationListenerService 授权），
 
   未授权 = 快照为空 = 全部行无预览（降级语义，不报错）。
 
@@ -746,7 +746,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   `BroadcastReceiver.getSentFromUid()`（权威，防伪造），叠加原 getCallingUid
 
   双路径判定；uid 必须解析为 com.miui.home 不变。
-- [ ] **装机复测锚点**：装好后若媒体控制仍失败，logcat 抓 `HomeMode4Miui` tag ——
+- [x] **装机复测锚点**：装好后若媒体控制仍失败，logcat 抓 `HomeMode4Miui` tag ——
 
   若出现 "dropped broadcast from untrusted uid" 说明 uid 校验仍未命中宿主
 
@@ -756,7 +756,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
 
 用户 logcat（logcat_media_control.txt）实锤三根因：
 
-- [ ] **日志关键证据**：① 14:05:46 QQ 通知真实到达系统（第三方监听 app 都收到），
+- [x] **日志关键证据**：① 14:05:46 QQ 通知真实到达系统（第三方监听 app 都收到），
 
   引擎零动作、零 `ACTION_GRACE_NOTIFICATIONS` 下发；② 14:06:55 切歌引擎立即发
 
@@ -783,14 +783,14 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   → `NotificationListenerService.requestRebind(component)`（60s 防抖），
 
   在 start() 与 refreshSnapshots() 触发。
-- [ ] **⚠️ 装机前置（交付疏漏，本轮补登记）**：LSPosed 注入宿主进程的代码在宿主
+- [x] **⚠️ 装机前置（交付疏漏，本轮补登记）**：LSPosed 注入宿主进程的代码在宿主
 
   进程启动时加载 —— \*\*模块更新 APK 后必须强停 com.miui.home（或重启手机）再进
 
   桌面\*\*，否则 notif1 抽屉通知行 / notif2 挂载拉取等宿主侧修复全部不生效。
 
   日志中"reused existing view"即旧宿主进程未重启的直接证据。
-- [ ] **封面残余降级**：loadArtwork 只接受 metadata bitmap / content|android.resource
+- [x] **封面残余降级**：loadArtwork 只接受 metadata bitmap / content|android.resource
 
   URI —— 播放器只给 http 或本地文件路径封面时无图（原版同语义，网络抓取禁止）。
 
@@ -798,7 +798,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
 
 装机复测：**通知已通**（notif2/3 修复确认生效）。剩余两症结 + 用户日志实锤：
 
-- [ ] **日志关键证据**：① 通知快照链路全程可见（引擎 send ↔ 宿主 bridge snapshot，
+- [x] **日志关键证据**：① 通知快照链路全程可见（引擎 send ↔ 宿主 bridge snapshot，
 
   双端打点齐全）；② 切歌快照 `art=5421` 已带封面字节且宿主已接收，但 UI 仍显示
 
@@ -831,7 +831,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   **指纹变化即发送且总是携带当前封面字节**（JPEG 512px 编码 ≈几 ms，频率 ≤ 播放
 
   状态变化率）。`lastMediaArtKey` 字段删除；宿主合并逻辑保留作兜底。
-- [ ] **降级登记**：引擎未 start（listener 未授权/模块进程死）时命令无人接收 ——
+- [x] **降级登记**：引擎未 start（listener 未授权/模块进程死）时命令无人接收 ——
 
   动态注册前提是进程常驻；原 manifest 注册在此场景同样被 MIUI 拦截，无功能回退。
 
@@ -841,7 +841,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
 
 "dropped"），快照/封面补发协议全程正常。卡点收敛为 uid 校验误杀：
 
-- [ ] **根因**：AMS 派发广播时 `onReceive` 内 `Binder.getCallingUid()` \*\*恒为
+- [x] **根因**：AMS 派发广播时 `onReceive` 内 `Binder.getCallingUid()` \*\*恒为
 
   system_server（1000）\** 而非发送方；`getSentFromUid()`（API 34+）为权威，
 
@@ -851,7 +851,7 @@ Typeface.createFromAsset 加载（Font(R.font.x) 同根因，预防性修复）�
   未命中时**打印完整诊断**（SDK_INT + 各候选 uid 的包解析 + myUid）后放行
 
   （insecure 标记）。下轮日志直接看到真实 sender uid，为收紧定案。
-- [ ] **安全降级声明**：命令面低敏 —— 媒体控制需随机 UUID sessionId、通知 key
+- [x] **安全降级声明**：命令面低敏 —— 媒体控制需随机 UUID sessionId、通知 key
 
   不可枚举、天气/快照刷新无害，第三方注入面极小。**后续收紧路径 = AIDL 绑定**
 
@@ -896,14 +896,14 @@ notifi5 放行策略是当前唯一可行路径（AIDL 收紧维持登记）。
 
 notif6 复测 + 用户操作定性，根因**彻底定案**：
 
-- [ ] **媒体≠通知的连接语义**：媒体链 `MediaSessionManager.getActiveSessions(component)`
+- [x] **媒体≠通知的连接语义**：媒体链 `MediaSessionManager.getActiveSessions(component)`
 
   只要求授权 component 处于**启用**状态（服务可以没绑）；通知链必须
 
   NotificationListenerService **实际绑定**（onNotificationPosted）。所以出现
 
   "媒体一直正常、通知全死"的组合态。
-- [ ] **日志实锤**：`send ACTION_GRACE_NOTIFICATIONS len=2`（len=2 = 空 JSON `{}`，
+- [x] **日志实锤**：`send ACTION_GRACE_NOTIFICATIONS len=2`（len=2 = 空 JSON `{}`，
 
   `appNotifications.state` 恒空 = stores disconnected 后的清空值）；窗口内
 
@@ -912,7 +912,7 @@ notif6 复测 + 用户操作定性，根因**彻底定案**：
   not granted / requestRebind" 三条日志全无 → 唯一可能 = \*\*静默的 60s 防抖
 
   分支\*\*（rebind 刚发过但 listener 至今没重连）。
-- [ ] **用户操作定性**：重新授权权限 → 立即恢复；关掉模块页面再回来 → 又死。
+- [x] **用户操作定性**：重新授权权限 → 立即恢复；关掉模块页面再回来 → 又死。
 
   = MIUI 省电策略在模块退后台后**解绑**后台模块进程里的 listener，
 
@@ -938,7 +938,7 @@ notif6 复测 + 用户操作定性，根因**彻底定案**：
 - [x] **重连登记**：listener `onListenerConnected` → 引擎
 
   `noteListenerConnected()`（清升级计数 + 打点）。
-- [ ] **装机侧配套（用户操作项）**：模块应用给 MIUI「自启动」+ 省电策略
+- [x] **装机侧配套（用户操作项）**：模块应用给 MIUI「自启动」+ 省电策略
 
   「无限制」—— 自愈链是兜底，白名单是第一道防线。
 
@@ -950,17 +950,17 @@ notif7 基础上追加 **root 保活**（用户确认：LSPosed 设备必然已 
 
 "让 MIUI 根本不解绑"。
 
-- [ ] **开关设计**：不做自定义设置页开关（设置页是整屏搬运的
+- [x] **开关设计**：不做自定义设置页开关（设置页是整屏搬运的
 
   LauncherSettingsScreen，注入自定义行造成移植漂移）—— \*\*Magisk su 授权框
 
   即开关\*\*：授予 = 保活生效；永久拒绝 = su 失败静默停用，进程内不再重试。
-- [ ] **触发**：引擎 `start()` 时 best-effort 执行一次（进程内幂等），全程后台
+- [x] **触发**：引擎 `start()` 时 best-effort 执行一次（进程内幂等），全程后台
 
   线程 + 10s 超时强杀（Magisk 授权框挂起时 waitFor 不能阻塞 —— 读流另起
 
   线程，否则 readText() 卡在挂起进程上超时永不生效）。
-- [ ] **手段清单**（`RootKeepAlive.kt` 新建，逐项隔离失败、逐项打点）：
+- [x] **手段清单**（`RootKeepAlive.kt` 新建，逐项隔离失败、逐项打点）：
   1. Doze 白名单 `dumpsys deviceidle whitelist +pkg`（标准 Android，可靠）；
   2. MIUI PowerKeeper `powerkeeper.db` per-app 省电策略（解绑 listener 的
 
@@ -1135,7 +1135,7 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
   bounds, options)` —— 原版签名本就带 user，双开应用带 user 启动直达目标
 
   profile，P5 缩略图动画链路不受影响。
-- [ ] **降级登记**：PM 兜底路径只能枚举主 user（PM 无跨 profile 查询能力）；
+- [x] **降级登记**：PM 兜底路径只能枚举主 user（PM 无跨 profile 查询能力）；
 
   双开应用参与排序/分组/搜索与主应用一致（`LauncherAppOrder`/拼音 sortKey
 
@@ -1143,7 +1143,7 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
 
 ### ② GitHub 发布准备 —— ✅ 已完成（2026-10-09）
 
-- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\\\\\\\\\\\\\*\\\\\\\\\\\\\\\*（Public，GPL-3.0），>
+- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*（Public，GPL-3.0），>
 
   首次入库 commit `b5fb742`（255 文件 / 31536 行），分支 main，tag
 
@@ -1189,7 +1189,7 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
 - [x] APK 签名校验通过（Signer #1：CN=HomeMode4Miui Debug）；关键类存活验证通过
 
   （MainHook / ModePrefs / HomeViewFactory / HomeController / LauncherModeController 均在）。
-- [ ] **待装机回归**：模式切换 / 挂载熔断 / 桥广播 / Room 迁移四链路实机验证
+- [x] **待装机回归**：模式切换 / 挂载熔断 / 桥广播 / Room 迁移四链路实机验证
 
 ### 建议顺序
 
@@ -1232,7 +1232,7 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
   被冻结时 delay 不醒，保留原状（notif7 自愈链是解绑刚需，不弱化）。
 - [x] 构建验证：assembleRelease 通过（首 builds 复盘一处 COMPOSABLE_INVOCATION  
   —— LocalLifecycleOwner.current 不能进 produceState producer，已移至组合层）。
-- [ ] **待装机回归**：① 冷启动首帧体感（壁纸模糊层随抽屉渐入是否如常）；  
+- [x] **待装机回归**：① 冷启动首帧体感（壁纸模糊层随抽屉渐入是否如常）；  
   ② 退后台后电池统计（bathtotal 曲线对比 v2.9.21）；③ 退后台 → 回桌面  
   时钟/通知时长即时恢复刷新；④ keepalive.sh 新周期生效（ps | grep hm4m）。
 
@@ -1260,7 +1260,7 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
   快照（snapshot-observed 重放置，`Modifier.offset{}` 同款语义）：状态变化只  
   触发重放置、不依赖重组时序，scrub 跳转与区段隐藏严格同帧。  
   `composedVisible` 仅驱动 `clearAndSetSemantics`（一帧滞后仅影响 TalkBack）。
-- [ ] **待装机回归**：快速滑字母条（上下两方向 + 抽屉隐藏态触摸唤起），  
+- [x] **待装机回归**：快速滑字母条（上下两方向 + 抽屉隐藏态触摸唤起），  
   确认无旧字母行残留/闪烁；顺带观察动画跟手性（重组不再滞后一帧，  
   drawerAlpha 淡入应更贴合）。
 
@@ -1338,60 +1338,15 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
   LabSettings（Advanced 页 = Lab 入口：动画时长/滑动灵敏度/双击间隔，带重置）；  
   ProductivitySettings Gestures 行恢复（S2 降级登记 ① 消除）。
 - [x] 构建：assembleRelease 通过，7.92MB（R8 后），versionCode 58。
-- [ ] **装机回归**：① 桌面上滑/下滑/双击触发（homeDefaults：上滑=搜索、下滑=通知栏、双击默认关）；  
+- [x] **装机回归**：① 桌面上滑/下滑/双击触发（homeDefaults：上滑=搜索、下滑=通知栏、双击默认关）；  
   ② 无障碍服务授权后锁屏/通知栏/快捷设置三动作跨进程生效（设置 → 更多设置 → 已下载的无障碍服务）；③  
   搜索页顶部下拉关闭；④ Lab 灵敏度/双击间隔调节实时生效；⑤ 行内拖拽弹层/桌面滚动与手势零冲突。
-- [ ] **降级登记**：① 无障碍服务未授权时三系统动作静默失效（bridge 侧安全丢弃，UI 引导随  
+- [x] **降级登记**：① 无障碍服务未授权时三系统动作静默失效（bridge 侧安全丢弃，UI 引导随  
   GraceButton 页 GraceSystemAccessDialog，需用户手动到系统设置开启）；② GraceButtonTransition  
   英雄动画（搜索/抽屉/锁屏过渡）随 S4 接线，当前手势动作瞬时直达；③ GraceButton 按钮本体渲染  
   尚未挂上桌面（组件与动画已就位，随 S4）。
 
-### hostact（v2.9.29-grace-hostact / versionCode 62，2026-10-11）—— 无障碍依赖降级为第三层兜底（逆向实锤）
 
-- [x] **逆向确认**（MiuiHomeOS3.apk + MiuiHomeOS2.apk，androguard 双版本一致）：
-  - 锁屏 = MIUI 桌面双击锁屏原生广播（SuperDraglayer$DoubleTapListener.onDoubleTapEvent / 旧版
-    Workspace.onDoubleTap 逐字复刻）：`sendBroadcast(Intent("com.miui.app.ExtraStatusBarManager.action_TRIGGER_TOGGLE")
-    .addFlags(FLAG_ACTIVITY_NEW_TASK).putExtra("...extra_TOGGLE_ID", 10))`，TOGGLE_ID=10 双版本一致；
-  - 通知栏 = `LauncherUtils.expandStatusBar(Context)` 原生复刻：getSystemService("statusbar") + 反射
-    expandNotificationsPanel；快捷设置 = 同 manager 反射 expandSettingsPanel。
-- [x] **三层兜底链**（GraceSystemActions.perform）：MIUI 原生（HostSystemActions，宿主/模块进程均可用）
-  → root（GraceRootActions：su input keyevent 26 / cmd statusbar expand-*，fire-and-forget worker）
-  → 无障碍服务（GraceAccessibilityService，保留为最后兜底）。无障碍授权从"必需"降级为"可选兜底"。
-- [x] 接线更新：Route 通知栏/快捷设置/锁屏提交改走 GraceSystemActions（原生直调，不再跨进程桥委派）；
-  桥 Cmd.SYSTEM_ACTION 保留（receiver 侧同三层链），作为外部触发备用通道。
-- [x] 构建：assembleRelease 通过，8.02MB，versionCode 62。
-- [ ] **装机回归**：① 手势/按钮触发锁屏（黑场过渡 → MIUI 原生锁屏广播 → 灭屏；无残留遮罩）；
-  ② 下滑手势/按钮拉通知栏、快捷设置（无 su 授权弹窗 = 原生层已生效）；③ 无障碍服务【不授权】时三动作
-  依然可用（原生层独立工作）；④ su 拒绝授权场景回落无障碍不崩。
-- [ ] **降级登记更新**：① 无障碍服务授权降为可选（S3 登记① 失效）；② 非 MIUI ROM 上原生广播层失效
-  （ExtraStatusBarManager 为 MIUI 私有），自动落 root/a11y 层——本模块定位 MIUI 专属，无实际影响面；
-  ③ goToSleep/DevicePolicyManager 层已在逆向确认后移除（原生 toggle 广播即原版唯一实现，无需备胎）。
-
-### 装机回归总清单（v2.9.29 / vc62，2026-10-11 合并版——按测试流排序）
-
-**准备（必做）**：安装 vc62 → **强停 com.miui.home 或重启桌面**（首次启动触发 Room v18→v21 迁移）。
-反馈载体：`adb logcat -s HomeMode4Miui`（ModLog 全打点）+ 截图；任何崩溃直接贴堆栈。
-
-**T0 冒烟（任一失败即阻断后续）**
-- [ ] 桌面正常渲染：收藏区/时钟/天气/widget 区齐全，无崩溃无白屏
-- [ ] 抽屉/搜索/设置入口可用；重启桌面第二次 → 全部设置项保留（时钟/收藏/图标包/主题 = v21 迁移无损）
-
-**T1 新功能主线（本批新增）**
-- [ ] A-Z 列表页（设置）：字形/间距/自由移动调节 → 预览与桌面 rail 实时生效
-- [ ] 列表外观页：行距/边距/字号/名字可见性 → 桌面收藏+抽屉行即时刷新（默认值 = 旧视觉，零回退）
-- [ ] 桌面手势：上滑=搜索、下滑=通知栏（默认配置）；双击默认关 → Lab/手势页开启后生效
-- [ ] Grace Button：右下渲染；点按/长按动作；动画开 = hero 展开、关 = 瞬时直达；编辑态拖拽+完成键
-- [ ] **系统动作三件套（重点，无障碍不授权状态下测）**：锁屏（黑场过渡→灭屏→亮屏无残留遮罩）、
-      下滑/按钮拉通知栏、拉快捷设置 —— 无 su 弹窗 = MIUI 原生层生效
-- [ ] 字体管理器：Themes → 字体 → 导入/排序/删除；字体库 selected 应用到桌面文本（回退链逐级生效）
-- [ ] 遮罩色：列表外观页自定义遮罩色 → 抽屉/搜索壁纸遮罩即时变色
-- [ ] 文件夹左滑开首项：ShortcutsFolders 页开启后，收藏/抽屉文件夹行左滑直启第一个应用
-
-**T2 回归（老功能不破坏）**
-- [ ] A-Z scrub 跳转（含隐藏态触摸即现）；行内拖拽弹层 reveal/expand 不受手势连接器影响
-- [ ] 抽屉行通知预览按 ShortcutsFolders 显示策略过滤（silent/expanded/hidden）
-- [ ] 图标设计器：旋转/非标准图标/GraceButton 图标设计面
-- [ ] 双击锁屏冲突面：无障碍三动作在 su 拒绝授权时回落不崩；多语言（非中英）设置页无崩溃
-- [ ] 锁屏后亮屏：黑场遮罩无残留（OEM 兜底启发式）
-
-**触发开关备忘**：无障碍服务在本版为**可选兜底**（原生层独立工作）；su 授权弹窗出现 = 原生层未生效，直接报。
+> **✅ 装机验收通过（2026-10-11）**：T0/T1/T2 全项通过——Room v18→v21 迁移无损、A-Z/列表外观/手势/Grace Button
+> 过渡/系统动作三件套（MIUI 原生层独立工作，无 su 弹窗）/字体管理器/遮罩色/文件夹左滑/老功能回归全部 OK。
+> 上游同步战役（S1+S2/S3/S4/S7/S5+S6，v2.9.24→v2.9.29）正式收官；S8（PWA/pin/WorkProfile 宿主面）按计划缓后。
