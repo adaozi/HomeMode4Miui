@@ -150,7 +150,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     val context = LocalContext.current
     val launchView = LocalView.current
     var drawerOpen by rememberSaveable { mutableStateOf(false) }
-    var selectedLetter by remember { mutableStateOf<String?>(null) }
+    // scrubfix：保留原始 MutableState —— AppDrawerScreen 的 placement 块要实时读它
+    // （retainItemSpace liveVisible），重组滞后一帧也能当帧隐藏/显示。
+    val selectedLetterState = remember { mutableStateOf<String?>(null) }
+    var selectedLetter by selectedLetterState
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var overlay by remember { mutableStateOf<LauncherOverlay?>(null) }
     var editingHome by rememberSaveable { mutableStateOf(false) }
@@ -585,6 +588,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             model = model,
             listState = drawerState,
             selectedLetter = selectedLetter,
+            selectedLetterState = selectedLetterState,
             topSpace = drawerTop,
             onLaunchApp = { app -> launchApp(app) },
             onAppDetails = viewModel::openAppDetails,

@@ -12,6 +12,12 @@
  *     soul 交互）+ rowGestures（拖拽 reveal/launchAt）；删 P2 临时 DropdownMenu
  *     长按菜单（收藏增删入口迁入弹层 menuEntries，长按保持原版应用信息语义）
  *   - 保留 retainItemSpace（字母 scrub 期间隐藏其他组不改滚动几何）
+ *   - scrubfix：retainItemSpace 拆双参 —— composedVisible 仍按组合期值清语义
+ *     （一帧滞后仅影响 TalkBack，不可见）；liveVisible 改为 placement 块内实时
+ *     读 selectedLetterState 快照（snapshot-observed，Modifier.offset{} 同款
+ *     重放置观察语义）：即使重组因任何原因滞后一帧，隐藏/显示也在当帧 layout
+ *     生效 —— 快速滑字母条时旧字母行残留的第二道防线（第一道 =
+ *     GraceHomeView.createRecomposer 换 AndroidUiDispatcher，重组先于 traversal）
  */
 package com.galaxyrio.gracelauncher.ui.drawer
 
@@ -26,6 +32,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.layout
@@ -52,6 +59,9 @@ fun AppDrawerScreen(
     model: AppListModel,
     listState: LazyListState,
     selectedLetter: String?,
+    // scrubfix：与 selectedLetter 同源的原始 state —— placement 块实时读取用。
+    // 不能用 rememberUpdatedState 包装（那是组合期写入，同样滞后一帧）。
+    selectedLetterState: State<String?>,
     topSpace: Dp,
     onLaunchApp: (LauncherApp) -> Unit,
     onAppDetails: (LauncherApp) -> Unit,
@@ -83,7 +93,12 @@ fun AppDrawerScreen(
         ) { item ->
             // Keep every item's key and measured height. Hiding a group must
             // not change scroll bounds or move the selected header on release.
-            Box(Modifier.retainItemSpace(selectedLetter == null || item.section == selectedLetter)) {
+            Box(
+                Modifier.retainItemSpace(
+                    composedVisible = selectedLetter == null || item.section == selectedLetter,
+                    liveVisible = { selectedLetterState.value == null || item.section == selectedLetterState.value },
+                )
+            ) {
                 when (item) {
                     is DrawerItem.Header -> Text(
                         text = when (item.section) {
@@ -122,12 +137,17 @@ fun AppDrawerScreen(
     }
 }
 
-private fun Modifier.retainItemSpace(visible: Boolean): Modifier =
+private fun Modifier.retainItemSpace(
+    composedVisible: Boolean,
+    liveVisible: () -> Boolean,
+): Modifier =
     // Unlike alpha=0, not placing a child also removes its invisible hit targets.
     // Clear descendants from TalkBack while retaining the complete list geometry.
-    then(if (visible) Modifier else Modifier.clearAndSetSemantics {}).layout { measurable, constraints ->
+    // liveVisible 在 placement 块内求值并观察快照：状态变化只触发重放置（不重测量、
+    // 不依赖重组时序），scrub 跳转与区段隐藏严格同帧。
+    then(if (composedVisible) Modifier else Modifier.clearAndSetSemantics {}).layout { measurable, constraints ->
         val placeable = measurable.measure(constraints)
         layout(placeable.width, placeable.height) {
-            if (visible) placeable.placeRelative(0, 0)
+            if (liveVisible()) placeable.placeRelative(0, 0)
         }
     }

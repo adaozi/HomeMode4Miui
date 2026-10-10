@@ -30,8 +30,9 @@ package com.homemode4miui.home
 
 import android.app.Activity
 import android.widget.FrameLayout
-import androidx.compose.runtime.DefaultMonotonicFrameClock
 import androidx.compose.runtime.Recomposer
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
@@ -207,12 +208,25 @@ class GraceHomeView(launcher: Activity) :
     }
 
     /**
-     * 自托管 Recomposer：主线程调度器 + Choreographer 驱动的默认帧时钟，
-     * launch runRecomposeAndApplyChanges 驱动重组；卸载时 cancel 作用域即取消 Recomposer。
+     * 自托管 Recomposer：官方 windowRecomposer 同款 [AndroidUiDispatcher.CurrentThread]。
+     *
+     * 【scrub 残留根因（装机：快速滑字母条时其他字母应用行残留）】
+     * 旧实现 `Dispatchers.Main + DefaultMonotonicFrameClock`：DefaultChoreographerFrameClock
+     * 的帧回调经 CancellableContinuation.resume 被 Dispatchers.Main 排成 Handler 任务，
+     * 在整帧 doFrame（含 measure/layout/draw）【之后】才执行 → 重组滞后一帧。
+     * 而 LazyList 的 measure（requestScrollToItem 消费跳转 + 新窗口行组合）跑在当帧
+     * traversal，用的是上一帧的"区段隐藏"组合结果（AppDrawerScreen.retainItemSpace 的
+     * visible 是组合期闭包）→ 快速 scrub 时每帧都是"跳到新区段 + 按旧字母隐藏"，
+     * 旧字母的行残留/新行缺失。
+     * AndroidUiDispatcher 的 dispatchCallback 是 Choreographer.FrameCallback，帧回调内
+     * trampoline 同步排空队列 → 重组在当帧 traversal 之前完成，跳转与隐藏同帧一致
+     * （上游独立 Activity 走 windowRecomposer 天然无此问题，本类自托管必须对齐）。
      */
+    @OptIn(ExperimentalComposeUiApi::class)
     private fun createRecomposer(): Recomposer {
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + DefaultMonotonicFrameClock)
-        val rec = Recomposer(scope.coroutineContext)
+        val context = AndroidUiDispatcher.CurrentThread
+        val scope = CoroutineScope(SupervisorJob() + context)
+        val rec = Recomposer(context)
         scope.launch { rec.runRecomposeAndApplyChanges() }
         recomposerScope = scope
         return rec

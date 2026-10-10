@@ -888,3 +888,31 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
 - [ ] **待装机回归**：① 冷启动首帧体感（壁纸模糊层随抽屉渐入是否如常）；
   ② 退后台后电池统计（bathtotal 曲线对比 v2.9.21）；③ 退后台 → 回桌面
   时钟/通知时长即时恢复刷新；④ keepalive.sh 新周期生效（ps | grep hm4m）。
+
+### scrubfix（v2.9.23-grace-scrubfix / versionCode 56，2026-10-10）
+
+**快速滑字母条时其他字母应用行残留**（用户装机反馈）。根因定位到自托管
+Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局兜底）：
+
+- [x] **根因：自托管 Recomposer 用 `Dispatchers.Main` 导致重组滞后一帧**。
+  `DefaultChoreographerFrameClock.withFrameNanos` 的帧回调经
+  `CancellableContinuation.resume` 被 `Dispatchers.Main` 排成 Handler 任务，
+  在整帧 doFrame（含 measure/layout/draw）**之后**才执行；而 LazyList 的
+  measure（`requestScrollToItem` 消费跳转 + 新窗口行组合）跑在当帧 traversal，
+  用的是**上一帧**的"区段隐藏"组合结果（`retainItemSpace` 的 visible 是组合期
+  闭包）→ 快速 scrub 时每帧都是"跳到新区段 + 按旧字母隐藏"→ 旧字母行残留 /
+  新行缺失。上游独立 Activity 走 `windowRecomposer`（`AndroidUiDispatcher`
+  的 dispatchCallback 是 Choreographer.FrameCallback，帧回调内 trampoline
+  同步排空队列，重组先于 traversal 完成）故无此问题。修复：
+  `GraceHomeView.createRecomposer` 换官方同款 `AndroidUiDispatcher.CurrentThread`
+  （自托管场景的官方推荐路径，字节码级核对过 1.12.1 实现）。
+- [x] **布局层兜底：`AppDrawerScreen.retainItemSpace` 拆双参**。新增
+  `selectedLetterState: State<String?>` 参数（Route 侧保留原始 MutableState +
+  `var selectedLetter by selectedLetterState` 委托，不能用 rememberUpdatedState
+  —— 那仍是组合期写入）；`liveVisible: () -> Boolean` 在 placement 块内实时读
+  快照（snapshot-observed 重放置，`Modifier.offset{}` 同款语义）：状态变化只
+  触发重放置、不依赖重组时序，scrub 跳转与区段隐藏严格同帧。
+  `composedVisible` 仅驱动 `clearAndSetSemantics`（一帧滞后仅影响 TalkBack）。
+- [ ] **待装机回归**：快速滑字母条（上下两方向 + 抽屉隐藏态触摸唤起），
+  确认无旧字母行残留/闪烁；顺带观察动画跟手性（重组不再滞后一帧，
+  drawerAlpha 淡入应更贴合）。
