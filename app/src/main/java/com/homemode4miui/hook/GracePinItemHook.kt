@@ -32,10 +32,81 @@ object GracePinItemHook {
     private const val TAG = "GracePinItemHook"
     /** LauncherApps.PinItemRequest.REQUEST_TYPE_SHORTCUT = 0（APPWIDGET = 1）。 */
     private const val TYPE_SHORTCUT = 0
+    private const val TYPE_APPWIDGET = 1
 
     fun hook(lpp: XC_LoadPackage.LoadPackageParam, cl: ClassLoader) {
         val compat = XposedHelpers.findClass("com.miui.launcher.common.PinItemRequestCompat", cl)
         XposedBridge.hookAllMethods(compat, "accept", object : de.robv.android.xposed.XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                try {
+                    // 带 Bundle 的 accept 是模块自身发起的回调用（appwidget 绑定后通知系统），直接放行防递归
+                    if (!param.args.isNullOrEmpty()) return
+                    val compat = param.thisObject ?: return
+                    val valid = XposedHelpers.callMethod(compat, "isValid") as? Boolean ?: return
+                    if (!valid) return
+                    val type = XposedHelpers.callMethod(compat, "getRequestType") as? Int ?: return
+                    if (type != TYPE_APPWIDGET) return  // SHORTCUT 走 after 转存
+                    val context = hostContext() ?: return
+                    // 模块 widget 区单槽：已占用时放行 MIUI 原流程（宿主承接，系统状态一致）
+                    val settingsRepo = com.galaxyrio.gracelauncher.data.LauncherSettingsRepository(
+                        com.galaxyrio.gracelauncher.data.LauncherDatabase.getInstance(context))
+                    // toSettings 为 Repository 文件内 private 扩展 —— 直接解码 homeLayoutJson
+                    val entity = kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            com.galaxyrio.gracelauncher.data.LauncherDatabase.getInstance(context)
+                                .settingsDao().readSettings()
+                        }
+                    }
+                    val hasWidget = com.galaxyrio.gracelauncher.data.HomeLayout
+                        .decode(entity?.homeLayoutJson).hasWidget
+                    if (hasWidget) {
+                        XposedBridge.log("[$TAG] appwidget pin: home widget slot occupied, letting host handle")
+                        return
+                    }
+                    val info = XposedHelpers.callMethod(compat, "getAppWidgetProviderInfo", context)
+                        as? android.appwidget.AppWidgetProviderInfo ?: return
+                    // 模块 widget host 自承载：allocate → bind（持 BIND_APPWIDGET，直接成功）→
+                    // accept(Bundle) 通知系统该 id 已被采用 → 写模块 homeLayout（上游 addWidget 语义）。
+                    // 不启动 configure（上游注释：Pin requests are already configured by the requesting app）。
+                    val host = com.galaxyrio.gracelauncher.platform.HomeWidgetHost(context)
+                    val id = host.allocateAppWidgetId()
+                    val options = android.os.Bundle().apply {
+                        putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY,
+                            android.appwidget.AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN)
+                    }
+                    val manager = android.appwidget.AppWidgetManager.getInstance(context)
+                    val bound = runCatching {
+                        manager.bindAppWidgetIdIfAllowed(id, info.profile, info.provider, options)
+                    }.onFailure { XposedBridge.log("[$TAG] bind failed: ${it.message}") }.getOrDefault(false)
+                    if (!bound) {
+                        runCatching { host.deleteAppWidgetId(id) }
+                        XposedBridge.log("[$TAG] appwidget bind rejected, letting host handle")
+                        return  // 放行 MIUI 原流程兜底
+                    }
+                    runCatching {
+                        val bundle = android.os.Bundle().apply {
+                            putInt(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                        }
+                        XposedHelpers.callMethod(compat, "accept", bundle)
+                    }
+                    val label = runCatching { info.loadLabel(context.packageManager).toString() }
+                        .getOrDefault(info.provider.className)
+                    runBlocking {
+                        kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            settingsRepo.mutateSettings { cur -> cur.copy(
+                                homeLayout = cur.homeLayout.copy(
+                                    widgetId = id, widgetProvider = info.provider.flattenToString(),
+                                    widgetLabel = label, widgetHeightDp = 0,
+                                )) }
+                        }
+                    }
+                    param.result = true  // 拦截 MIUI 原方法（避免宿主重复 allocate）
+                    XposedBridge.log("[$TAG] appwidget pin adopted: id=$id provider=${info.provider.flattenToString()}")
+                } catch (t: Throwable) {
+                    XposedBridge.log("[$TAG] beforeHookedMethod failed: ${t.message}")
+                }
+            }
+
             override fun afterHookedMethod(param: MethodHookParam) {
                 try {
                     val success = (param.result as? Boolean) ?: return
@@ -55,15 +126,18 @@ object GracePinItemHook {
         XposedBridge.log("[$TAG] hooked PinItemRequestCompat.accept (host ${lpp.packageName})")
     }
 
+    /** 宿主 Application（hidden 类反射；hook 回调线程安全）。 */
+    private fun hostContext(): android.content.Context? = runCatching {
+        (XposedHelpers.callStaticMethod(
+            XposedHelpers.findClass("android.app.ActivityThread", GracePinItemHook::class.java.classLoader),
+            "currentApplication") as? android.content.Context)?.applicationContext
+    }.getOrNull()
+
     /** ShortcutInfo → 模块 saved_shortcuts（showInAppList=true，抽屉主列表显示）。 */
     private fun persist(info: Any) {
         runBlocking {
             withContext(Dispatchers.IO) {
-                // ActivityThread 为 hidden 类，编译期不可直接引用 —— 反射取宿主 Application
-                val context = (XposedHelpers.callStaticMethod(
-                    XposedHelpers.findClass("android.app.ActivityThread", GracePinItemHook::class.java.classLoader),
-                    "currentApplication") as? android.content.Context)?.applicationContext
-                    ?: return@withContext
+                val context = hostContext() ?: return@withContext
                 val id = XposedHelpers.callMethod(info, "getId") as? String ?: return@withContext
                 val pkg = XposedHelpers.callMethod(info, "getPackage") as? String ?: return@withContext
                 val label = runCatching {

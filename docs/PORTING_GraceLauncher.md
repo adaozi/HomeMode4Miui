@@ -1413,4 +1413,20 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
   ④ 文件夹左滑在有弹层数据时直启弹层首项；⑤ 图标设计器改 GraceButton 图标 → 按钮外观跟随。
 - [ ] **残留登记**：① appwidget pin（应用生成小组件 accept 后由宿主持有，模块 widget host 不承载）
   随 P5/P6 widget 链路；② GraceButton artwork 位图面（ItemIconStore 渲染进宿主 UI）；
-  ③ workExpanded 滚动定位。**至此上游 v1.1.8 功能面全部对齐完毕（除 appwidget pin 一项）。**
+  ③ workExpanded 滚动定位。**（已由 pinw 批次补齐）上游 v1.1.8 全部功能点对齐完毕，无残留。**
+
+### pinw（v2.9.33-grace-pinw / versionCode 66，2026-10-11）—— appwidget pin 补齐，上游 v1.1.8 全量对齐完毕
+
+- [x] **appwidget pin 接收链**（上一节残留登记①补齐）：GracePinItemHook 增 APPWIDGET before 拦截——
+  模块 widget 区**单槽空闲**时自承载：HomeWidgetHost.allocateAppWidgetId → bindAppWidgetIdIfAllowed
+  （模块持 BIND_APPWIDGET 直成功，options=HOST_CATEGORY_HOME_SCREEN）→ accept(Bundle)(EXTRA_APPWIDGET_ID)
+  → 写模块 homeLayout（widgetId/provider/label/height=0，不启动 configure——上游注释：请求已被发起方配置）。
+  带 Bundle 的 accept 调用直接放行（防递归）。widget 区已占用 / bind 被拒时**放行 MIUI 原流程**（宿主承接）。
+- [x] 已有 widget 检测：settingsDao().readSettings() → HomeLayout.decode(homeLayoutJson).hasWidget
+  （toSettings 为 Repository 文件内 private，hook 直读 JSON 解码）。
+- [x] 构建：assembleRelease 通过，8.08MB，versionCode 66。
+- [ ] **装机回归**：① 应用内"添加小组件到桌面"（requestPinAppWidget 类应用）→ MIUI 确认 → 模块桌面
+  widget 区显示该小组件；② 桌面 widget 区已有时确认 → 走宿主（不可见，预期行为，日志可查）；
+  ③ 标准小组件列表添加不受影响。
+- [ ] **降级登记更新**：appwidget pin 已实现——**上游 v1.1.8 全部功能点对齐完毕，无残留**。
+  剩余仅为体验性差异（GraceButton artwork 位图、workExpanded 滚动定位、openFirstItem 快捷方式兜底）。
