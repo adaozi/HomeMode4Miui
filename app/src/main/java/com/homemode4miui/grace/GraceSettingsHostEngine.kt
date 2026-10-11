@@ -50,6 +50,8 @@ class GraceSettingsHostEngine(
     private val onMutated: () -> Unit,
     /** UI 动作命令回调（hotfix2）：编辑模式等桌面 UI 状态不属于数据面，不经 apply 落库。 */
     private val onMoveWidget: () -> Unit = {},
+    /** 上游同步补漏：设置页「添加自定义小组件」→ 桌面开 WidgetPicker（同 MOVE_WIDGET 模式）。 */
+    private val onAddWidget: () -> Unit = {},
     /** folders 阶段（hotfix folders2）：弹层 widget 添加（宿主开 WidgetPicker 弹层模式）与快捷方式代查。 */
     private val onAddPopupWidget: (String) -> Unit = {},
     private val onShortcutQuery: (String) -> Unit = {},
@@ -176,6 +178,9 @@ class GraceSettingsHostEngine(
             // hotfix2：设置页"移动小部件" → 桌面 editingHome（原版同进程直改 UI 状态，
             // 本仓跨进程只能发命令；返回 false = 纯 UI 动作，不触发快照回推/onMutated）
             GraceSettingsBridge.Cmd.MOVE_WIDGET -> { onMoveWidget(); false }
+            // 上游同步补漏：设置页「添加自定义小组件」（原版同进程直开 WidgetSetupActivity，
+            // 本仓跨进程发命令；返回 false = 纯 UI 动作，不触发快照回推/onMutated）
+            GraceSettingsBridge.Cmd.ADD_WIDGET -> { onAddWidget(); false }
             // folders 阶段（hotfix folders2）：均为 UI 动作/代查，不触发快照回推
             GraceSettingsBridge.Cmd.ADD_POPUP_WIDGET -> { onAddPopupWidget(arg1 ?: return false); false }
             GraceSettingsBridge.Cmd.SHORTCUTS_QUERY -> { onShortcutQuery(json ?: return false); false }

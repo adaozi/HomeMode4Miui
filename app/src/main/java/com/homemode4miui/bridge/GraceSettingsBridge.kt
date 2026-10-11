@@ -72,6 +72,7 @@ object GraceSettingsBridge {
         const val PS_REORDER = "settings_ps_reorder"             // EXTRA_JSON = [key..]
         const val PS_RESET_APPEARANCE = "settings_ps_reset"      // 回传快照 extra 带 ok 标志
         const val MOVE_WIDGET = "settings_move_widget"           // UI 动作命令：桌面进入 widget 编辑模式（无参数，不回推快照）
+        const val ADD_WIDGET = "settings_add_widget"             // UI 动作命令：桌面开 WidgetPicker（无参数，不回推快照）
         // folders 阶段（hotfix folders2）：
         const val ADD_POPUP_WIDGET = "settings_add_popup_widget" // UI 动作命令：EXTRA_ARG1 = ownerKey（桌面开 WidgetPicker 弹层模式）
         const val SHORTCUTS_QUERY = "settings_shortcuts_query"   // EXTRA_JSON = [appKey..]（宿主代查，回 ACTION_SHORTCUTS_RESULT）

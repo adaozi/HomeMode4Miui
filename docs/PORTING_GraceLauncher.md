@@ -1371,3 +1371,29 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
 - [ ] **降级登记**：① ProfileSettings 工作资料设置页（显示名/排序/开关编辑器）随 S8b——当前  
   workProfile 走默认值（enabled=true、Folder 展示）；② pin item/PWA（ACTION_CONFIRM_PIN\_* 宿主流程  
   hook）随 S8b 宿主逆向；③ workExpanded 展开时滚动定位（上游 LaunchedEffect）未接，长列表首用需手滑。
+
+### graceicon1（v2.9.35-graceicon1 / versionCode 68，2026-10-11）—— 图标装饰链落地 + 五项修复 + QQ 群
+
+- [x] **GraceButton 图标生效**：renderGraceButtonIcon 在宿主进程抛 Resources$NotFoundException  
+  （MiuiResources 无模块 R id）→ GraceHomeViewModel 加 moduleResourceContext（createPackageContext  
+  模块 APK），iconStore + GraceButtonIcon.item 全走模块资源表。不用 DualResources 兜底  
+  （drawable 同 ID 会静默错位换图，按钮 glyph 必须纯模块表解析）。
+- [x] **应用图标设计生效**：上游 LauncherViewModel.decorate/applyDesign（:430/:443）此前未移植，  
+  宿主 refreshApps 不消费 itemIcons → GraceHomeViewModel 补 iconsSnapshot / currentIconSettings()  
+  （Room 行 + iconDesignJson + iconPackPackagesJson + LauncherPreferences themedIcons）/
+  decorateApps()（快速路径零渲染）/ refreshApps 装饰 + icons collect 变化重装饰（保存即生效）。
+- [x] **字母 rail 左边缘触摸修复**：Route 调用漏传 leftTouchEnabled（S2 移植时新增参数默认 false），  
+  补 leftTouchEnabled = listAppearance.leftAlphabet（上游 LauncherScreen.kt:1030 对齐）。
+- [x] **设置页「添加自定义小组件」修复**：SettingsViewModel.addWidget 原 no-op 占位 → 照 MOVE_WIDGET  
+  跨进程先例补 ADD_WIDGET 桥（5 处：Cmd / 宿主 engine / VM flow / Route LaunchedEffect / VM send），
+  语义对齐桌面端（关抽屉/搜索 → hasWidget 超限 Toast → picker）。
+- [x] **时钟面板私密空间行移除**：上游 HomeWidgetSheet 无此行，系 P6 自加探测面漏 privateSpace.enabled  
+  过滤 → 直接移除（上游对齐），管理入口只在设置效率页承载。
+- [x] **应用名统一**：en+zh 共 8 处 "Grace 启动器" → HomeMode4Miui（licenses_app_summary 的 GPL  
+  归属声明保留 Grace Launcher）。
+- [x] **README 交流与反馈**：QQ 群「桌面第四模式」（578966891）二维码入库 docs/img/qq_group_qrcode.jpg，
+  README 简介区新增交流入口；当前版本行同步。
+- [x] 构建：assembleRelease 通过，versionCode 68；装机验证零异常（NotFound / renderGraceButtonIcon  
+  failed = 0，按钮图标 + 应用图标生效确认）。
+- [x] **GitHub Release v2.9.35-graceicon1**：首次补发 v2.9.20 之后全量版本（v2.9.21 OS3 家族 →  
+  v2.9.29 上游同步收官 → v2.9.33 S8/pin 收官 → v2.9.35 本批），APK 附件 + release body。

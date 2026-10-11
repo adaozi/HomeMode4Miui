@@ -15,13 +15,21 @@
 | OS2（5.x） | `RELEASE-5.39.40.10843` | `com.miui.home.launcher.Launcher` |
 | OS3（6.x） | `RELEASE-6.01.03.1927` | `com.miui.home.launcher.BaseLauncher`（OS3 的 Launcher 大重构，方法整体上移） |
 
-当前版本：`2.9.21-grace-dualapp-os3`（versionCode 54），见 `app/build.gradle`。
+当前版本：`2.9.35-graceicon1`（versionCode 68），见 `app/build.gradle`。
+
+## 交流与反馈
+
+- QQ 群：**桌面第四模式**（群号 `578966891`）—— bug 反馈、功能建议、机型适配交流
+- issue（含宿主版本号与导出日志）同样欢迎，见下方「安装与启用 → 日志导出」
+
+<img src="docs/img/qq_group_qrcode.jpg" width="260" alt="QQ 群：桌面第四模式（578966891）">
 
 ---
 
 ## 目录
 
 - [进程模型：先理解这个，后面全部成立](#进程模型先理解这个后面全部成立)
+- [交流与反馈](#交流与反馈)
 - [三类代码 + 一个桥](#三类代码--一个桥)
 - [核心设计：为什么能"原生式"新增模式](#核心设计为什么能原生式新增模式)
 - [Compose 宿主接桩：四个必解难题](#compose-宿主接桩四个必解难题)

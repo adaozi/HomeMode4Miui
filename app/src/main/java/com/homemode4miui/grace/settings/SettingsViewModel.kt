@@ -72,7 +72,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val settingsWriteMutex = Mutex()
 
     /** 快照到达前 true；超时仍无快照 → settingsLoadFailed（只读面）。 */
-    private val _uiState = MutableStateFlow(LauncherUiState(isLoadingSettings = true))
+    private val _uiState = MutableStateFlow(LauncherUiState(
+        isLoadingSettings = true,
+        // 上游同步 v1.1.8 S8b（LauncherViewModel.kt:254）：Grace 按钮虚拟项注入。
+        // IconDesignerSettings 经 findItem 解析后进入按钮特化面；仅为身份载体，
+        // 预览位图由 IconDesigner 经 ItemIconStore.layers 现算（不依赖此处 icon）。
+        graceButtonApp = com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.item(application),
+    ))
     val uiState = _uiState.asStateFlow()
 
     /** hotfix2：跨进程 UI 动作后关闭设置页回桌面（moveWidget 请求桌面 editingHome）。 */
@@ -345,7 +351,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         openNotification = { _, _ -> false },
         requestWeatherAccess = { refreshWeather() }, // provider permission 模块 manifest 自持
         requestCalendarAccess = {},     // 降级：日历权限在宿主授予（B6.2），设置页只切开关
-        addWidget = {},                 // 降级：桌面 widget 编辑走宿主（P4）
+        // 上游同步补漏：原为 no-op 占位（"桌面 widget 编辑走宿主"），效率页
+        // 「添加自定义小组件」点击无反应。对齐 moveWidget 跨进程模式：发命令 +
+        // 关设置页，桌面 Route 收 ADD_WIDGET 开 WidgetPicker。
+        addWidget = {
+            send(GraceSettingsBridge.Cmd.ADD_WIDGET)
+            viewModelScope.launch { _closeRequests.emit(Unit) }
+        },
         configureWidget = {},
         removeWidget = {},
         // hotfix2：编辑模式在桌面进程（原版同进程直改 editingHome）→ 发桥命令 +

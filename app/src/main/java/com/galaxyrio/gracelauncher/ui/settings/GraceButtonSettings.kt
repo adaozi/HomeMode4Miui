@@ -48,7 +48,9 @@ internal fun GraceButtonSettingsScreen(uiState: LauncherUiState, actions: Launch
             } }
             if (!home) {
                 item {
-                    SettingsActionItem(stringResource(R.string.edit_icon), null, 0, 1,
+                    // 文案消歧：此处编辑的是 Grace 按钮自身图标，不用通用 edit_icon
+                    //（该串仍被 ProductivitySettings/ProfileSettings/PrivateSpaceSettings 复用）。
+                    SettingsActionItem(stringResource(R.string.grace_button_edit_icon), null, 0, 1,
                         "grace_button_icon", onClick = onEditIcon)
                     Spacer(Modifier.height(16.dp))
                 }

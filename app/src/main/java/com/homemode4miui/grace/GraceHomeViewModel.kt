@@ -124,6 +124,13 @@ data class GraceHomeUiState(
     val popups: Map<String, List<PopupItem>> = emptyMap(),
     // 上游同步 v1.1.8 S8b：图标设计器产出（GraceButton artwork/design 消费）
     val itemIcons: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon> = emptyMap(),
+    /**
+     * 上游同步 v1.1.8 S8b（LauncherViewModel.kt:450-451 同构）：Grace 按钮虚拟项，
+     * icon = ItemIconStore.apply 渲染后的 256px 位图（Suggestion glyph/图片/托盘色+
+     * 圆形 mask）。null = itemIcons 尚未产出；Route 层 takeIf(key in itemIcons) 决定
+     * artwork 是否生效（上游 LauncherScreen.kt:1054 语义）。
+     */
+    val graceButtonApp: com.galaxyrio.gracelauncher.data.LauncherApp? = null,
 ) {
     /** 原版 LauncherUiState.favoriteItems 的 P1 同构：按 favoriteOrder 排出已装应用。 */
     val favorites: List<LauncherApp>
@@ -192,12 +199,27 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val bridgeReceiver = GraceBridgeReceiver(this)
     /** C 组（C3）：设置命令引擎（模块设置页 → 本进程落 Room/SP → 快照回推）。 */
     private val settingsHostEngine = GraceSettingsHostEngine(application, viewModelScope, ::onSettingsMutated, ::onBridgeMoveWidget,
-        ::onBridgeAddPopupWidget, ::onBridgeShortcutQuery)
+        ::onBridgeAddWidget, ::onBridgeAddPopupWidget, ::onBridgeShortcutQuery)
+    /** 上游同步 v1.1.8 S8b：图标渲染管线（Grace 按钮 artwork 面专用；settings 传入逐次构造）。
+     *  context 必须是【模块资源 Context】：ItemIconStore/GraceButtonIcon 解析模块
+     *  drawable/string——宿主 MiuiResources 无模块 R id（NotFound）或同 ID 错位
+     *  （DualResources 只兜 string 族，drawable 错位静默换图）。filesDir 指向模块
+     *  数据目录仅影响 image kind（当前设置侧 import 降级禁用，不可达）。 */
+    private val moduleResourceContext: android.content.Context = runCatching {
+        application.createPackageContext("com.homemode4miui", android.content.Context.CONTEXT_IGNORE_SECURITY)
+    }.getOrElse { application }
+    private val iconStore = com.galaxyrio.gracelauncher.data.icons.ItemIconStore(moduleResourceContext,
+        com.galaxyrio.gracelauncher.data.icons.IconPackRepository(moduleResourceContext))
 
     /** hotfix2：设置页"移动小部件"命令 → 桌面进入 widget 编辑模式（原版同进程直改 editingHome）。 */
     private val _moveWidgetRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val moveWidgetRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _moveWidgetRequests
     private fun onBridgeMoveWidget() { _moveWidgetRequests.tryEmit(Unit) }
+
+    /** 上游同步补漏：设置页"添加自定义小组件"命令 → 桌面开 WidgetPicker（跨进程 UI 动作）。 */
+    private val _addWidgetRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val addWidgetRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _addWidgetRequests
+    private fun onBridgeAddWidget() { _addWidgetRequests.tryEmit(Unit) }
 
     /** folders 阶段（hotfix folders2）：设置页"添加新的小组件"命令 → 桌面开 WidgetPicker 弹层模式。 */
     private val _addPopupWidgetRequests = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -235,6 +257,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** folders 阶段：文件夹流（Room folders 表 + popup items 成员 JSON，原版 snapshots 同构） */
     private var foldersJob: Job? = null
     private var iconsJob: Job? = null
+    /** 上游同步补漏：item_icons 快照（iconsJob 主线程写，refreshApps/装饰读）。
+     *  上游 LauncherViewModel.itemsSnapshot.icons 的宿主同构。 */
+    private var iconsSnapshot: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon> = emptyMap()
     /** hotfix folders2：已保存快捷方式流（saved_shortcuts 表） */
     private var savedShortcutsJob: Job? = null
     /** P6：图标包开关变化 → 重刷应用列表（渲染装饰跟随包顺序）。 */
@@ -344,7 +369,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 ModLog.e("GraceHomeViewModel observeFolders failed", error)
             }
         }
-        // 上游同步 v1.1.8 S8b：图标设计器产出跟随（GraceButton design 面）
+        // 上游同步 v1.1.8 S8b：图标设计器产出跟随（GraceButton design + artwork 面）
         iconsJob = viewModelScope.launch {
             try {
                 val database = LauncherDatabase.getInstance(application)
@@ -352,7 +377,41 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     val icons = rows.mapNotNull { row ->
                         com.galaxyrio.gracelauncher.data.ItemIcon.decode(row.iconJson)?.let { row.itemKey to it }
                     }.toMap()
-                    _uiState.update { it.copy(itemIcons = icons) }
+                    // Grace 按钮位图随 icons 流产出（上游 LauncherViewModel.kt:450-451 同构）：
+                    // ItemIconStore.apply 走 isGraceButton 分支渲染 256px artwork。
+                    // 图标渲染设置统一走 currentIconSettings（补 iconDesign/iconPackPackages，
+                    // 与 applyDesign 全局面 + theme kind 语义对齐）。
+                    val buttonApp = try {
+                        val iconSettings = currentIconSettings()
+                        // moduleResourceContext：GraceButtonIcon.item 内部 getString
+                        // (settings_grace_button) 必须解析模块资源——宿主 Application 的
+                        // MiuiResources 无模块 R id（Resources$NotFoundException 实锤，
+                        // 与 GraceHomeRoot LocalContext 覆盖同族问题，VM 非组合代码需手动过桥）。
+                        iconStore.apply(
+                            com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.item(moduleResourceContext),
+                            com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.choice(icons[com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key]),
+                            iconSettings,
+                        )
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        ModLog.e("GraceHomeViewModel renderGraceButtonIcon failed", error)
+                        null
+                    }
+                    // 上游同步补漏：icons 变化 → 已加载应用重装饰（设计器保存后桌面立即生效，
+                    // 不重查系统；refreshApps 侧同链路覆盖冷启动/包变化路径）。
+                    val redecorated = try {
+                        decorateApps(_uiState.value.apps)
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        ModLog.e("GraceHomeViewModel redecorateApps failed", error)
+                        null
+                    }
+                    _uiState.update { state ->
+                        state.copy(itemIcons = icons, graceButtonApp = buttonApp,
+                            apps = redecorated ?: state.apps)
+                    }
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
@@ -396,7 +455,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 // B6.4：图标包跟随设置（装饰在 loadApps 内完成；包加载失败自动回退系统图标）
                 val packs = _uiState.value.settings.enabledIconPackPackages
                 lastIconPacks = packs
-                val apps = loadApps(packs)
+                // 上游同步补漏（LauncherViewModel.kt:443 decorate 逐字语义）：
+                // 应用图标设计器产出（item_icons）+ 全局面设计 + 主题化在入库前套用。
+                val apps = decorateApps(loadApps(packs))
                 // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
                 // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
                 val order = favoritesStore.favoritesFor(apps)
@@ -421,6 +482,46 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** B3.1：查询逻辑已抽入 AppRepository（AOSP 稳定 API，宿主进程直接可用）。 */
     private suspend fun loadApps(iconPackPackages: List<String>): List<LauncherApp> =
         appRepository.loadApps(iconPackPackages)
+
+    // ---- 上游同步补漏：应用图标装饰链（LauncherViewModel.kt:430/443 + LauncherSettingsRepository 主题三参同源）----
+
+    /**
+     * 图标渲染设置（上游 iconSettings = _uiState.value.settings 的宿主同构）：
+     * 主题三参从 Room 行直取（与设计器预览同源），iconDesign = 全局面「全部」页
+     * 设计（Room iconDesignJson），iconPackPackages = theme kind 跟随的主题包。
+     */
+    private suspend fun currentIconSettings(): com.galaxyrio.gracelauncher.data.LauncherSettings {
+        val row = LauncherDatabase.getInstance(getApplication()).settingsDao().readSettings()
+        return com.galaxyrio.gracelauncher.data.LauncherSettings(
+            useDynamicColors = row?.useDynamicColors ?: true,
+            themeColor = row?.themeColor ?: 0xFF6750A4.toInt(),
+            darkMode = row?.darkMode
+                ?.let { runCatching { com.galaxyrio.gracelauncher.data.ThemeMode.valueOf(it) }.getOrNull() }
+                ?: com.galaxyrio.gracelauncher.data.ThemeMode.System,
+            iconDesign = row?.iconDesignJson?.let(com.galaxyrio.gracelauncher.data.ItemIcon::decode),
+            iconPackPackages = com.galaxyrio.gracelauncher.data.GraceHomeSettings.decodeStringList(row?.iconPackPackagesJson),
+        )
+    }
+
+    /**
+     * 应用图标装饰（上游 LauncherViewModel.decorate 逐字语义：applyDesign(app,
+     * icons[key], settings.iconDesign, settings, themedIcons)）。快速路径：无自定义
+     * 设计 + 无全局面 + 未开主题化时零渲染（宿主进程省 200+ 次 144px 位图渲染）。
+     */
+    private suspend fun decorateApps(apps: List<LauncherApp>): List<LauncherApp> {
+        val icons = iconsSnapshot
+        val iconSettings = currentIconSettings()
+        val themed = com.galaxyrio.gracelauncher.data.LauncherPreferences(
+            getApplication<Application>()).themedIcons
+        if (!themed && icons.isEmpty() && iconSettings.iconDesign == null) return apps
+        return kotlinx.coroutines.withContext(Dispatchers.IO) {
+            apps.map { app ->
+                runCatching {
+                    iconStore.applyDesign(app, icons[app.key], iconSettings.iconDesign, iconSettings, themed)
+                }.getOrElse { app }
+            }
+        }
+    }
 
     /**
      * 原版 AppRepository.launch 对齐：LauncherApps.startMainActivity（宿主即默认桌面）。

@@ -429,6 +429,26 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             editingHome = true
         }
     }
+    // 上游同步补漏：设置页"添加自定义小组件"（效率页 settings_add_widget 行）→
+    // 桌面开 WidgetPicker。原版同进程 = LauncherActions.addWidget 直调；本仓设置页
+    // 在模块进程，此前该 action 是 no-op 占位 → 入口点了没反应。对齐桌面端
+    // addWidget 语义（单 widget 上限检查 + 预载 providers），复用 ADD_POPUP_WIDGET
+    // 同款弹层编排（ADD_WIDGET 命令 → 宿主 engine → 本 collect）。
+    LaunchedEffect(Unit) {
+        viewModel.addWidgetRequests.collect {
+            drawerOpen = false
+            selectedLetter = null
+            searchOpen = false
+            overlay = null
+            popupPickerOwner = null
+            if (state.settings.homeLayout.hasWidget) {
+                Toast.makeText(context, R.string.widget_single_limit, Toast.LENGTH_LONG).show()
+            } else {
+                viewModel.loadWidgetProviders()
+                pickerOpen = true
+            }
+        }
+    }
     // folders 阶段（hotfix folders2）：设置页"添加新的小组件" → 桌面开 WidgetPicker 弹层模式
     LaunchedEffect(Unit) {
         viewModel.addPopupWidgetRequests.collect { ownerKey ->
@@ -815,6 +835,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             autoHide = state.settings.hideAlphabet && !drawerOpen,
             // 上游同步 v1.1.8：A-Z 列表自定义外观（字形/间距/几何）直达桌面 rail
             alphabet = state.settings.listAppearance.alphabet,
+            // 上游同步 v1.1.8 S2 补漏（LauncherScreen.kt:1030 逐字）：屏幕左边缘
+            // 28dp 字母 scrub 触摸面（listAppearance.leftAlphabet，默认开）。
+            // 模块 AlphabetRail 组件本身已带该参数，但此处漏传 → 左侧永远无效。
+            leftTouchEnabled = state.settings.listAppearance.leftAlphabet,
             letters = model.letters,
             selectedLetter = if (drawerOpen) selectedLetter else null,
             height = railHeight,
@@ -861,7 +885,6 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         }
 
         // ---- 上游同步 v1.1.8 S4：Grace Button（对齐原版 LauncherScreen.kt:1052-1060）----
-        // 图标设计/自定义 artwork 面随 itemIcons 进宿主 UI 后接入（当前 defaults）。
         if (!drawerOpen && (editingHome || state.settings.graceButton.enabled)) {
             com.galaxyrio.gracelauncher.ui.components.GraceButton(
                 settings = state.settings.graceButton,
@@ -873,6 +896,11 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 heldOrigin = buttonTransition?.takeIf {
                     it.action == com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen && it.originIsButton
                 }?.origin,
+                // 上游同步 v1.1.8 S8b（LauncherScreen.kt:1054 逐字）：仅当用户保存过
+                // 按钮设计（item_icons 有行）才消费自定义 artwork，否则回退默认 G glyph。
+                artwork = state.graceButtonApp?.icon.takeIf {
+                    com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key in state.itemIcons
+                },
                 // 上游同步 v1.1.8 S8b：按钮图标设计面（IconDesigner → item_icons → design）
                 design = com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon
                     .choice(state.itemIcons[com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key])
@@ -963,22 +991,9 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                     state.settings.showBatteryPercentage) { enabled ->
                     viewModel.updateSettings { it.copy(showBatteryPercentage = enabled) }
                 }
-                // P6（B6.5）：私密空间状态行（探测降级面；完整 Controller 随 folders 阶段）
-                com.galaxyrio.gracelauncher.ui.overlays.PanelAction(
-                    com.galaxyrio.gracelauncher.ui.components.LauncherSymbol.Lock,
-                    stringResource(R.string.private_space_title),
-                    summary = stringResource(when {
-                        !privateSpaceState.supported -> R.string.private_space_unsupported
-                        !privateSpaceState.exists -> R.string.private_space_setup
-                        privateSpaceState.locked -> R.string.private_space_locked
-                        else -> R.string.private_space_unlocked
-                    }),
-                    iconColumnWidth = 34.dp, iconTextSpacing = 20.dp,
-                ) {
-                    if (!PrivateSpaceProbe.openSettings(hostContext)) {
-                        Toast.makeText(context, R.string.action_unavailable, Toast.LENGTH_SHORT).show()
-                    }
-                }
+                // 上游对齐修正：上游 HomeWidgetSheet（时钟面板）没有私密空间行——
+                // 此处原为 P6 自加的探测降级面，漏了 enabled 过滤，用户关闭后仍常驻
+                // 显示（用户实测反馈）。私密空间管理入口只在设置（效率页）承载，随上游。
             },
             // P6（B6.2）：日程 + 天气面板
             agenda = {

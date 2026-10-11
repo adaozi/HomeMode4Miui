@@ -14,7 +14,7 @@
     <string name="favorites_empty">还没有收藏，点按恢复默认收藏</string>
 
     <!-- GraceLauncher settings strings (zh-CN)（C 组设置全家桶搬运） -->
-    <string name="app_name">Grace 启动器</string>
+    <string name="app_name">HomeMode4Miui</string>
     <string name="app_unavailable">无法打开这个应用</string>
     <string name="calendar_above_clock">放置于时钟上方</string>
     <string name="calendar_enable">启用日历和日程</string>
@@ -153,7 +153,7 @@
     <string name="licenses_unknown">未提供</string>
     <string name="licenses_unknown_developer">未提供</string>
     <string name="licenses_unknown_version">未提供版本号</string>
-    <string name="media_access_explanation">请在下一页为 Grace Launcher 开启通知使用权。Grace 会读取应用通知的摘要和正文，在你操作时打开或清除对应通知，并通过媒体会话控制音乐。通知文字和图标仅保留在内存中，不保存到本地，也不上传。你可以随时在系统设置中撤销授权。</string>
+    <string name="media_access_explanation">请在下一页为 HomeMode4Miui 开启通知使用权。HomeMode4Miui 会读取应用通知的摘要和正文，在你操作时打开或清除对应通知，并通过媒体会话控制音乐。通知文字和图标仅保留在内存中，不保存到本地，也不上传。你可以随时在系统设置中撤销授权。</string>
     <string name="media_access_required">需要开启通知使用权</string>
     <string name="media_allow_controls">允许通知与媒体访问</string>
     <string name="media_always_visible">常驻显示</string>
@@ -228,7 +228,7 @@
     <string name="settings_about">关于</string>
     <string name="settings_about_app">应用</string>
     <string name="settings_about_description">使用 Kotlin 与 Jetpack Compose 构建的简洁列表式安卓启动器。</string>
-    <string name="settings_about_summary">Grace Launcher、更新与许可证</string>
+    <string name="settings_about_summary">HomeMode4Miui、更新与许可证</string>
     <string name="settings_accent_color">强调色</string>
     <string name="settings_advanced">高级</string>
     <string name="settings_advanced_summary">更多启动器选项</string>
@@ -327,7 +327,7 @@
     <string name="weather_settings_enabled_summary">桌面与日程 · Breezy Weather</string>
     <string name="weather_settings_first_location">Breezy Weather 中的第一个地点</string>
     <string name="weather_settings_forecast_days">预报天数</string>
-    <string name="weather_settings_incompatible">请检查 Grace Launcher 和 Breezy Weather 的更新，以使用兼容的天气共享版本。</string>
+    <string name="weather_settings_incompatible">请检查 HomeMode4Miui 和 Breezy Weather 的更新，以使用兼容的天气共享版本。</string>
     <string name="weather_settings_install">安装 Breezy Weather</string>
     <string name="weather_settings_loading">正在检查 Breezy Weather…</string>
     <string name="weather_settings_location">地点</string>
@@ -335,11 +335,11 @@
     <string name="weather_settings_no_locations">请在 Breezy Weather 中添加地点，然后返回此处。</string>
     <string name="weather_settings_not_installed">请安装 Breezy Weather 以使用内置天气。未安装时，此功能不可用。</string>
     <string name="weather_settings_open">打开 Breezy Weather</string>
-    <string name="weather_settings_permission">请允许 Grace Launcher 读取 Breezy Weather 共享的天气。</string>
+    <string name="weather_settings_permission">请允许 HomeMode4Miui 读取 Breezy Weather 共享的天气。</string>
     <string name="weather_settings_ready">已连接 Breezy Weather。</string>
     <string name="weather_settings_refresh">检查更新</string>
     <string name="weather_settings_unavailable">无法读取 Breezy Weather 的数据。请打开该应用检查预报，然后重试。</string>
-    <string name="weather_settings_update_notifier">自动更新：Breezy Weather → 设置 → 外部模块 → 位置更新通知器 → 启用 Grace Launcher。</string>
+    <string name="weather_settings_update_notifier">自动更新：Breezy Weather → 设置 → 外部模块 → 位置更新通知器 → 启用 HomeMode4Miui。</string>
     <string name="widget_add">添加自定义小组件</string>
     <string name="widget_calendar">日历</string>
     <string name="widget_calendar_access">允许访问日历</string>
@@ -450,7 +450,8 @@
     <string name="shortcuts_folders_enable">启用应用弹出窗口</string>
 
     <string name="edit_icon">修改图标</string>
-    <string name="grace_accessibility_explanation">这些操作需要 Android 无障碍权限，不需要 root。请在系统设置的已安装应用或已下载服务中启用 Grace Launcher。Grace 只执行您主动触发的操作，不读取屏幕内容，也不监控您的活动。您可随时撤销权限。</string>
+    <string name="grace_button_edit_icon">修改按钮图标</string>
+    <string name="grace_accessibility_explanation">这些操作需要 Android 无障碍权限，不需要 root。请在系统设置的已安装应用或已下载服务中启用 HomeMode4Miui。HomeMode4Miui 只执行您主动触发的操作，不读取屏幕内容，也不监控您的活动。您可随时撤销权限。</string>
     <string name="grace_accessibility_required">执行系统操作需要无障碍权限。</string>
     <string name="grace_accessibility_title">允许执行系统操作</string>
     <string name="grace_action_unavailable">此操作在当前设备上不可用。</string>

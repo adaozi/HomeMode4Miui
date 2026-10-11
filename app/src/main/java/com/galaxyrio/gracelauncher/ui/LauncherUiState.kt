@@ -85,6 +85,10 @@ data class LauncherUiState(
     val workProfiles: List<com.galaxyrio.gracelauncher.data.WorkProfile> = emptyList(),
     val workProfileApps: List<LauncherApp> = emptyList(),
     val shownShortcutKeys: Set<String> = emptySet(),
+    // 上游同步 v1.1.8 S8b（LauncherViewModel.kt:254/460）：Grace 按钮虚拟项。
+    // designer-only 身份——IconDesignerSettings 依赖 findItem 解析它进入按钮特化面
+    // （Suggestion 行/圆形锁定/iconSize=100），从未命中时按钮设计页退化为普通应用面。
+    val graceButtonApp: LauncherApp? = null,
 ) {
     // 上游同步 v1.1.8（LauncherViewModel.notificationsFor 逐字语义，落到本仓 UiState）：
     // 通知预览按 ShortcutsFoldersSettings 的静默/普通显示策略过滤；快捷方式/文件夹/
@@ -105,6 +109,8 @@ data class LauncherUiState(
         ?: privateSpaceApps.firstOrNull { it.key == key }
         ?: privateFolder.takeIf { it.key == key }?.let(::folderItem)
         ?: folders.firstOrNull { it.key == key }?.let(::folderItem)
+        // 上游同步 v1.1.8（LauncherViewModel.kt:140）：Grace 按钮虚拟项兜底。
+        ?: graceButtonApp?.takeIf { it.key == key }
 
     val privateFolder: LauncherFolder get() = settings.privateSpace.folder(privateSpaceApps)
     val privateContentVisible: Boolean get() = !isLoadingSettings && !settingsLoadFailed && settings.privateSpace.enabled &&

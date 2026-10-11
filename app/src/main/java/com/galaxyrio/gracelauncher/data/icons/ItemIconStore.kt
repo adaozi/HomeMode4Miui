@@ -27,6 +27,7 @@ import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.PrivateSpaceFolderId
 import com.galaxyrio.gracelauncher.data.LauncherSettings
 import com.galaxyrio.gracelauncher.data.ThemeMode
+import com.galaxyrio.gracelauncher.data.icons.isGraceButton
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamicColorScheme
 import com.materialkolor.dynamiccolor.ColorSpec
@@ -96,6 +97,12 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
 
     internal suspend fun layers(app: LauncherApp, choice: ItemIcon, settings: LauncherSettings, size: Int = 384): IconLayers? = safelyRender(app, null) {
         withContext(Dispatchers.IO) {
+            // 上游同步 v1.1.8 S8b（ItemIconStore.kt:99-101）：Grace 按钮虚拟项不走
+            // 系统图标解析——system/theme/symbol 全部由 GraceButtonIcon 直接渲染
+            // （Suggestion glyph + 托盘色 + 圆形 mask），否则落 app.icon=null 链路。
+            if (app.isGraceButton && choice.kind in setOf("system", "theme", "symbol")) {
+                return@withContext GraceButtonIcon.layers(context, choice, size, themeColors(settings))
+            }
             if (app.folderId != null && choice.kind in setOf("system", "theme")) {
                 val colors = themeColors(settings)
                 val glyph = ContextCompat.getDrawable(context, if (app.folderId == PrivateSpaceFolderId) R.drawable.ms_lock else R.drawable.ms_folder)
@@ -113,6 +120,11 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
                 else -> null
             }
             if (packed != null) return@withContext packed
+            // 上游同步 v1.1.8 S8b（ItemIconStore.kt:123-125）：按钮 + 图标包来源回退
+            // 默认渲染（图标包形状不适合 FAB；pack 分支不落入系统图标解析）。
+            if (app.isGraceButton && choice.kind == "pack") {
+                return@withContext GraceButtonIcon.layers(context, ItemIcon.System, size, themeColors(settings))
+            }
             val drawable = if (app.shortcut == null && choice.kind in setOf("theme", "system", "pack")) systemDrawable(app) else null
             if (drawable != null) return@withContext iconLayers(drawable, size)
             val bitmap = if (choice.kind == "image") imageBitmap(choice.source, size) else null
@@ -124,7 +136,8 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
         safelyRender(app, app) {
             if (choice == null) return@withContext app
             choice.design?.let { design ->
-                val original = layers(app, choice, settings, 144) ?: return@withContext app
+                // 上游同步 v1.1.8 S8b（ItemIconStore.kt:137）：按钮位图 256px（54dp FAB 高密度）。
+                val original = layers(app, choice, settings, if (app.isGraceButton) 256 else 144) ?: return@withContext app
                 val colors = dynamicColors(settings)
                 val theme = themeColors(settings)
                 return@withContext app.copy(icon = renderDesignedIcon(original, design, colors.first, colors.second, theme.first, theme.second).asImageBitmap(),
