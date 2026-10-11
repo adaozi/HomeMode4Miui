@@ -34,9 +34,17 @@ sealed interface DrawerItem {
     data class Folder(val folder: LauncherFolder, override val section: String = FolderSection) : DrawerItem {
         override val key = "folder:${folder.id}"
     }
+
+    /** 上游同步 v1.1.8 S8a：工作资料空态行（无应用时仍显示 setup 提示）。 */
+    data object WorkStatus : DrawerItem {
+        override val key = "work-profile-status"
+        override val section = FolderSection
+    }
 }
 
-class AppListModel(apps: List<LauncherApp>, folders: List<LauncherFolder> = emptyList()) {
+class AppListModel(apps: List<LauncherApp>, folders: List<LauncherFolder> = emptyList(),
+    // 上游同步 v1.1.8 S8a：工作资料文件夹（抽屉底部区；无 managed profile 时恒 null 零变化）
+    workFolder: LauncherFolder? = null, workExpanded: Boolean = false, workApps: List<LauncherApp> = emptyList()) {
     private val inlineFolders = folders.filter { it.placement.inAppList && !it.appListAtBottom }.associateBy(LauncherFolder::key)
     // Use exactly the same name/pinyin ordering and alphabet sections as apps.
     private val grouped = (apps + inlineFolders.values.map(LauncherFolder::asApp))
@@ -53,9 +61,17 @@ class AppListModel(apps: List<LauncherApp>, folders: List<LauncherFolder> = empt
                 add(if (folder == null) DrawerItem.App(app, letter) else DrawerItem.Folder(folder, letter))
             }
         }
-        if (drawerFolders.isNotEmpty()) {
+        if (drawerFolders.isNotEmpty() || workFolder != null) {
             add(DrawerItem.Header(FolderSection))
             drawerFolders.forEach { add(DrawerItem.Folder(it)) }
+            // 上游同步 v1.1.8 S8a：工作资料文件夹跟随用户文件夹之后（原版顺序）
+            if (workFolder != null) {
+                add(DrawerItem.Folder(workFolder))
+                if (workExpanded) {
+                    workApps.forEach { add(DrawerItem.App(it, FolderSection)) }
+                    if (workApps.isEmpty()) add(DrawerItem.WorkStatus)
+                }
+            }
         }
     }
     // Keep the rail in sync with every section, including launcher utilities.

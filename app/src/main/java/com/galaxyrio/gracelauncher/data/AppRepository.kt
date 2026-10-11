@@ -30,6 +30,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
+/** 上游同步 v1.1.8 S8a：工作资料 profile 描述（仅 managed type，MIUI 双开/clone 永不进入）。 */
+data class WorkProfile(val user: android.os.UserHandle, val serial: Long)
+
 class AppRepository(
     private val context: Context,
     /** B6.4：图标包仓储（installedPacks 面板查询 + loadApps 装饰共用一个缓存）。 */
@@ -102,6 +105,48 @@ class AppRepository(
     }
 
     /** 原版 AppRepository.launch 对齐：Launcher API 保留目标 task 语义，Android 出启动动画。 */
+    /**
+     * 上游同步 v1.1.8 S8a：工作资料 profile 枚举。
+     * 与上游差异：严格只认 USER_TYPE_PROFILE_MANAGED（去掉上游 API<35 的放行分支）——
+     * MIUI 双开（clone/XSpace）必须留在主列表（dualapp 装机实锤语义），永不进工作文件夹。
+     */
+    fun workProfiles(): List<WorkProfile> {
+        val launcher = launcherApps ?: return emptyList()
+        val users = context.getSystemService(android.os.UserManager::class.java) ?: return emptyList()
+        return runCatching {
+            launcher.profiles.filter { user ->
+                user != android.os.Process.myUserHandle() &&
+                    launcher.getLauncherUserInfo(user)?.userType == android.os.UserManager.USER_TYPE_PROFILE_MANAGED
+            }.mapNotNull { user ->
+                users.getSerialNumberForUser(user).takeIf { it >= 0 }?.let { WorkProfile(user, it) }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 上游同步 v1.1.8 S8a：逐工作资料拉应用（isWorkProfile 标记 + serial key 前缀，与主列表天然区分）。 */
+    suspend fun loadWorkApps(profiles: List<WorkProfile>, iconPackPackages: List<String> = emptyList()): List<LauncherApp> =
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val packs = normalizeIconPackOrder(iconPackPackages).mapNotNull { iconPacks.load(it) }
+            val launcher = checkNotNull(launcherApps)
+            profiles.flatMap { profile ->
+                // Quiet/removed profiles must not prevent the personal app inventory from loading.
+                try {
+                    launcher.getActivityList(null, profile.user).mapNotNull { info ->
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        val component = info.componentName ?: return@mapNotNull null
+                        val label = info.label.toString().trim().ifBlank { return@mapNotNull null }
+                        val icon = runCatching { info.getBadgedIcon(0)?.toBitmap()?.asImageBitmap() }.getOrNull()
+                        makeApp(component, label, icon, packs)
+                            .copy(user = profile.user, userSerial = profile.serial, isWorkProfile = true)
+                    }
+                } catch (error: SecurityException) {
+                    emptyList()
+                } catch (error: IllegalStateException) {
+                    emptyList()
+                }
+            }.distinctBy(LauncherApp::key).sortedWith(LauncherAppOrder)
+        }
+
     fun launch(
         app: LauncherApp,
         sourceBounds: Rect? = null,

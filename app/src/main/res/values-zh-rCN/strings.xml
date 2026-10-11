@@ -481,4 +481,7 @@
     <string name="settings_lab">实验室</string>
 
     <string name="grace_accessibility_description">通过 Grace 按钮或主页手势锁屏或打开通知栏、控制中心，不读取或存储屏幕内容。</string>
+
+    <string name="work_profile_no_apps">没有可用的工作应用，工作资料可能已暂停。</string>
+    <string name="work_profile_setup">打开工作资料设置</string>
 </resources>

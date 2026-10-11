@@ -22,6 +22,7 @@
 package com.galaxyrio.gracelauncher.ui.drawer
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -30,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -79,6 +81,9 @@ fun AppDrawerScreen(
     notifications: Map<String, List<AppNotification>> = emptyMap(),
     // 上游同步 v1.1.8：ShortcutsFoldersSettings（通知显示策略；swipeLeftToOpenFirst 随 S3/S7）
     popupSettings: ShortcutsFoldersSettings = ShortcutsFoldersSettings(),
+    // 上游同步 v1.1.8 S8a：工作资料（文件夹展开态 + 空态设置入口）
+    workExpanded: Boolean = false,
+    onWorkProfileSettings: () -> Unit = {},
 ) {
     val appearance = LocalLauncherAppearance.current
     // 上游同步 v1.1.8：列表外观（边距/字号/名字可见性）+ 行标签样式
@@ -99,7 +104,7 @@ fun AppDrawerScreen(
         items(
             items = model.items,
             key = DrawerItem::key,
-            contentType = { when (it) { is DrawerItem.Header -> "header"; is DrawerItem.App -> "app"; is DrawerItem.Folder -> "folder" } },
+            contentType = { when (it) { is DrawerItem.Header -> "header"; is DrawerItem.App -> "app"; is DrawerItem.Folder -> "folder"; DrawerItem.WorkStatus -> "status" } },
         ) { item ->
             // Keep every item's key and measured height. Hiding a group must
             // not change scroll bounds or move the selected header on release.
@@ -149,6 +154,12 @@ fun AppDrawerScreen(
                             open(item.folder.asApp(), bounds)
                         } },
                     )
+                    // 上游同步 v1.1.8 S8a：工作资料空态（无应用时提示 + 设置入口）
+                    DrawerItem.WorkStatus -> Column(Modifier.padding(start = LauncherLayout.ContentInset, bottom = 12.dp)) {
+                        Text(stringResource(R.string.work_profile_no_apps), Modifier.padding(vertical = 12.dp), color = appearance.text,
+                            style = MaterialTheme.typography.bodyMedium.copy(shadow = appearance.textShadow))
+                        TextButton(onClick = onWorkProfileSettings) { Text(stringResource(R.string.work_profile_setup), color = appearance.text) }
+                    }
                 }
             }
         }

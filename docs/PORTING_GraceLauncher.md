@@ -1350,3 +1350,25 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
 > **✅ 装机验收通过（2026-10-11）**：T0/T1/T2 全项通过——Room v18→v21 迁移无损、A-Z/列表外观/手势/Grace Button
 > 过渡/系统动作三件套（MIUI 原生层独立工作，无 su 弹窗）/字体管理器/遮罩色/文件夹左滑/老功能回归全部 OK。
 > 上游同步战役（S1+S2/S3/S4/S7/S5+S6，v2.9.24→v2.9.29）正式收官；S8（PWA/pin/WorkProfile 宿主面）按计划缓后。
+
+### work1（v2.9.30-grace-work1 / versionCode 63，2026-10-11）—— §9 落地：S8a Work Profile 数据面 + 抽屉渲染
+
+- [x] **数据面**：AppRepository +WorkProfile/workProfiles()/loadWorkApps —— **与上游差异（保护 dualapp
+  装机实锤语义）**：workProfiles 严格只认 USER_TYPE_PROFILE_MANAGED（去掉上游 API<35 放行分支），
+  MIUI 双开（clone/XSpace）永不进工作文件夹、主列表行为零变化；无 managed profile 时零开销静默跳过。
+  应用标记 isWorkProfile + serial key 前缀（与主列表天然区分）。
+- [x] **VM 链**：GraceHomeViewModel refreshApps 追加 work 枚举（无 profile 零开销）；GraceHomeUiState
+  +workProfiles/workProfileApps + workAppsOrganized/workProfileAppsOrdered/workFolder 计算属性；
+  appListApps 在 workAppsOrganized 时过滤 work 应用（收编进文件夹）。
+- [x] **抽屉渲染**：AppListModel +WorkStatus/workFolder/workExpanded/workApps（跟随用户文件夹后）；
+  AppDrawerScreen WorkStatus 空态行（无应用提示 + 设置入口）+ contentType/params；Route workExpanded
+  状态（抽屉内展开/收起，收藏区与抽屉两处 onOpenFolder 拦截 WorkProfileFolderId）。
+- [x] **宿主视图**：GraceHomeSettings +workProfile 字段（SP/Room 三路径；workProfileJson 列 schema v19
+  已有，零 migration）。设置页 workProfile 更新经桥自动落库（S1 链路）。
+- [x] 构建：assembleRelease 通过，8.02MB，versionCode 63。
+- [ ] **装机回归**：① 无工作资料/无双开设备：抽屉与主列表零变化（恒 null 静默）；② 有工作资料设备：
+  抽屉底部出现工作资料文件夹（角标），点击展开/收起，应用带工作角标，主列表不再重复显示；
+  ③ 文件夹左滑开首项对工作文件夹同样生效。
+- [ ] **降级登记**：① ProfileSettings 工作资料设置页（显示名/排序/开关编辑器）随 S8b——当前
+  workProfile 走默认值（enabled=true、Folder 展示）；② pin item/PWA（ACTION_CONFIRM_PIN_* 宿主流程
+  hook）随 S8b 宿主逆向；③ workExpanded 展开时滚动定位（上游 LaunchedEffect）未接，长列表首用需手滑。

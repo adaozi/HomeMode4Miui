@@ -73,6 +73,8 @@ data class GraceHomeSettings(
     val graceButton: GraceButtonSettings = GraceButtonSettings(),
     /** 上游同步 v1.1.8 S5：字体库（JSON 列 fontLibraryJson；decode 兼容 appFontId 旧选择）。 */
     val fontLibrary: FontLibrary = FontLibrary(),
+    /** 上游同步 v1.1.8 S8a：工作资料模型（JSON 列 workProfileJson；schema v19 已有列）。 */
+    val workProfile: ProfileSettings = ProfileSettings.workDefaults(),
 ) {
     /** 对齐原版 LauncherSettings.enabledIconPackPackages：空列表 = 系统图标。 */
     val enabledIconPackPackages: List<String>
@@ -94,7 +96,8 @@ data class GraceHomeSettings(
                    shortcutsFoldersJson: String? = null,
                    homeGesturesJson: String? = null,
                    graceButtonJson: String? = null,
-                   fontLibraryJson: String? = null) = GraceHomeSettings(
+                   fontLibraryJson: String? = null,
+                   workProfileJson: String? = null) = GraceHomeSettings(
             clockEnabled = clockEnabled,
             clockStyle = ClockStyle.decode(clockStyleJson),
             hideFavoriteNames = hideFavoriteNames,
@@ -120,6 +123,7 @@ data class GraceHomeSettings(
             homeGestures = GraceButtonSettings.decode(homeGesturesJson, GraceButtonSettings.homeDefaults()),
             graceButton = GraceButtonSettings.decode(graceButtonJson),
             fontLibrary = FontLibrary.decode(fontLibraryJson),
+            workProfile = ProfileSettings.decode(workProfileJson, ProfileSettings.workDefaults()),
         )
 
         /** 原版 LauncherSettingsRepository.settingsJson 同构：字符串列表 JSON。 */
@@ -164,6 +168,7 @@ class GraceHomeSettingsStore(context: Context) {
         homeGesturesJson = preferences.getString(KEY_HOME_GESTURES, null),
         graceButtonJson = preferences.getString(KEY_GRACE_BUTTON, null),
         fontLibraryJson = preferences.getString(KEY_FONT_LIBRARY, null),
+        workProfileJson = preferences.getString(KEY_WORK_PROFILE, null),
     )
 
     fun save(settings: GraceHomeSettings) = preferences.edit {
@@ -192,6 +197,7 @@ class GraceHomeSettingsStore(context: Context) {
         putString(KEY_HOME_GESTURES, settings.homeGestures.encode())
         putString(KEY_GRACE_BUTTON, settings.graceButton.encode())
         putString(KEY_FONT_LIBRARY, settings.fontLibrary.encode())
+        putString(KEY_WORK_PROFILE, settings.workProfile.encode())
     }
 
     private companion object {
@@ -221,5 +227,6 @@ class GraceHomeSettingsStore(context: Context) {
         const val KEY_HOME_GESTURES = "home_gestures"
         const val KEY_GRACE_BUTTON = "grace_button"
         const val KEY_FONT_LIBRARY = "font_library"
+        const val KEY_WORK_PROFILE = "work_profile"
     }
 }

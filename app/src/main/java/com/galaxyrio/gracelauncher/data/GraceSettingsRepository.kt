@@ -110,6 +110,7 @@ class GraceSettingsRepository(context: Context) {
                     homeGesturesJson = next.homeGestures.encode(),
                     graceButtonJson = next.graceButton.encode(),
                     fontLibraryJson = next.fontLibrary.encode(),
+                    workProfileJson = next.workProfile.encode(),
                 ))
                 next
             }
@@ -158,6 +159,7 @@ class GraceSettingsRepository(context: Context) {
         homeGesturesJson = settings.homeGestures.encode(),
         graceButtonJson = settings.graceButton.encode(),
         fontLibraryJson = settings.fontLibrary.encode(),
+        workProfileJson = settings.workProfile.encode(),
     )
 
     private fun LauncherSettingsEntity.toGraceSettings() = GraceHomeSettings.decode(
@@ -187,5 +189,6 @@ class GraceSettingsRepository(context: Context) {
         homeGesturesJson = homeGesturesJson,
         graceButtonJson = graceButtonJson,
         fontLibraryJson = fontLibraryJson,
+        workProfileJson = workProfileJson,
     )
 }

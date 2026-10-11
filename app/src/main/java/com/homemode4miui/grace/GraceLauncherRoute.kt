@@ -191,7 +191,12 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
 
     // hotfix7：抽屉字母列表 = appListApps（原版 LauncherViewModel 语义：隐藏应用只
     // 影响字母列表，favorites/其余表面用全量 apps）
-    val model = remember(state.appListApps, state.folders) { AppListModel(state.appListApps, state.folders) }
+    // 上游同步 v1.1.8 S8a：工作资料文件夹进抽屉（无 managed profile 时恒 null，抽屉零变化）
+    var workExpanded by rememberSaveable { mutableStateOf(false) }
+    val model = remember(state.appListApps, state.folders, state.workFolder, workExpanded, state.workProfileApps) {
+        AppListModel(state.appListApps, state.folders, workFolder = state.workFolder,
+            workExpanded = workExpanded, workApps = state.workProfileAppsOrdered)
+    }
     val drawerState = rememberLazyListState()
     // 过渡生命周期：退后台清未决过渡（已提交锁屏保留黑场直至亮屏）；回前台清残留
     val routeLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -712,8 +717,14 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 // folders 阶段：收藏区文件夹项（原版 HomeScreen.kt:214-224）
                 folders = state.folders,
                 onOpenFolder = { folder, bounds ->
-                    lastFolderAnchor = bounds
-                    overlay = LauncherOverlay.Folder(folder, bounds)
+                    // 上游同步 v1.1.8 S8a：工作资料文件夹点击 = 抽屉内展开/收起（非弹层）
+                    if (folder.id == com.galaxyrio.gracelauncher.data.WorkProfileFolderId) {
+                        lastFolderAnchor = bounds
+                        workExpanded = !workExpanded
+                    } else {
+                        lastFolderAnchor = bounds
+                        overlay = LauncherOverlay.Folder(folder, bounds)
+                    }
                 },
                 onEditFolder = { folder -> openGraceSettingsInModule(context, "folders") },
                 // P6（B6.2）：日期点击 → 日程+天气面板（原版 LauncherOverlay.Agenda 语义）
@@ -761,12 +772,20 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             rowGestures = rowGestures,
             // folders 阶段：抽屉文件夹（原版 AppDrawerScreen FolderRow 分支）
             onOpenFolder = { folder, bounds ->
-                lastFolderAnchor = bounds
-                overlay = LauncherOverlay.Folder(folder, bounds)
+                // 上游同步 v1.1.8 S8a：抽屉内工作资料文件夹点击 = 展开/收起
+                if (folder.id == com.galaxyrio.gracelauncher.data.WorkProfileFolderId) {
+                    workExpanded = !workExpanded
+                } else {
+                    lastFolderAnchor = bounds
+                    overlay = LauncherOverlay.Folder(folder, bounds)
+                }
             },
             onEditFolder = { openGraceSettingsInModule(context, "folders") },
             // P6（B6.3）：抽屉行内通知预览（原版 AppDrawerScreen.kt:152 同构）
             notifications = state.notifications,
+            // 上游同步 v1.1.8 S8a：工作资料（文件夹展开 + 空态设置入口）
+            workExpanded = workExpanded && state.workFolder != null,
+            onWorkProfileSettings = { openGraceSettingsInModule(context, "") },
             modifier = Modifier.retainedPage(visible = drawerOpen)
                 .graphicsLayer { alpha = drawerAlpha }.statusBarContentFade(),
         )

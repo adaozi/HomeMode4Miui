@@ -602,4 +602,7 @@
     <string name="settings_lab">Lab</string>
 
     <string name="grace_accessibility_description">Use Grace button or home screen gestures to lock the screen or open notifications and control center. No screen content is read or stored.</string>
+
+    <string name="work_profile_no_apps">No work apps available. Your work profile may be paused.</string>
+    <string name="work_profile_setup">Open work profile settings</string>
 </resources>

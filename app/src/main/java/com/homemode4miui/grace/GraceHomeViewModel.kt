@@ -52,6 +52,8 @@ import com.galaxyrio.gracelauncher.data.CalendarRepository
 import com.galaxyrio.gracelauncher.data.ClockLayout
 import com.galaxyrio.gracelauncher.data.FavoritesStore
 import com.galaxyrio.gracelauncher.data.GraceHomeSettings
+import com.galaxyrio.gracelauncher.data.WorkProfileFolderId
+import com.galaxyrio.gracelauncher.data.PrivateSpaceDisplay
 import com.galaxyrio.gracelauncher.data.GraceSettingsRepository
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherAppOrder
@@ -115,6 +117,9 @@ data class GraceHomeUiState(
     val folderWidgets: Map<String, List<com.galaxyrio.gracelauncher.data.HomeLayout>> = emptyMap(),
     /** hotfix folders2：已保存快捷方式（saved_shortcuts 表 → LauncherApp，文件夹成员解析用）。 */
     val savedShortcutApps: List<LauncherApp> = emptyList(),
+    // 上游同步 v1.1.8 S8a：工作资料数据面（仅 managed profile；MIUI 双开不受影响）
+    val workProfiles: List<com.galaxyrio.gracelauncher.data.WorkProfile> = emptyList(),
+    val workProfileApps: List<LauncherApp> = emptyList(),
 ) {
     /** 原版 LauncherUiState.favoriteItems 的 P1 同构：按 favoriteOrder 排出已装应用。 */
     val favorites: List<LauncherApp>
@@ -150,6 +155,23 @@ data class GraceHomeUiState(
     val appListApps: List<LauncherApp>
         get() = if (isLoadingApps || appLoadFailed) emptyList()
         else apps.filterNot { it.key in hiddenAppKeys }
+            // 上游同步 v1.1.8 S8a：工作资料应用从主列表收编进独立文件夹（仅 managed profile，
+            // MIUI 双开/clone 永不进入——见 AppRepository.workProfiles 严格过滤）
+            .let { list -> if (workAppsOrganized) list.filterNot { it.isWorkProfile } else list }
+
+    /** 上游同步 v1.1.8 S8a：工作资料是否已组织为独立文件夹（enabled + 存在 managed profile + 非 NormalApp 展示）。 */
+    val workAppsOrganized: Boolean
+        get() = settings.workProfile.enabled && workProfiles.isNotEmpty() &&
+            settings.workProfile.display != PrivateSpaceDisplay.NormalApp
+
+    /** 原版 LauncherViewModel.workProfileApps 语义：appOrder 排序 + 文件夹收编。 */
+    val workProfileAppsOrdered: List<LauncherApp>
+        get() = settings.workProfile.orderedApps(workProfileApps)
+
+    /** 上游 workFolder：桌面抽屉底部工作资料文件夹载体（无应用时仍显示空态行）。 */
+    val workFolder: LauncherFolder?
+        get() = settings.workProfile.folder(workProfileAppsOrdered, WorkProfileFolderId)
+            .takeIf { workAppsOrganized || workProfileApps.isNotEmpty() }
 }
 
 class GraceHomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -350,8 +372,14 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
                 // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
                 val order = favoritesStore.favoritesFor(apps)
+                // 上游同步 v1.1.8 S8a：工作资料枚举（无 managed profile 时零开销静默跳过）
+                val workProfiles = appRepository.workProfiles()
+                val workProfileApps = if (workProfiles.isNotEmpty()) {
+                    appRepository.loadWorkApps(workProfiles, packs)
+                } else emptyList()
                 _uiState.update {
-                    it.copy(apps = apps, favoriteOrder = order, isLoadingApps = false)
+                    it.copy(apps = apps, favoriteOrder = order, isLoadingApps = false,
+                        workProfiles = workProfiles, workProfileApps = workProfileApps)
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
