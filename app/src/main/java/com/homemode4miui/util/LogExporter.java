@@ -26,8 +26,12 @@ import java.util.regex.Pattern;
  *        logcat 里没有（MainHook/HomeController 的 log() 仅走 XposedBridge.log）；
  *     ② 兜底 su logcat -d（root 在但 lspd 路径漂移时，含 ModLog 双写的 logcat 部分）；
  *     ③ 再兜底无 su logcat -d（仅模块 App 进程自身日志，文件头注明局限）。
- *   - 时间范围过滤：逐行解析时间戳（LSPosed ISO 格式 / logcat MM-DD 格式），
- *     多行堆栈（无时间戳的续行）跟随上一行去留；
+ *   - 两级过滤：
+ *     ① 时间范围：逐行解析时间戳（LSPosed ISO 格式 / logcat MM-DD 格式），
+ *        多行堆栈（无时间戳的续行）跟随上一行去留；
+ *     ② tag 过滤（内容级）：modules.log 是所有 LSPosed 模块共享文件、logcat 是全设备
+ *        缓冲，必须按 "HomeMode4Miui" tag 过滤，否则 1 分钟就能导出数 MB 噪音；
+ *        无时间戳的续行跟随上一行去留，保证堆栈不割裂。
  *   - 10MB 上限：超限保留【最新】部分（ArrayDeque 头部裁剪）；
  *   - 落盘：MediaStore.Downloads（Download 文件夹，无需存储权限，min-api 29+）。
  *   - 全程 try/catch 兜底：导出失败只影响本功能，绝不二次崩溃。
@@ -45,6 +49,9 @@ public final class LogExporter {
             "/data/adb/lsposed/logs/modules.log",   // 旧版 1.8.x
             "/data/adb/lsposed/log/modules.log",    // 旧版备选布局
     };
+
+    /** 模块日志 tag（MainHook/HomeController/HostCompat/ModLog 四处出口统一前缀） */
+    private static final String TAG = "HomeMode4Miui";
 
     /** 单次导出上限 10MB（超出保留最新部分） */
     private static final long MAX_BYTES = 10L * 1024 * 1024;
@@ -99,17 +106,17 @@ public final class LogExporter {
             source = "LSPosed 模块日志";
             rootUsed = true;
         } else {
-            // ② su logcat（root 在但 lspd 路径全空）
+            // ② su logcat（root 在但 lspd 路径全空）——-s 源头按 tag 过滤，防全设备缓冲灌入
             String lcRoot = runCommandCapture(new String[]{"su", "-c",
-                    "logcat -d -v time"}, startMs, 30_000);
+                    "logcat -d -v time -s " + TAG + ":V"}, startMs, 30_000);
             if (lcRoot != null) {
-                body.append(lcRoot);
-                source = "logcat（root，全设备缓冲）";
+                body.append(filterByTag(lcRoot));
+                source = "logcat（root，tag 过滤：" + TAG + "）";
                 rootUsed = true;
             } else {
                 // ③ 无 su：仅本进程 logcat（Android 4.1+ UID 隔离，读不到宿主进程日志）
-                body.append(runCommandCapture(new String[]{"logcat", "-d", "-v", "time"},
-                        startMs, 30_000));
+                body.append(filterByTag(runCommandCapture(new String[]{"logcat", "-d",
+                        "-v", "time", "-s", TAG + ":V"}, startMs, 30_000)));
                 source = "logcat（无 root，仅模块 App 进程 —— 宿主 hook 日志请在"
                         + " LSPosed 管理器「日志」页导出后一并提供）";
             }
@@ -136,13 +143,17 @@ public final class LogExporter {
 
     /* ==================== 来源采集 ==================== */
 
-    /** 逐路径探测 LSPosed 模块日志；任一路径读到内容即返回（已过滤），全失败返回 null */
+    /** 逐路径探测 LSPosed 模块日志；按 tag 过滤后非空即返回，全失败返回 null */
     private static String tryLspLog(long startMs) {
         for (String path : LSP_LOG_PATHS) {
             try {
                 String content = runCommandCapture(
                         new String[]{"su", "-c", "cat " + path}, startMs, 10_000);
                 if (content != null && content.trim().length() > 0) {
+                    // 内容级 tag 过滤：modules.log 是所有 LSPosed 模块共享文件，
+                    // 不按 tag 过滤时其他模块的日志量可轻松达到每分钟数 MB
+                    content = filterByTag(content);
+                    if (content.trim().length() == 0) continue; // 本路径无本模块日志
                     StringBuilder sb = new StringBuilder("# ---- ").append(path).append(" ----\n");
                     sb.append(content);
                     return sb.toString();
@@ -152,6 +163,30 @@ public final class LogExporter {
             }
         }
         return null;
+    }
+
+    /* ==================== tag 过滤 ==================== */
+
+    /**
+     * 内容级 tag 过滤：
+     *   - 有时间戳的行：含 TAG → 保留并标记；不含 → 丢弃并清除标记；
+     *   - 无时间戳的行（多行堆栈续行）：跟随上一行去留，保证堆栈不与正文割裂。
+     */
+    private static String filterByTag(String content) {
+        if (content == null || content.length() == 0) return content;
+        StringBuilder out = new StringBuilder(content.length() / 2);
+        boolean keep = false;
+        for (String line : content.split("\n", -1)) {
+            boolean hasTs = LSP_TIME.matcher(line).find()
+                    || LOGCAT_TIME.matcher(line).find();
+            if (hasTs) {
+                keep = line.contains(TAG);
+            }
+            if (keep) {
+                out.append(line).append('\n');
+            }
+        }
+        return out.toString();
     }
 
     /**

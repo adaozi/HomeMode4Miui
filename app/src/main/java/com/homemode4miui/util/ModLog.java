@@ -26,19 +26,24 @@ public final class ModLog {
     }
 
     public static void e(String msg, Throwable t) {
+        // 堆栈合并进带 tag 的单条消息：XposedBridge.log(t) 的首行不带模块 tag，
+        // LogExporter 的 tag 过滤会把无 tag 的堆栈整段丢弃
         try {
-            XposedBridge.log("[" + TAG + "] " + msg);
+            if (t != null) {
+                XposedBridge.log("[" + TAG + "] " + msg + "\n"
+                        + android.util.Log.getStackTraceString(t));
+            } else {
+                XposedBridge.log("[" + TAG + "] " + msg);
+            }
         } catch (Throwable ignored) {
         }
-        if (t != null) {
-            try {
-                XposedBridge.log(t); // LSPosed 日志里的完整堆栈
-            } catch (Throwable ignored) {
-            }
-            try {
+        try {
+            if (t != null) {
                 android.util.Log.e(TAG, msg, t);
-            } catch (Throwable ignored) {
+            } else {
+                android.util.Log.i(TAG, msg);
             }
+        } catch (Throwable ignored) {
         }
     }
 }
