@@ -900,32 +900,9 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             com.galaxyrio.gracelauncher.ui.components.GraceSystemAccessDialog { systemActionAccess = false }
         }
 
-        // ---- FAB（P4：编辑态 = 完成键；常态 = 搜索入口）----
-        if (!drawerOpen && !searchOpen && !pickerOpen) {
-            val fabDescription = stringResource(if (editingHome) R.string.done else R.string.settings_search)
-            Surface(
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(end = LauncherLayout.End, bottom = 22.dp + bottomInset).size(54.dp)
-                    .testTag("launcher_fab_surface"),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary,
-                shadowElevation = 6.dp,
-            ) {
-                Box(Modifier.fillMaxSize().testTag("launcher_fab").clip(CircleShape).combinedClickable(
-                        interactionSource = remember { MutableInteractionSource() }, indication = ripple(),
-                        role = Role.Button,
-                        onClick = {
-                            if (editingHome) editingHome = false
-                            else { searchQuery.clearText(); searchOpen = true }
-                        },
-                    ).semantics { contentDescription = fabDescription }, contentAlignment = Alignment.Center) {
-                    // Use the app's real foreground path, without its adaptive background.
-                    Icon(painterResource(if (editingHome) R.drawable.ms_check else R.drawable.ic_launcher_foreground), null,
-                        Modifier.size(if (editingHome) 26.dp else 48.dp))
-                }
-            }
-        }
+        // ---- FAB 已移除（上游同步 S8b 修复）：P4 时代的搜索 FAB 与 GraceButton 完全重叠
+        //（同 align/padding/54dp/testTag），z 在上完全遮挡按钮手势——搜索入口由
+        // GraceButton 的 tap 动作承担（编辑态完成键 = GraceButton editing 分支）。----
 
         // ---- WidgetPicker 全屏浮层（P4：原版 WidgetSetupActivity 的宿主内等价物；
         // ---- hotfix folders2：popupPickerOwner 非 null 时为弹层 widget 模式）----

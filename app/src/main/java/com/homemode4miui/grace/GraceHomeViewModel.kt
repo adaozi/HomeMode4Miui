@@ -272,6 +272,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             val initial = settingsRepository.loadInitial()
             _uiState.update { it.copy(settings = initial) }
             settingsRepository.observeSettings().collect { observed ->
+                // S8b 诊断：宿主 settings 流（graceButton.enabled 跟随验证）
+                com.homemode4miui.util.ModLog.i(
+                    "GraceSettings observe graceButton.enabled=" + observed.graceButton.enabled +
+                        " tap=" + observed.graceButton.tap.action.name +
+                        " longPress=" + observed.graceButton.longPress.action.name +
+                        " doubleTap.enabled=" + observed.graceButton.doubleTap.enabled)
                 _uiState.update { it.copy(settings = observed) }
                 // B6.4：图标包顺序变化 → 重刷（设置流驱动，幂等）
                 if (lastIconPacks != null && observed.enabledIconPackPackages != lastIconPacks) refreshApps()

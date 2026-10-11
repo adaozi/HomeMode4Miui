@@ -268,6 +268,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     current to next
                 }
                 GraceSettingsBridge.diffRow(old, new)?.let { delta ->
+                    // S8b 诊断：设置侧发出的增量 keys
+                    com.homemode4miui.util.ModLog.i(
+                        "GraceSettings diffRow keys=" + delta.keys().asSequence().toList().toString())
                     send(GraceSettingsBridge.Cmd.MUTATE_SETTINGS, json = delta.toString())
                 }
             }

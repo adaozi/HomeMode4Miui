@@ -81,8 +81,16 @@ class GraceSettingsHostEngine(
             GraceSettingsBridge.Cmd.REQUEST_SNAPSHOT -> true // 快照在 handle 尾部统一回推
             GraceSettingsBridge.Cmd.MUTATE_SETTINGS -> {
                 val delta = JSONObject(json ?: "{}")
+                // S8b 诊断：宿主收到的设置增量（graceButton 链验证）
+                com.homemode4miui.util.ModLog.i(
+                    "GraceSettingsHostEngine MUTATE keys=" + delta.keys().asSequence().toList().toString())
                 repo.mutateSettings { current ->
                     val next = GraceSettingsBridge.applyDelta(current, delta)
+                    if (next.graceButton != current.graceButton) {
+                        com.homemode4miui.util.ModLog.i(
+                            "GraceSettingsHostEngine graceButton delta applied enabled=" +
+                                next.graceButton.enabled)
+                    }
                     if (next.privateSpace != current.privateSpace) privateSpace?.configure(next.privateSpace)
                     next
                 }

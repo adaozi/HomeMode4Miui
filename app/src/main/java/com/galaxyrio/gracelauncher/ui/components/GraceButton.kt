@@ -105,6 +105,12 @@ internal fun GraceButton(settings: GraceButtonSettings, editing: Boolean, enable
     fun activate(gesture: GraceButtonGesture) { perform(gesture, origin.copy(velocity = releaseVelocity)) }
     val activateLatest by rememberUpdatedState(::activate)
     val description = stringResource(if (editing) R.string.done else R.string.settings_grace_button)
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        com.homemode4miui.util.ModLog.i(
+            "GraceButton debug: mounted enabled=$enabled editing=$editing animations=" +
+                settings.animationsEnabled + " tap=" + settings.tap.active +
+                " longPress=" + settings.longPress.active + " doubleTap=" + settings.doubleTap.active)
+    }
     val extraActions = if (editing || !enabled) emptyList() else GraceButtonGesture.entries
         .filter { it != GraceButtonGesture.Tap && it != GraceButtonGesture.LongPress && settings.target(it).active }
         .map { gesture -> CustomAccessibilityAction(stringResource(gesture.labelRes)) { activate(gesture); true } }
@@ -153,6 +159,9 @@ internal fun GraceButton(settings: GraceButtonSettings, editing: Boolean, enable
                     onDragStart = { travel = Offset.Zero },
                     onDragCancel = { travel = Offset.Zero },
                     onDragEnd = {
+                        com.homemode4miui.util.ModLog.i(
+                            "GraceButton debug: drag end travel=" + travel.getDistance().toString() +
+                                "px threshold=" + swipeThreshold)
                         if (travel.getDistance() >= swipeThreshold) {
                             val gesture = if (abs(travel.x) > abs(travel.y)) {
                                 if (travel.x > 0f) GraceButtonGesture.SwipeRight else GraceButtonGesture.SwipeLeft
