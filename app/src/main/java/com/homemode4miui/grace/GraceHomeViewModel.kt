@@ -120,6 +120,10 @@ data class GraceHomeUiState(
     // 上游同步 v1.1.8 S8a：工作资料数据面（仅 managed profile；MIUI 双开不受影响）
     val workProfiles: List<com.galaxyrio.gracelauncher.data.WorkProfile> = emptyList(),
     val workProfileApps: List<LauncherApp> = emptyList(),
+    // 上游同步 v1.1.8 S8b：弹层项（per ownerKey；openFirstItem 弹层版消费）
+    val popups: Map<String, List<PopupItem>> = emptyMap(),
+    // 上游同步 v1.1.8 S8b：图标设计器产出（GraceButton artwork/design 消费）
+    val itemIcons: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon> = emptyMap(),
 ) {
     /** 原版 LauncherUiState.favoriteItems 的 P1 同构：按 favoriteOrder 排出已装应用。 */
     val favorites: List<LauncherApp>
@@ -230,6 +234,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private var hiddenAppsJob: Job? = null
     /** folders 阶段：文件夹流（Room folders 表 + popup items 成员 JSON，原版 snapshots 同构） */
     private var foldersJob: Job? = null
+    private var iconsJob: Job? = null
     /** hotfix folders2：已保存快捷方式流（saved_shortcuts 表） */
     private var savedShortcutsJob: Job? = null
     /** P6：图标包开关变化 → 重刷应用列表（渲染装饰跟随包顺序）。 */
@@ -306,6 +311,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     database.settingsDao().observeFolders(),
                     database.itemsDao().popups(),
                 ) { folderRows, popupRows ->
+                    // 上游同步 v1.1.8 S8b：popups 全量一并透出（Triple，openFirstItem 弹层版消费）
                     val contents = popupRows.associate { it.ownerKey to PopupItem.decode(it.itemsJson) }
                     // hotfix folders2：widget 项单独透出（文件夹弹层渲染用；appKeys 仍不含 widget）
                     val widgets = contents.mapNotNull { (ownerKey, items) ->
@@ -322,14 +328,30 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                             appListAtBottom = entry.appListAtBottom,
                         )
                     }
-                    folders to widgets
-                }.collect { (folders, widgets) -> _uiState.update {
-                    it.copy(folders = folders, folderWidgets = widgets)
+                    Triple(folders, widgets, contents)
+                }.collect { (folders, widgets, popups) -> _uiState.update {
+                    it.copy(folders = folders, folderWidgets = widgets, popups = popups)
                 } }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Exception) {
                 ModLog.e("GraceHomeViewModel observeFolders failed", error)
+            }
+        }
+        // 上游同步 v1.1.8 S8b：图标设计器产出跟随（GraceButton design 面）
+        iconsJob = viewModelScope.launch {
+            try {
+                val database = LauncherDatabase.getInstance(application)
+                database.itemsDao().icons().collect { rows ->
+                    val icons = rows.mapNotNull { row ->
+                        com.galaxyrio.gracelauncher.data.ItemIcon.decode(row.iconJson)?.let { row.itemKey to it }
+                    }.toMap()
+                    _uiState.update { it.copy(itemIcons = icons) }
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                ModLog.e("GraceHomeViewModel observeItemIcons failed", error)
             }
         }
         // hotfix folders2：已保存快捷方式跟随（文件夹成员里的 shortcut key 解析用；

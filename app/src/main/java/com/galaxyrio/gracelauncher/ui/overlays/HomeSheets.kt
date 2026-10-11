@@ -110,6 +110,8 @@ fun LauncherOverlays(
     favorites: (@Composable () -> Unit)? = null,
     // folders 阶段：文件夹弹层 slot（路由层组装 FolderPopup）
     folder: (@Composable () -> Unit)? = null,
+    // 上游同步 v1.1.8 S8b：弹层行文字可见性（listAppearance.showNames(favorites = false)）
+    showNames: Boolean = true,
 ) {
     if (overlay == null) return
     when (overlay) {
@@ -117,6 +119,8 @@ fun LauncherOverlays(
             app = overlay.app, anchor = overlay.anchor, hasAccess = hasShortcutAccess,
             actions = actions, onLaunchApp = { onChange(null) }, onDismiss = { onChange(null) },
             reveal = overlay.reveal,
+            // 上游同步 v1.1.8 S8b：弹层行样式/名字可见性跟随列表外观
+            showNames = showNames,
             menuEntries = menuEntriesProvider(overlay.app),
         )
         LauncherOverlay.HomeWidgetMenu -> HomeWidgetPanel(layout, apps, actions, custom = false,

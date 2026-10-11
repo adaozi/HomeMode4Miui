@@ -41,7 +41,12 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.semantics.contentDescription
+import com.galaxyrio.gracelauncher.ui.components.LocalListAppearance
+import com.galaxyrio.gracelauncher.ui.components.listLabelStyle
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.paneTitle
@@ -64,7 +69,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 @Stable
-class ShortcutRevealState(expanded: Boolean = true, dragging: Boolean = false) {
+class ShortcutRevealState(expanded: Boolean = true, dragging: Boolean = false, val animationsEnabled: Boolean = true) {
     var dragging by mutableStateOf(dragging)
     var expanded by mutableStateOf(expanded)
 }
@@ -81,6 +86,8 @@ fun ShortcutPopup(
     onDismiss: () -> Unit,
     reveal: ShortcutRevealState = remember { ShortcutRevealState() },
     hapticsEnabled: Boolean = true,
+    // 上游同步 v1.1.8 S8b（v1.1.7）：行文字可见性/样式跟随列表外观
+    showNames: Boolean = true,
     menuEntries: List<PopupEntry> = emptyList(),
     onDetails: (LauncherApp) -> Unit = {},
 ) {
@@ -94,6 +101,9 @@ fun ShortcutPopup(
         value = loadShortcuts(app)
     }
     // 原版经 uiState.findItem 复用已存条目；本模块 shortcut 不入应用列表，直接 asApp 包装。
+    // 上游同步 v1.1.8 S8b：行样式跟随列表外观（字号/字体/名字可见性/间距）
+    val listAppearance = LocalListAppearance.current
+    val labelStyle = listLabelStyle(onWallpaper = false)
     val shortcuts = result.shortcuts.map { it.asApp(app) }
     SwipeRevealPanel(
         anchor = anchor,
@@ -148,34 +158,38 @@ fun ShortcutPopup(
             items(shortcuts, key = { "shortcut:${it.key}" }) { itemApp ->
                     var iconBounds by remember { mutableStateOf(Rect.Zero) }
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("shortcut:${itemApp.shortcut?.id ?: itemApp.key}")
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("shortcut:${itemApp.shortcut?.id ?: itemApp.key}")
                             .clip(RoundedCornerShape(16.dp))
                             .combinedClickable(enabled = !reveal.dragging && reveal.expanded, onLongClick = { onDetails(itemApp) }, onClick = {
                                 itemApp.shortcut?.let { shortcut ->
                                     actions.launchShortcutAt?.invoke(shortcut, iconBounds) ?: actions.launchShortcut(shortcut)
                                 }
                                 onDismiss()
-                            }).padding(horizontal = 12.dp, vertical = 8.dp),
+                            }).padding(horizontal = 12.dp, vertical = (listAppearance.appSpacing / 2f).dp)
+                            // 上游同步 v1.1.8 S8b：名字隐藏时进无障碍描述
+                            .semantics { if (!showNames) contentDescription = itemApp.label },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         AppIcon(itemApp, Modifier.onGloballyPositioned { iconBounds = it.boundsInWindow() }, size = 36.dp)
-                        Spacer(Modifier.width(22.dp))
-                        Text(itemApp.label, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (showNames) {
+                            Spacer(Modifier.width(listAppearance.iconNameGap.dp))
+                            Text(itemApp.label, style = labelStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
                     }
             }
             items(menuEntries, key = { "entry:${it.key}" }) { entry ->
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("entry:${entry.key}")
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("entry:${entry.key}")
                         .clip(RoundedCornerShape(16.dp))
                         .combinedClickable(enabled = !reveal.dragging && reveal.expanded, onClick = {
                             entry.onClick()
                             onDismiss()
-                        }).padding(horizontal = 12.dp, vertical = 8.dp),
+                        }).padding(horizontal = 12.dp, vertical = (listAppearance.appSpacing / 2f).dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     LauncherIcon(entry.symbol, Modifier.size(23.dp))
                     Spacer(Modifier.width(22.dp))
-                    Text(entry.label, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(entry.label, style = labelStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -198,23 +212,39 @@ internal fun SwipeRevealPanel(
     val margin = with(density) { 32.dp.roundToPx() }
     val maxListHeight = with(density) { windowSize.height.toDp() } * 0.55f
     val currentOnDismiss by rememberUpdatedState(onDismiss)
-    val spatial = remember(reveal) { Animatable(0f) }
-    val effects = remember(reveal) { Animatable(0f) }
+    // 上游同步 v1.1.8 S8b：动画关闭 = snapTo 瞬时（GraceButton instant 语义）；触觉反馈随展开/收起
+    val spatial = remember(reveal) { Animatable(if (!reveal.animationsEnabled && reveal.expanded) 1f else 0f) }
+    val effects = remember(reveal) { Animatable(spatial.value) }
     val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
     val effectsSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val haptics by rememberUpdatedState(LocalHapticFeedback.current)
+    var feedbackExpanded by remember(reveal) { mutableStateOf(false) }
+    LaunchedEffect(reveal) {
+        snapshotFlow { reveal.expanded }.collect { expanded ->
+            if (expanded != feedbackExpanded) {
+                haptics.performHapticFeedback(if (expanded) HapticFeedbackType.GestureThresholdActivate else HapticFeedbackType.GestureEnd)
+                feedbackExpanded = expanded
+            }
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(reveal) {
+        // Back、启动条目、打开详情会直接移除面板——滑动/点按关闭的反馈已在上面发过。
+        onDispose { if (feedbackExpanded) haptics.performHapticFeedback(HapticFeedbackType.GestureEnd) }
+    }
     LaunchedEffect(reveal, spatialSpec, effectsSpec) {
         snapshotFlow { reveal.expanded }.collect { expanded ->
             val destination = if (expanded) 1f else 0f
             // Let Animatable interrupt its previous animateTo. Cancelling the
             // owning effect on every target change would reset its velocity.
-            launch { effects.animateTo(destination, effectsSpec) }
-            launch { spatial.animateTo(destination, spatialSpec) }
+            launch { if (reveal.animationsEnabled) effects.animateTo(destination, effectsSpec) else effects.snapTo(destination) }
+            launch { if (reveal.animationsEnabled) spatial.animateTo(destination, spatialSpec) else spatial.snapTo(destination) }
         }
     }
-    LaunchedEffect(reveal.dragging, reveal.expanded, spatial.isRunning) {
+    val finishedClosing = !reveal.dragging && !reveal.expanded && !spatial.isRunning && spatial.value == 0f
+    LaunchedEffect(reveal, finishedClosing) {
         // Keep the original gesture alive at zero so a rightward reversal can
         // reopen the same panel without lifting the finger.
-        if (!reveal.dragging && !reveal.expanded && !spatial.isRunning && spatial.value == 0f) currentOnDismiss()
+        if (finishedClosing) currentOnDismiss()
     }
     var origin by remember { mutableStateOf(Offset.Zero) }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.boundsInWindow().topLeft }) {

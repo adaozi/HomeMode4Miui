@@ -1393,3 +1393,24 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
   ③ 抽屉工作文件夹展开显示重排后顺序；④ 无工作资料设备零变化 + 设置页显示 work_profile_empty 提示。
 - [ ] **降级登记**：① pin item/PWA（ACTION_CONFIRM_PIN_* 宿主流程 hook）缓后独立逆向；② workExpanded
   展开滚动定位未接；③ openWorkProfileSettings 暂跳系统设置主页。
+
+### final（v2.9.32-grace-final / versionCode 65，2026-10-11）—— §9 落地：四项缓后功能全部实现，上游同步战役全量收官
+
+- [x] **openFirstItem 弹层版**：文件夹左滑 = popups 首个非 widget 项直启（上游 firstPopupApp 语义），
+  回落 appKeys 首个应用；GraceHomeUiState +popups（foldersJob combine Triple 透出）。
+- [x] **GraceButton 图标设计面**：item_icons 表 icons() Flow → 宿主 UIState.itemIcons →
+  GraceButtonIcon.choice(design) 接入按钮渲染（artwork 位图面随 P5/P6 渲染扩展登记）。
+- [x] **pin item / PWA 接收链**（逆向实锤后零 hook 方案）：MIUI AddItemActivity 原生确认 →
+  PinItemRequestCompat.accept() 成功后，**GracePinItemHook（after，runBlocking+IO）** 把 ShortcutInfo
+  转存模块 saved_shortcuts（showInAppList=true → 抽屉主列表显示 PWA/快捷方式）；appwidget pin 登记
+  随 P5/P6 widget 链路。MainHook tryHook("0b.PinItemCompat.accept") 注册。
+- [x] **ShortcutPopup 体验增强合并**（v1.1.7/v1.1.8）：ShortcutRevealState +animationsEnabled（关=瞬时
+  snapTo，GraceButton instant 语义）；触觉反馈（展开/收起/面板移除）；行样式跟随列表外观
+  （48dp 行高/appSpacing 间距/iconNameGap/labelStyle/showNames 无障碍描述）；HomeSheets/Route showNames 透传。
+- [x] 构建：assembleRelease 通过，8.08MB，versionCode 65。
+- [ ] **装机回归**：① Chrome"添加到主屏幕"（PWA）→ MIUI 确认 → 模块抽屉出现 PWA 图标并可启动；
+  ② 应用内"添加快捷方式到桌面"同上；③ 长按弹层：触觉反馈、行样式随列表外观、动画关=瞬时；
+  ④ 文件夹左滑在有弹层数据时直启弹层首项；⑤ 图标设计器改 GraceButton 图标 → 按钮外观跟随。
+- [ ] **残留登记**：① appwidget pin（应用生成小组件 accept 后由宿主持有，模块 widget host 不承载）
+  随 P5/P6 widget 链路；② GraceButton artwork 位图面（ItemIconStore 渲染进宿主 UI）；
+  ③ workExpanded 滚动定位。**至此上游 v1.1.8 功能面全部对齐完毕（除 appwidget pin 一项）。**

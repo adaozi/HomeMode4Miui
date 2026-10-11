@@ -120,6 +120,14 @@ public class MainHook implements IXposedHookLoadPackage {
         // 未命中（OS3 DI 重构下已实证存在此风险），首页 ping/pong 探测依然可用。
         // 此前接收器只在 mLauncherUiSync 里注册 —— Launcher hook 没命中即"hook 上了
         // 桌面但判定检测不到"（OS2/OS3 通病，装机实锤）。
+        // 上游同步 v1.1.8 S8b：pin item 接收链 —— MIUI AddItemActivity 确认 accept 后
+        // 旁路旁听转存模块 saved_shortcuts（showInAppList=true → 抽屉显示 PWA/快捷方式）。
+        tryHook("0b.PinItemCompat.accept", new HookTask() {
+            @Override public void run() {
+                com.homemode4miui.hook.GracePinItemHook.INSTANCE.hook(lpp, cl);
+            }
+        });
+
         tryHook("0.Application.onCreate (gate1 接收器前置)", new HookTask() {
             @Override public void run() {
                 XposedHelpers.findAndHookMethod("android.app.Application", cl, "onCreate",

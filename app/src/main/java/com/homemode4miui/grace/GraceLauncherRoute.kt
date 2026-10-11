@@ -598,9 +598,13 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 文件夹语义 = appKeys 首个应用直接启动（发布说明口径），弹层版随 P5 弹层批次扩展。
     val openFirstItem: (LauncherApp, Rect) -> Unit = openFirst@{ owner, bounds ->
         if (overlay != null || !state.settings.shortcutsFolders.swipeLeftToOpenFirst) return@openFirst
+        // 上游同步 v1.1.8 S8b：openFirstItem 升级弹层首项（原版 firstPopupApp 语义）——
+        // 文件夹 = popups 首个非 widget 项；回落 appKeys 首个应用（兼容无弹层数据的旧文件夹）
         val folder = state.folders.firstOrNull { it.key == owner.key } ?: return@openFirst
-        val firstKey = folder.appKeys.firstOrNull() ?: return@openFirst
-        val app = state.apps.firstOrNull { it.key == firstKey } ?: return@openFirst
+        val popupKey = state.popups[folder.key].orEmpty().firstOrNull { it.widget == null }?.key
+        val app = popupKey?.let { key -> state.apps.firstOrNull { it.key == key } }
+            ?: state.apps.firstOrNull { it.key == folder.appKeys.firstOrNull() }
+            ?: return@openFirst
         launchApp(app, bounds)
     }
     val rowGestures = AppRowGestures(
@@ -862,7 +866,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 heldOrigin = buttonTransition?.takeIf {
                     it.action == com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen && it.originIsButton
                 }?.origin,
-                design = com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.defaults,
+                // 上游同步 v1.1.8 S8b：按钮图标设计面（IconDesigner → item_icons → design）
+                design = com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon
+                    .choice(state.itemIcons[com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key])
+                    .design ?: com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.defaults,
                 onGesture = { gesture, origin ->
                     performGestureAction(state.settings.graceButton.target(gesture), origin)
                 },
@@ -940,6 +947,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             hasShortcutAccess = state.hasShortcutAccess,
             menuEntriesProvider = menuEntriesProvider,
             onChange = { overlay = it },
+            // 上游同步 v1.1.8 S8b：弹层行文字可见性跟随列表外观
+            showNames = state.settings.listAppearance.showNames(favorites = false),
             // P6：时钟长按面板的附属特性开关行组（原版 HomeWidgetSheet non-custom 尾部）
             widgetMenuExtras = {
                 WidgetToggle(stringResource(R.string.settings_calendar_agenda),
