@@ -114,7 +114,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             runCatching {
                 val apps = appRepository.loadApps(_uiState.value.settings.enabledIconPackPackages)
-                _uiState.update { it.copy(apps = apps, isLoadingApps = false, appLoadFailed = false) }
+                // 上游同步 v1.1.8 S8b：工作资料枚举（仅 managed profile，MIUI 双开不受影响）
+                val workProfiles = appRepository.workProfiles()
+                val workSerials = workProfiles.map { it.serial }.toSet()
+                val workProfileApps = if (workProfiles.isNotEmpty()) {
+                    appRepository.loadWorkApps(workProfiles, _uiState.value.settings.enabledIconPackPackages)
+                } else emptyList()
+                // 主列表收编：managed profile 应用排除（已进工作文件夹），MIUI 双开（clone）保留
+                val personal = apps.filterNot { it.userSerial != null && it.userSerial in workSerials }
+                _uiState.update { it.copy(apps = personal, isLoadingApps = false, appLoadFailed = false,
+                    workProfiles = workProfiles, workProfileApps = workProfileApps) }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 ModLog.e("SettingsViewModel: app load failed", error)
@@ -276,6 +285,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 com.galaxyrio.gracelauncher.data.ClockFontStore(getApplication()).delete(ids)
                 true
             }.getOrDefault(false)
+        },
+        // 上游同步 v1.1.8 S8b：工作资料应用排序（workProfile.appOrder，经桥落 Room workProfileJson）
+        reorderWorkApps = { keys ->
+            // mutateSettingsDirect：设置进程直写（appOrder 经桥 workProfileJson delta 落 Room）
+            mutateSettingsDirect { it.copy(workProfile = it.workProfile.copy(appOrder = keys)) }
+            true
+        },
+        resetWorkProfileAppearance = sendAndTrue {
+            mutateSettingsDirect { it.copy(workProfile = it.workProfile.copy(appOrder = emptyList())) }
+        },
+        openWorkProfileSettings = {
+            // MIUI/Android 无统一工作资料设置入口，跳系统设置（登记：后续可细化 per-profile 页）
+            runCatching {
+                getApplication<Application>().startActivity(
+                    Intent(android.provider.Settings.ACTION_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
         },
         setHiddenApps = { keys ->
             _uiState.update { it.copy(hiddenAppKeys = keys) }

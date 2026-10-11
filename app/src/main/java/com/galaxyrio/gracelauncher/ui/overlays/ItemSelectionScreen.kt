@@ -62,6 +62,21 @@ internal fun PrivateSpaceEditorScreen(owner: LauncherApp, uiState: LauncherUiSta
     )
 }
 
+/** 上游同步 v1.1.8 S8b：工作资料应用编辑器（ProfileEditorScreen，PrivateSpaceEditorScreen 的 work 泛化）。 */
+@Composable
+internal fun ProfileEditorScreen(owner: LauncherApp, uiState: LauncherUiState, actions: LauncherActions,
+    onBack: () -> Unit, work: Boolean = false, header: @Composable () -> Unit) {
+    val loading = if (work) uiState.isLoadingApps else uiState.privateAppsLoading
+    val failed = if (work) uiState.appLoadFailed else uiState.privateAppsFailed
+    ItemSelectionScreen(
+        title = stringResource(R.string.edit_app_popup, owner.label), tag = "work_profile_editor",
+        selected = (if (work) uiState.workProfileApps else uiState.privateSpaceApps).map { SelectionEntry(it.key, it.label, it) },
+        apps = emptyList(), enabled = !loading && !failed,
+        onToggle = {}, onRemove = {}, onReorder = if (work) actions.reorderWorkApps else actions.reorderPrivateApps, onDone = onBack,
+        header = header, reorderOnly = true, loading = loading,
+    )
+}
+
 @Composable
 internal fun FavoritesScreen(uiState: LauncherUiState, actions: LauncherActions, onToggle: (LauncherApp) -> Unit, onReorder: (List<String>) -> Unit, onDone: () -> Unit,
     // hotfix8（宿主 shim 适配）：false = 隐藏收藏文件夹入口（宿主 folders 渲染载体随 folders

@@ -484,4 +484,13 @@
 
     <string name="work_profile_no_apps">没有可用的工作应用，工作资料可能已暂停。</string>
     <string name="work_profile_setup">打开工作资料设置</string>
+
+    <string name="work_profile_default_home">将 Grace 设为默认启动器以访问工作应用</string>
+    <string name="work_profile_edit">编辑</string>
+    <string name="work_profile_empty">未找到 Android 工作资料。关闭分组后，工作应用仍会按普通应用显示。</string>
+    <string name="work_profile_enable">启用工作资料分组</string>
+    <string name="work_profile_indicator">工作应用角标</string>
+    <string name="work_profile_indicator_summary">在工作应用图标上显示工作角标</string>
+    <string name="work_profile_setup_summary">在 Android 设置中管理工作资料</string>
+    <string name="work_profile_summary">管理 Android 工作资料中的应用</string>
 </resources>

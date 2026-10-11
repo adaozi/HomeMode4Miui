@@ -605,4 +605,13 @@
 
     <string name="work_profile_no_apps">No work apps available. Your work profile may be paused.</string>
     <string name="work_profile_setup">Open work profile settings</string>
+
+    <string name="work_profile_default_home">Set Grace as your default launcher to access work apps</string>
+    <string name="work_profile_edit">Edit</string>
+    <string name="work_profile_empty">No Android work profile found. Work apps remain available as normal apps when grouping is disabled.</string>
+    <string name="work_profile_enable">Enable Work Profile grouping</string>
+    <string name="work_profile_indicator">Work app indicator</string>
+    <string name="work_profile_indicator_summary">Show a work badge on work app icons</string>
+    <string name="work_profile_setup_summary">Manage your work profile in Android settings</string>
+    <string name="work_profile_summary">Organize apps in your Android work profile</string>
 </resources>

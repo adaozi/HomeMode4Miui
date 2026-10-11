@@ -81,6 +81,9 @@ data class LauncherUiState(
     val privateAppsLoading: Boolean = false,
     val privateAppsFailed: Boolean = false,
     val privateFolderApp: LauncherApp? = null,
+    // 上游同步 v1.1.8 S8b：工作资料（设置侧；由 SettingsViewModel 从 AppRepository 枚举填充）
+    val workProfiles: List<com.galaxyrio.gracelauncher.data.WorkProfile> = emptyList(),
+    val workProfileApps: List<LauncherApp> = emptyList(),
     val shownShortcutKeys: Set<String> = emptySet(),
 ) {
     // 上游同步 v1.1.8（LauncherViewModel.notificationsFor 逐字语义，落到本仓 UiState）：
@@ -89,6 +92,12 @@ data class LauncherUiState(
     fun notificationsFor(app: LauncherApp, expanded: Boolean): List<AppNotification> =
         if (app.shortcut != null || app.user != null || app.folderId != null) emptyList()
         else notifications[app.packageName].orEmpty().filter { settings.shortcutsFolders.showsNotification(it.silent, expanded) }
+
+    /** 上游同步 v1.1.8 S8b：工作资料文件夹载体（work 面）。 */
+    val workFolder: LauncherFolder?
+        get() = if (workProfiles.isEmpty()) null
+        else settings.workProfile.folder(
+            settings.workProfile.orderedApps(workProfileApps), com.galaxyrio.gracelauncher.data.WorkProfileFolderId)
 
     fun findItem(key: String): LauncherApp? = apps.firstOrNull { it.key == key }
         ?: shortcutApps.firstOrNull { it.key == key && (!it.isPrivateSpace || privateContentVisible) }

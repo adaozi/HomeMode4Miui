@@ -77,7 +77,7 @@ internal enum class SettingsPage {
     Changelog, Licenses, AppLicense, IconPacks, IconDesigner, IconDesignerApp, PrivateSpace, PrivateSpaceEditor, Search,
     MediaPlayer, GraceButton,
     // 上游同步 v1.1.8（S2）：A-Z 列表 + 列表外观设置页（Fonts 页随 S5 批次补）
-    ListAppearance, Alphabet, ShortcutsFolders, Fonts,
+    ListAppearance, Alphabet, ShortcutsFolders, Fonts, WorkProfile, WorkProfileEditor,
     // 上游同步 v1.1.8（S3）：手势目标编辑 + Lab；旧 GraceTap*/GraceLong* 四页被
     // GraceAction/{gesture}?home={home} 参数化路由取代
     GraceAction, GraceApp, GraceShortcut, GraceFolder, Gestures, LabGraceButton, LabGesture,
@@ -309,6 +309,14 @@ fun LauncherSettingsScreen(
                     SettingsPage.Advanced -> AdvancedSettings(back, navigate)
                     SettingsPage.About -> AboutSettings(back, navigate)
                     SettingsPage.HiddenApps -> HiddenAppsSettings(uiState, actions, back)
+                    // 上游同步 v1.1.8 S8b：工作资料设置页（ProfileSettingsScreen work 面）+ 应用编辑器
+                    SettingsPage.WorkProfile -> ProfileSettingsScreen(uiState, actions, back, work = true) { navigate(SettingsPage.WorkProfileEditor) }
+                    SettingsPage.WorkProfileEditor -> ProfileEditorSettings(uiState, actions, back, work = true, onEditIcon = { app ->
+                        if (isCurrent()) {
+                            navController.navigate(SettingsPage.IconDesigner.name)
+                            navController.currentBackStackEntry?.savedStateHandle?.set("icon_designer_app", app.key)
+                        }
+                    })
                     SettingsPage.PrivateSpace -> PrivateSpaceSettings(uiState, actions, back) { navigate(SettingsPage.PrivateSpaceEditor) }
                     SettingsPage.PrivateSpaceEditor -> PrivateSpaceEditorSettings(uiState, actions,
                         onBack = { actions.closePrivateSpace(); back() }, onEditIcon = { app ->

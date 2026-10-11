@@ -136,21 +136,25 @@ internal fun ProductivitySettings(
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_hide_apps), pluralStringResource(R.plurals.settings_hidden_count, uiState.hiddenAppKeys.size, uiState.hiddenAppKeys.size),
-                    0, 3, "settings_open_hidden_apps",
+                    0, 4, "settings_open_hidden_apps",
                     leading = { LauncherIcon(LauncherSymbol.VisibilityOff) },
                 ) { navigate(SettingsPage.HiddenApps) }
             }
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_folders), pluralStringResource(R.plurals.settings_folder_count, uiState.folders.size, uiState.folders.size),
-                    1, 3, "settings_open_folders",
+                    1, 4, "settings_open_folders",
                     leading = { LauncherIcon(LauncherSymbol.Folder) },
                 ) { navigate(SettingsPage.Folders) }
             }
-            // 上游同步裁剪：Work Profile 行随 S8 批次恢复（ProfileSettings 页 + 宿主 workFolder 载体）
+            // 上游同步 v1.1.8 S8b：Work Profile 行恢复（S8a 数据面 + ProfileSettingsScreen work 面）
+            item {
+                SettingsActionItem(stringResource(R.string.work_profile_title), stringResource(R.string.work_profile_summary),
+                    2, 4, "settings_open_work_profile", leading = { LauncherIcon(LauncherSymbol.Work) }) { navigate(SettingsPage.WorkProfile) }
+            }
             item {
                 SettingsActionItem(stringResource(R.string.private_space_title), stringResource(R.string.private_space_summary),
-                    2, 3, "settings_open_private_space", leading = { LauncherIcon(LauncherSymbol.Lock) }) { navigate(SettingsPage.PrivateSpace) }
+                    3, 4, "settings_open_private_space", leading = { LauncherIcon(LauncherSymbol.Lock) }) { navigate(SettingsPage.PrivateSpace) }
             }
             item { SettingsHeading(stringResource(R.string.settings_advanced)) }
             // 上游同步 v1.1.8 S3：Gestures 行恢复（桌面手势目标编辑，GraceButtonSettingsScreen home 面）

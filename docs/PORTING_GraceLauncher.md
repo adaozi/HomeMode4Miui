@@ -1372,3 +1372,24 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
 - [ ] **降级登记**：① ProfileSettings 工作资料设置页（显示名/排序/开关编辑器）随 S8b——当前
   workProfile 走默认值（enabled=true、Folder 展示）；② pin item/PWA（ACTION_CONFIRM_PIN_* 宿主流程
   hook）随 S8b 宿主逆向；③ workExpanded 展开时滚动定位（上游 LaunchedEffect）未接，长列表首用需手滑。
+
+### work2（v2.9.31-grace-work2 / versionCode 64，2026-10-11）—— §9 落地：S8b 工作资料设置页 + 编辑器
+
+- [x] **ProfileSettingsScreen**（上游 ProfileSettings.kt 原版 + R swap）：Private Space + Work Profile
+  统一设置页；模块仅接 work 面（PrivateSpace 页走本仓 v1.1.4 PrivateSpaceSettings 链路不动）；
+  ProfileEditorSettings private 分支依赖 uiState.privateFolder（模块私密空间 folder 载体未移植，
+  该分支永不进入，登记随 P5/P6）。
+- [x] **ProfileEditorScreen**（ItemSelectionScreen 新增，work 泛化 PrivateSpaceEditorScreen）：工作资料
+  应用重排（actions.reorderWorkApps → mutateSettingsDirect → workProfileJson 桥 delta 落 Room）、
+  应用排序重置（resetWorkProfileAppearance）、图标设计器入口（IconDesigner per-app）。
+- [x] **设置侧数据**：SettingsViewModel refreshApps 枚举 workProfiles/loadWorkApps + 主列表收编
+  （managed serial 过滤，与桌面语义一致）；LauncherUiState +workProfiles/workProfileApps/workFolder
+  （privateFolder 用模块既有非空计算属性，上游 nullable 语义以 !! 适配并登记）。
+- [x] **注册**：LauncherSettingsScreen WorkProfile/WorkProfileEditor 页；ProductivitySettings WorkProfile
+  行恢复（S7 降级登记消除）；work_profile_* 字符串 EN/zh +8。
+- [x] 构建：assembleRelease 通过，8.06MB，versionCode 64。
+- [ ] **装机回归**（需设备上有"工作资料" managed profile）：① 设置 → 应用整理 → 工作资料 页（开关/
+  展示模式/角标开关/编辑器/系统设置入口）；② 编辑器重排工作应用（appOrder 落库 + 桌面抽屉顺序联动）；
+  ③ 抽屉工作文件夹展开显示重排后顺序；④ 无工作资料设备零变化 + 设置页显示 work_profile_empty 提示。
+- [ ] **降级登记**：① pin item/PWA（ACTION_CONFIRM_PIN_* 宿主流程 hook）缓后独立逆向；② workExpanded
+  展开滚动定位未接；③ openWorkProfileSettings 暂跳系统设置主页。
