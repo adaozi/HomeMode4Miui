@@ -861,8 +861,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             com.galaxyrio.gracelauncher.ui.components.GraceButton(
                 settings = state.settings.graceButton,
                 editing = editingHome,
-                enabled = overlay == null && buttonTransition == null,
-                hidden = searchTransition != null,
+                // 上游同步 S8b 修正：搜索打开时按钮禁用（上游 overlay != null 同语义；
+                // 模块搜索 overlay 独立于 overlay 状态，需显式排除）
+                enabled = overlay == null && buttonTransition == null && !searchOpen,
+                hidden = searchTransition != null || searchOpen,
                 heldOrigin = buttonTransition?.takeIf {
                     it.action == com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen && it.originIsButton
                 }?.origin,
