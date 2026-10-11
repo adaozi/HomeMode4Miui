@@ -1143,7 +1143,7 @@ loadApps 主路径只查 `myUserHandle()`，而 MIUI 把双开 profile 经
 
 ### ② GitHub 发布准备 —— ✅ 已完成（2026-10-09）
 
-- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*（Public，GPL-3.0），>
+- [x] 仓库：\*\*<https://github.com/adaozi/HomeMode4Miui\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*（Public，GPL-3.0），>
 
   首次入库 commit `b5fb742`（255 文件 / 31536 行），分支 main，tag
 
@@ -1346,87 +1346,28 @@ Recomposer 的帧时序错误，两层修复（第一层根因，第二层布局
   英雄动画（搜索/抽屉/锁屏过渡）随 S4 接线，当前手势动作瞬时直达；③ GraceButton 按钮本体渲染  
   尚未挂上桌面（组件与动画已就位，随 S4）。
 
-
-> **✅ 装机验收通过（2026-10-11）**：T0/T1/T2 全项通过——Room v18→v21 迁移无损、A-Z/列表外观/手势/Grace Button
-> 过渡/系统动作三件套（MIUI 原生层独立工作，无 su 弹窗）/字体管理器/遮罩色/文件夹左滑/老功能回归全部 OK。
+> **✅ 装机验收通过（2026-10-11）**：T0/T1/T2 全项通过——Room v18→v21 迁移无损、A-Z/列表外观/手势/Grace Button  
+> 过渡/系统动作三件套（MIUI 原生层独立工作，无 su 弹窗）/字体管理器/遮罩色/文件夹左滑/老功能回归全部 OK。  
 > 上游同步战役（S1+S2/S3/S4/S7/S5+S6，v2.9.24→v2.9.29）正式收官；S8（PWA/pin/WorkProfile 宿主面）按计划缓后。
 
 ### work1（v2.9.30-grace-work1 / versionCode 63，2026-10-11）—— §9 落地：S8a Work Profile 数据面 + 抽屉渲染
 
-- [x] **数据面**：AppRepository +WorkProfile/workProfiles()/loadWorkApps —— **与上游差异（保护 dualapp
-  装机实锤语义）**：workProfiles 严格只认 USER_TYPE_PROFILE_MANAGED（去掉上游 API<35 放行分支），
-  MIUI 双开（clone/XSpace）永不进工作文件夹、主列表行为零变化；无 managed profile 时零开销静默跳过。
+- [x] **数据面**：AppRepository +WorkProfile/workProfiles()/loadWorkApps —— **与上游差异（保护 dualapp  
+  装机实锤语义）**：workProfiles 严格只认 USER_TYPE_PROFILE_MANAGED（去掉上游 API<35 放行分支），  
+  MIUI 双开（clone/XSpace）永不进工作文件夹、主列表行为零变化；无 managed profile 时零开销静默跳过。  
   应用标记 isWorkProfile + serial key 前缀（与主列表天然区分）。
-- [x] **VM 链**：GraceHomeViewModel refreshApps 追加 work 枚举（无 profile 零开销）；GraceHomeUiState
-  +workProfiles/workProfileApps + workAppsOrganized/workProfileAppsOrdered/workFolder 计算属性；
+- [x] **VM 链**：GraceHomeViewModel refreshApps 追加 work 枚举（无 profile 零开销）；GraceHomeUiState  
+  +workProfiles/workProfileApps + workAppsOrganized/workProfileAppsOrdered/workFolder 计算属性；  
   appListApps 在 workAppsOrganized 时过滤 work 应用（收编进文件夹）。
-- [x] **抽屉渲染**：AppListModel +WorkStatus/workFolder/workExpanded/workApps（跟随用户文件夹后）；
-  AppDrawerScreen WorkStatus 空态行（无应用提示 + 设置入口）+ contentType/params；Route workExpanded
+- [x] **抽屉渲染**：AppListModel +WorkStatus/workFolder/workExpanded/workApps（跟随用户文件夹后）；  
+  AppDrawerScreen WorkStatus 空态行（无应用提示 + 设置入口）+ contentType/params；Route workExpanded  
   状态（抽屉内展开/收起，收藏区与抽屉两处 onOpenFolder 拦截 WorkProfileFolderId）。
-- [x] **宿主视图**：GraceHomeSettings +workProfile 字段（SP/Room 三路径；workProfileJson 列 schema v19
+- [x] **宿主视图**：GraceHomeSettings +workProfile 字段（SP/Room 三路径；workProfileJson 列 schema v19  
   已有，零 migration）。设置页 workProfile 更新经桥自动落库（S1 链路）。
 - [x] 构建：assembleRelease 通过，8.02MB，versionCode 63。
-- [ ] **装机回归**：① 无工作资料/无双开设备：抽屉与主列表零变化（恒 null 静默）；② 有工作资料设备：
-  抽屉底部出现工作资料文件夹（角标），点击展开/收起，应用带工作角标，主列表不再重复显示；
+- [ ] **装机回归**：① 无工作资料/无双开设备：抽屉与主列表零变化（恒 null 静默）；② 有工作资料设备：  
+  抽屉底部出现工作资料文件夹（角标），点击展开/收起，应用带工作角标，主列表不再重复显示；  
   ③ 文件夹左滑开首项对工作文件夹同样生效。
-- [ ] **降级登记**：① ProfileSettings 工作资料设置页（显示名/排序/开关编辑器）随 S8b——当前
-  workProfile 走默认值（enabled=true、Folder 展示）；② pin item/PWA（ACTION_CONFIRM_PIN_* 宿主流程
+- [ ] **降级登记**：① ProfileSettings 工作资料设置页（显示名/排序/开关编辑器）随 S8b——当前  
+  workProfile 走默认值（enabled=true、Folder 展示）；② pin item/PWA（ACTION_CONFIRM_PIN\_* 宿主流程  
   hook）随 S8b 宿主逆向；③ workExpanded 展开时滚动定位（上游 LaunchedEffect）未接，长列表首用需手滑。
-
-### work2（v2.9.31-grace-work2 / versionCode 64，2026-10-11）—— §9 落地：S8b 工作资料设置页 + 编辑器
-
-- [x] **ProfileSettingsScreen**（上游 ProfileSettings.kt 原版 + R swap）：Private Space + Work Profile
-  统一设置页；模块仅接 work 面（PrivateSpace 页走本仓 v1.1.4 PrivateSpaceSettings 链路不动）；
-  ProfileEditorSettings private 分支依赖 uiState.privateFolder（模块私密空间 folder 载体未移植，
-  该分支永不进入，登记随 P5/P6）。
-- [x] **ProfileEditorScreen**（ItemSelectionScreen 新增，work 泛化 PrivateSpaceEditorScreen）：工作资料
-  应用重排（actions.reorderWorkApps → mutateSettingsDirect → workProfileJson 桥 delta 落 Room）、
-  应用排序重置（resetWorkProfileAppearance）、图标设计器入口（IconDesigner per-app）。
-- [x] **设置侧数据**：SettingsViewModel refreshApps 枚举 workProfiles/loadWorkApps + 主列表收编
-  （managed serial 过滤，与桌面语义一致）；LauncherUiState +workProfiles/workProfileApps/workFolder
-  （privateFolder 用模块既有非空计算属性，上游 nullable 语义以 !! 适配并登记）。
-- [x] **注册**：LauncherSettingsScreen WorkProfile/WorkProfileEditor 页；ProductivitySettings WorkProfile
-  行恢复（S7 降级登记消除）；work_profile_* 字符串 EN/zh +8。
-- [x] 构建：assembleRelease 通过，8.06MB，versionCode 64。
-- [ ] **装机回归**（需设备上有"工作资料" managed profile）：① 设置 → 应用整理 → 工作资料 页（开关/
-  展示模式/角标开关/编辑器/系统设置入口）；② 编辑器重排工作应用（appOrder 落库 + 桌面抽屉顺序联动）；
-  ③ 抽屉工作文件夹展开显示重排后顺序；④ 无工作资料设备零变化 + 设置页显示 work_profile_empty 提示。
-- [ ] **降级登记**：① pin item/PWA（ACTION_CONFIRM_PIN_* 宿主流程 hook）缓后独立逆向；② workExpanded
-  展开滚动定位未接；③ openWorkProfileSettings 暂跳系统设置主页。
-
-### final（v2.9.32-grace-final / versionCode 65，2026-10-11）—— §9 落地：四项缓后功能全部实现，上游同步战役全量收官
-
-- [x] **openFirstItem 弹层版**：文件夹左滑 = popups 首个非 widget 项直启（上游 firstPopupApp 语义），
-  回落 appKeys 首个应用；GraceHomeUiState +popups（foldersJob combine Triple 透出）。
-- [x] **GraceButton 图标设计面**：item_icons 表 icons() Flow → 宿主 UIState.itemIcons →
-  GraceButtonIcon.choice(design) 接入按钮渲染（artwork 位图面随 P5/P6 渲染扩展登记）。
-- [x] **pin item / PWA 接收链**（逆向实锤后零 hook 方案）：MIUI AddItemActivity 原生确认 →
-  PinItemRequestCompat.accept() 成功后，**GracePinItemHook（after，runBlocking+IO）** 把 ShortcutInfo
-  转存模块 saved_shortcuts（showInAppList=true → 抽屉主列表显示 PWA/快捷方式）；appwidget pin 登记
-  随 P5/P6 widget 链路。MainHook tryHook("0b.PinItemCompat.accept") 注册。
-- [x] **ShortcutPopup 体验增强合并**（v1.1.7/v1.1.8）：ShortcutRevealState +animationsEnabled（关=瞬时
-  snapTo，GraceButton instant 语义）；触觉反馈（展开/收起/面板移除）；行样式跟随列表外观
-  （48dp 行高/appSpacing 间距/iconNameGap/labelStyle/showNames 无障碍描述）；HomeSheets/Route showNames 透传。
-- [x] 构建：assembleRelease 通过，8.08MB，versionCode 65。
-- [ ] **装机回归**：① Chrome"添加到主屏幕"（PWA）→ MIUI 确认 → 模块抽屉出现 PWA 图标并可启动；
-  ② 应用内"添加快捷方式到桌面"同上；③ 长按弹层：触觉反馈、行样式随列表外观、动画关=瞬时；
-  ④ 文件夹左滑在有弹层数据时直启弹层首项；⑤ 图标设计器改 GraceButton 图标 → 按钮外观跟随。
-- [ ] **残留登记**：① appwidget pin（应用生成小组件 accept 后由宿主持有，模块 widget host 不承载）
-  随 P5/P6 widget 链路；② GraceButton artwork 位图面（ItemIconStore 渲染进宿主 UI）；
-  ③ workExpanded 滚动定位。**（已由 pinw 批次补齐）上游 v1.1.8 全部功能点对齐完毕，无残留。**
-
-### pinw（v2.9.33-grace-pinw / versionCode 66，2026-10-11）—— appwidget pin 补齐，上游 v1.1.8 全量对齐完毕
-
-- [x] **appwidget pin 接收链**（上一节残留登记①补齐）：GracePinItemHook 增 APPWIDGET before 拦截——
-  模块 widget 区**单槽空闲**时自承载：HomeWidgetHost.allocateAppWidgetId → bindAppWidgetIdIfAllowed
-  （模块持 BIND_APPWIDGET 直成功，options=HOST_CATEGORY_HOME_SCREEN）→ accept(Bundle)(EXTRA_APPWIDGET_ID)
-  → 写模块 homeLayout（widgetId/provider/label/height=0，不启动 configure——上游注释：请求已被发起方配置）。
-  带 Bundle 的 accept 调用直接放行（防递归）。widget 区已占用 / bind 被拒时**放行 MIUI 原流程**（宿主承接）。
-- [x] 已有 widget 检测：settingsDao().readSettings() → HomeLayout.decode(homeLayoutJson).hasWidget
-  （toSettings 为 Repository 文件内 private，hook 直读 JSON 解码）。
-- [x] 构建：assembleRelease 通过，8.08MB，versionCode 66。
-- [ ] **装机回归**：① 应用内"添加小组件到桌面"（requestPinAppWidget 类应用）→ MIUI 确认 → 模块桌面
-  widget 区显示该小组件；② 桌面 widget 区已有时确认 → 走宿主（不可见，预期行为，日志可查）；
-  ③ 标准小组件列表添加不受影响。
-- [ ] **降级登记更新**：appwidget pin 已实现——**上游 v1.1.8 全部功能点对齐完毕，无残留**。
-  剩余仅为体验性差异（GraceButton artwork 位图、workExpanded 滚动定位、openFirstItem 快捷方式兜底）。

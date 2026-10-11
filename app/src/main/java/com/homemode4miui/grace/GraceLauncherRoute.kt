@@ -488,6 +488,11 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         origin: com.galaxyrio.gracelauncher.ui.components.GraceButtonOrigin,
         fromButton: Boolean = true) {
         val buttonSettings = state.settings.graceButton
+        // S8b 诊断打点：动作执行分流
+        com.homemode4miui.util.ModLog.i(
+            "GraceButton perform action=" + target.action.name + " key=" + target.itemKey +
+            " enabled=" + target.enabled + " active=" + target.active +
+            " anim=" + buttonSettings.animationsEnabled + " transition=" + (buttonTransition != null))
         if (!target.active || buttonTransition != null) return
         instantButtonEntrance = fromButton && !buttonSettings.animationsEnabled &&
             target.action in listOf(com.galaxyrio.gracelauncher.data.GraceButtonAction.Search,
@@ -873,6 +878,11 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                     .choice(state.itemIcons[com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key])
                     .design ?: com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.defaults,
                 onGesture = { gesture, origin ->
+                    // S8b 诊断打点：按钮手势 emit（组件层）——桌面拖动/长按无响应时先看此行是否出现
+                    com.homemode4miui.util.ModLog.i(
+                        "GraceButton emit gesture=" + gesture.name + " active=" +
+                        state.settings.graceButton.target(gesture).active +
+                        " action=" + state.settings.graceButton.target(gesture).action.name)
                     performGestureAction(state.settings.graceButton.target(gesture), origin)
                 },
                 onFinishEditing = { editingHome = false },
