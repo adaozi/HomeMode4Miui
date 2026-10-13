@@ -40,6 +40,7 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
+            android:launchMode="singleTop"
             android:label="@string/settings_title"
             android:windowSoftInputMode="adjustResize" />
 

@@ -88,6 +88,19 @@ class SettingsActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        // hotfix：CLEAR_TOP|SINGLE_TOP 复用实例的入口 —— 刷新目标页；page 变化时
+        // setIntent + recreate 重定向 NavHost startDestination（initialPage 只在
+        // onCreate 读，普通字段变更不会触发重组导航）
+        setIntent(intent)
+        val page = intent.getStringExtra("page")
+        if (page != initialPage) {
+            initialPage = page
+            recreate()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         // 回前台重拉快照（设置页打开期间桌面侧可能改过设置/收藏）

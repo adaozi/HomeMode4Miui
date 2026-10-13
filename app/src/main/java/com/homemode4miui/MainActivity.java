@@ -115,6 +115,10 @@ public class MainActivity extends Activity {
             Intent settings = new Intent(this, SettingsActivity.class);
             String page = getIntent().getStringExtra("page");
             if (page != null) settings.putExtra("page", page);
+            // hotfix：CLEAR_TOP|SINGLE_TOP 复用已有设置页实例 —— 旧实现每次桌面进入
+            // 都压一个新 SettingsActivity（中转 MainActivity 已 finish，任务栈里只堆
+            // 设置页），按返回要退 N 次
+            settings.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             startActivity(settings);
             finish();
             return;

@@ -383,3 +383,10 @@ DIFF vs 桩文件:
 - [x] **GraceBridgeEngine mediaCommand**：OpenPlayer 冗余 when（两分支同调用）收敛为直调。
 - [x] 构建：assembleRelease 通过，versionCode 72（中途三次编译错误即时修正：when 替换括号残留、孤儿 KDoc、内部类引用非 final 局部变量 → final holder）。
 - [ ] **遗留（v2.9.40-perf 候选）**：热路径反射缓存（GestureIsolator/HomeController/MainHook）、rowGestures remember 化（Compose 稳定性）、60s 时钟循环抽 rememberMinuteTick 公共组件、GraceHomeUiState 拆分与超长文件职责拆分（结构性，随 P3+ 推进）。
+
+### setbk（v2.9.40-setbk / versionCode 73，2026-10-14）—— 设置页返回堆叠修复
+
+- [x] **根因（装机实锤）**：桌面入口链 openGraceSettingsInModule → MainActivity（route 转发后 finish）→ SettingsActivity —— 中转 MainActivity 自杀后任务栈里只剩设置页，每次进入压一个新实例，N 次进入按 N 次返回。
+- [x] **修复**：MainActivity 转发 Intent 加 FLAG_ACTIVITY_CLEAR_TOP | FLAG_ACTIVITY_SINGLE_TOP（复用已有实例并清中间层）；SettingsActivity 补 onNewIntent（setIntent + page 变化时 recreate 重定向 NavHost startDestination —— initialPage 只在 onCreate 读，普通字段变更不触发重组导航）；Manifest 补 launchMode="singleTop" 双保险（未来新入口漏 flags 时连续启动仍复用栈顶）。
+- [x] 行为验证（推演）：桌面 N 次进入 → 栈内恒 1 个设置页，返回一次回桌面；模块首页进入 → 返回回首页（CLEAR_TOP 只清设置页之上的层，不影响 MainActivity）。
+- [x] 构建：assembleRelease 通过，versionCode 73。
