@@ -427,3 +427,13 @@ DIFF vs 桩文件:
 - [x] Route 消费点全部切换（performGestureAction 守卫/entrance/begin×3、widgetInputEnabled、GraceButton enabled/hidden/heldOrigin、TransitionOverlay、rememberUpdatedState 删除），代码标识符零残留。
 - [x] 构建：assembleRelease 通过，versionCode 78。
 - [ ] **遗留（refactor4）**：GraceHomeUiState 拆分 —— **设计定稿挂起**（docs/UISTATE_SPLIT_DESIGN.md：字段→消费面矩阵 + 三阶段方案）。结论：热路径已被 perf 批治理、settings 低频占 76% 读取量、Phase 2 侵入面与收益不成比；触发条件 = profiler 实测热点 / 新增高频状态面 / 大版本顺路重构。
+
+### recents-strings（v2.9.46-recents-strings / versionCode 79，2026-10-14）—— 模块页退出多任务 + 硬编码文本资源化
+
+- [x] **多任务排除**：Manifest 给 MainActivity / SettingsActivity 加 `android:excludeFromRecents="true"` —— 模块门禁页与 Grace 设置页不再出现在多任务界面（task 根为 MainActivity，LAUNCHER 入口排除即整任务不进 recents；SettingsActivity 同声明兜底独立 task 场景）。
+- [x] **Manifest label 资源化**：application label → @string/app_name；xposeddescription → @string/xposed_description；MediaNotificationListener label → @string/media_service_name（复用既有 key）；GraceAccessibilityService label → @string/accessibility_service_name。
+- [x] **MainActivity 硬编码文本全量迁移（~50 处）**：首页说明 / gate 前置条件区（标题、按钮、提示）/ 开关与拒绝回落 Toast / gate 缺项清单 / ①②③④ 状态行 / hook 三级状态 / root 探测结果 / 媒体授权回显 / 桥自诊断 / 日志导出对话框与 Toast —— 全部改走 getString(R.string.*)。
+- [x] **LogExporter 回调重构**：Callback 签名 `onDone(String)` → `onDone(boolean success, String message, String path)` —— 替代旧版"已导出"前缀字符串匹配（文案资源化后前缀不再稳定）；busy/failed/success 三类消息资源化；pathLineOf（前缀提取残留）删除；导出文件头/来源描述属文件内容非 UI，保持中文原样（反馈文件不随设备语言变化）。
+- [x] **PlaceholderHomeView**（宿主进程）：提示文本经 createPackageContext 解析模块 placeholder_tip 资源（随设备语言），模块资源不可达回落中文原样 —— 沿用同文件 resolveSemanticColor 的包上下文模式。
+- [x] **双语落地**：values/strings.xml（EN 默认翻译）+ values-zh-rCN/strings.xml（中文原文）各追加 60+ key，与既有 C 组字符串同文件维护。
+- [x] 构建：assembleRelease 通过，versionCode 79。

@@ -493,4 +493,96 @@
     <string name="work_profile_indicator_summary">在工作应用图标上显示工作角标</string>
     <string name="work_profile_setup_summary">在 Android 设置中管理工作资料</string>
     <string name="work_profile_summary">管理 Android 工作资料中的应用</string>
+
+    <!-- ===================== 模块专属（MainActivity 门禁页 / LogExporter / 占位视图） ===================== -->
+
+    <!-- Manifest 引用 -->
+    <string name="xposed_description">为 com.miui.home 增加自定义桌面模式底座（原生式模式注册 + 视图挂载 + 手势隔离），UI 由 HomeView 接入</string>
+    <string name="accessibility_service_name">HomeMode4Miui system actions</string>
+
+    <!-- 首页头部说明 -->
+    <string name="module_desc">\n为小米桌面（com.miui.home，OS2/OS3 双版本自适应）新增第四种桌面模式。\n切换走原生链路，与三种原生模式互不干扰。\n提示：请先关闭系统「极简模式」</string>
+
+    <!-- gate1 前置条件区 -->
+    <string name="gate_title">\n使用前置条件（全部就绪后才能启用第四桌面）</string>
+    <string name="gate_reprobe_hook">重新检测 hook</string>
+    <string name="gate_hook_hint">刚更新模块 APK 的话，hook 代码只在桌面进程启动时注入 ——\n必须强停「系统桌面」（或重启手机）后重新检测。</string>
+    <string name="gate_open_autostart">打开 MIUI 自启动设置</string>
+    <string name="autostart_fallback_toast">未能直达自启动页，请在应用详情里找到「自启动」开关并开启</string>
+    <string name="gate_probe_root">检测 root 权限并启用保活</string>
+    <string name="root_probing">root 状态：检测中…（首次会弹出 Magisk 授权框，请选择允许）</string>
+    <string name="gate_open_notif">打开通知使用权设置</string>
+    <string name="gate_hint">root 保活用于阻止 MIUI 省电策略解绑通知监听服务（媒体/通知行的\n前置）；通知权限丢失时桌面会自动回落原生，权限补齐后自动恢复，\n无需重新开关。通知内容仅内存桥接，从不落盘或上传。</string>
+    <string name="gate_enable_switch">启用第四桌面</string>
+    <string name="restore_native">恢复原生桌面（发广播关闭自定义模式）</string>
+
+    <!-- 开关/拒绝/回落 Toast -->
+    <string name="toggle_rejected">桌面已拒绝开启第四桌面：宿主侧%1$s</string>
+    <string name="toggle_rejected_notif">未读到通知使用权（回首页后重试）</string>
+    <string name="toggle_rejected_autostart">MIUI 自启动未开启（首页第④项引导开启）</string>
+    <string name="toggle_rejected_root">root 标志未同步（回首页自动补发，或重新检测 root）</string>
+    <string name="cannot_enable">无法启用：%1$s</string>
+    <string name="gate_lost">前置条件丢失（%1$s），已自动恢复原生桌面</string>
+
+    <!-- gate 缺项清单 -->
+    <string name="gate_missing_hook">LSPosed hook 未生效（启用模块+勾选系统桌面作用域，且强停系统桌面/重启手机让 hook 注入）</string>
+    <string name="gate_missing_hook_failed">无法 hook 当前系统桌面（核心 hook 未生效：%1$s）—— 桌面版本可能暂不受支持，请导出日志反馈</string>
+    <string name="gate_missing_notif">缺少通知使用权</string>
+    <string name="gate_missing_root">未确认 root 权限（点击上方检测按钮）</string>
+    <string name="gate_missing_autostart">MIUI 自启动未开启（点击上方按钮进入自启动设置开启 HomeMode4Miui）</string>
+
+    <!-- 前置条件状态行 -->
+    <string name="notif_status_ok">② 通知使用权：已授权 ✓</string>
+    <string name="notif_status_missing">② 通知使用权：未授权 ✗（点击下方按钮，在列表中允许 HomeMode4Miui）</string>
+    <string name="root_status_ok">③ root 保活：已就绪 ✓</string>
+    <string name="root_status_missing">③ root 保活：未确认 ✗（点击下方检测按钮，Magisk 授权框选允许）</string>
+    <string name="autostart_status_ok">④ MIUI 自启动：已开启 ✓</string>
+    <string name="autostart_status_missing">④ MIUI 自启动：未开启 ✗（点击下方按钮开启，否则模块后台进程无法被拉起）</string>
+    <string name="autostart_status_unknown">④ MIUI 自启动：无法检测（不阻断；若被省电策略杀后台请手动开启）</string>
+    <string name="gate_summary_ok">✓ 前置条件全部就绪，可以启用第四桌面</string>
+    <string name="gate_summary_not_ready">✗ 尚未就绪：%1$s</string>
+
+    <!-- hook 状态分级 -->
+    <string name="hook_status_not_detected">① LSPosed hook：未检测到 ✗（若刚更新模块：先强停「系统桌面」再点重新检测）</string>
+    <string name="hook_host_label">宿主桌面 %1$s</string>
+    <string name="hook_status_failed">① LSPosed hook：无法 hook 当前桌面 ✗（%1$s）\n未生效：%2$s\n当前系统桌面版本可能暂不受模块支持 —— 请点上方「导出日志（bug 反馈用）」并把日志文件发给我们</string>
+    <string name="hook_status_partial">① LSPosed hook：部分生效 ⚠（%1$s）\n未生效 %2$d 项：%3$s\n相关功能可能受限；建议「导出日志」反馈</string>
+    <string name="hook_status_ok">① LSPosed hook：已生效 ✓（%1$s）</string>
+    <string name="hook_failed_none">无</string>
+    <string name="hook_failed_join">；</string>
+    <string name="hook_failed_more">…（共 %1$d 项）</string>
+
+    <!-- root 探测结果 -->
+    <string name="root_probe_ok_toast">root 保活已启用（Doze 白名单 + MIUI 省电策略豁免）</string>
+    <string name="root_probe_fail_toast">root 不可用：未授权或未刷入 root（自愈链仍会兜底，但通知可能被 MIUI 解绑）</string>
+
+    <!-- 媒体/通知授权状态回显 -->
+    <string name="media_status_ok">授权状态：已开启 ✓（回桌面即可使用媒体控制与通知预览）</string>
+    <string name="media_status_missing">授权状态：未开启 ✗（点击下方按钮，在列表中允许 HomeMode4Miui）</string>
+
+    <!-- 桥自诊断 -->
+    <string name="diag_header">\n[桥自诊断]\n</string>
+    <string name="diag_system_record">系统授权记录: %1$s</string>
+    <string name="diag_record_ok">含本模块 ✓</string>
+    <string name="diag_record_missing">不含本模块 ✗</string>
+    <string name="diag_sessions">活动媒体会话: %1$d 条</string>
+    <string name="diag_sessions_denied">活动媒体会话: 查询被拒（SecurityException —— 系统授权记录与实际权限不同步）</string>
+    <string name="diag_sessions_failed">活动媒体会话: 查询失败 %1$s</string>
+
+    <!-- 日志导出 -->
+    <string name="log_export_button">导出日志（bug 反馈用）</string>
+    <string name="log_export_range_title">导出日志范围（保存到 Download 文件夹，上限 10MB）</string>
+    <string name="log_range_1h">最近 1 小时</string>
+    <string name="log_range_30m">最近 30 分钟</string>
+    <string name="log_range_10m">最近 10 分钟</string>
+    <string name="log_range_5m">最近 5 分钟</string>
+    <string name="log_range_1m">最近 1 分钟</string>
+    <string name="log_exporting">正在导出日志…（范围：%1$s）</string>
+    <string name="log_export_busy">已有导出在进行中，请稍候</string>
+    <string name="log_export_failed">导出失败：%1$s</string>
+    <string name="log_export_done">已导出（%1$s，超 10MB 的旧日志已裁剪保留最新）：</string>
+    <string name="last_export_path">上次导出路径：\n%1$s</string>
+
+    <!-- 占位视图（宿主进程，经包上下文解析） -->
+    <string name="placeholder_tip">自定义模式底座已挂载\n\nHomeViewFactory.create() → 换成你的桌面 UI</string>
 </resources>

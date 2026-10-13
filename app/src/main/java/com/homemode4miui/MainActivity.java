@@ -86,10 +86,10 @@ public class MainActivity extends Activity {
                 boolean notif = reason != null && reason.startsWith("notification");
                 boolean autostart = reason != null && reason.startsWith("autostart");
                 Toast.makeText(MainActivity.this,
-                        "桌面已拒绝开启第四桌面：宿主侧" + (notif
-                                ? "未读到通知使用权（回首页后重试）"
-                                : autostart ? "MIUI 自启动未开启（首页第④项引导开启）"
-                                : "root 标志未同步（回首页自动补发，或重新检测 root）"),
+                        getString(R.string.toggle_rejected,
+                                notif ? getString(R.string.toggle_rejected_notif)
+                                        : autostart ? getString(R.string.toggle_rejected_autostart)
+                                        : getString(R.string.toggle_rejected_root)),
                         Toast.LENGTH_LONG).show();
             }
         }
@@ -132,21 +132,19 @@ public class MainActivity extends Activity {
         root.setPadding(dp(24), dp(48), dp(24), dp(24));
 
         TextView title = new TextView(this);
-        title.setText("HomeMode4Miui");
+        title.setText(R.string.app_name);
         title.setTextSize(22);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         root.addView(title);
 
         TextView desc = new TextView(this);
-        desc.setText("\n为小米桌面（com.miui.home，OS2/OS3 双版本自适应）新增第四种桌面模式。\n"
-                + "切换走原生链路，与三种原生模式互不干扰。\n"
-                + "提示：请先关闭系统「极简模式」");
+        desc.setText(getString(R.string.module_desc));
         desc.setTextSize(15);
         root.addView(desc);
 
         // ==================== gate1：使用前置条件 ====================
         TextView gateTitle = new TextView(this);
-        gateTitle.setText("\n使用前置条件（全部就绪后才能启用第四桌面）");
+        gateTitle.setText(getString(R.string.gate_title));
         gateTitle.setTextSize(16);
         gateTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         root.addView(gateTitle);
@@ -155,7 +153,7 @@ public class MainActivity extends Activity {
         root.addView(mHookStatus);
 
         Button hookReprobe = new Button(this);
-        hookReprobe.setText("重新检测 hook");
+        hookReprobe.setText(getString(R.string.gate_reprobe_hook));
         hookReprobe.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -165,15 +163,14 @@ public class MainActivity extends Activity {
         root.addView(hookReprobe);
 
         TextView hookHint = new TextView(this);
-        hookHint.setText("刚更新模块 APK 的话，hook 代码只在桌面进程启动时注入 ——\n"
-                + "必须强停「系统桌面」（或重启手机）后重新检测。");
+        hookHint.setText(getString(R.string.gate_hook_hint));
         hookHint.setTextSize(13);
         hookHint.setTextColor(color(R.color.text_hint));
         root.addView(hookHint);
 
         // 日志导出（bug 反馈用）：导出到 Download 文件夹，范围可选
         Button exportLog = new Button(this);
-        exportLog.setText("导出日志（bug 反馈用）");
+        exportLog.setText(getString(R.string.log_export_button));
         exportLog.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -201,7 +198,7 @@ public class MainActivity extends Activity {
         root.addView(mAutoStartStatus);
 
         Button autoStartBtn = new Button(this);
-        autoStartBtn.setText("打开 MIUI 自启动设置");
+        autoStartBtn.setText(getString(R.string.gate_open_autostart));
         autoStartBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -214,7 +211,7 @@ public class MainActivity extends Activity {
                                 android.net.Uri.parse("package:com.homemode4miui"));
                         startActivity(detail);
                         Toast.makeText(MainActivity.this,
-                                "未能直达自启动页，请在应用详情里找到「自启动」开关并开启",
+                                getString(R.string.autostart_fallback_toast),
                                 Toast.LENGTH_LONG).show();
                     } catch (Throwable fallbackEx) {
                         ModLog.e("MainActivity autostart app-details fallback failed", fallbackEx);
@@ -225,18 +222,18 @@ public class MainActivity extends Activity {
         root.addView(autoStartBtn);
 
         Button rootProbe = new Button(this);
-        rootProbe.setText("检测 root 权限并启用保活");
+        rootProbe.setText(getString(R.string.gate_probe_root));
         rootProbe.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                mRootStatus.setText("root 状态：检测中…（首次会弹出 Magisk 授权框，请选择允许）");
+                mRootStatus.setText(getString(R.string.root_probing));
                 com.homemode4miui.bridge.RootKeepAlive.INSTANCE.ensureJava(ok -> onRootProbeResult(ok));
             }
         });
         root.addView(rootProbe);
 
         Button notifAccess = new Button(this);
-        notifAccess.setText("打开通知使用权设置");
+        notifAccess.setText(getString(R.string.gate_open_notif));
         notifAccess.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -252,16 +249,14 @@ public class MainActivity extends Activity {
         root.addView(mGateSummary);
 
         TextView gateHint = new TextView(this);
-        gateHint.setText("root 保活用于阻止 MIUI 省电策略解绑通知监听服务（媒体/通知行的\n"
-                + "前置）；通知权限丢失时桌面会自动回落原生，权限补齐后自动恢复，\n"
-                + "无需重新开关。通知内容仅内存桥接，从不落盘或上传。");
+        gateHint.setText(getString(R.string.gate_hint));
         gateHint.setTextSize(13);
         gateHint.setTextColor(color(R.color.text_hint));
         root.addView(gateHint);
 
         // ==================== 模式开关 ====================
         final Switch sw = new Switch(this);
-        sw.setText("启用第四桌面");
+        sw.setText(getString(R.string.gate_enable_switch));
         sw.setChecked(mPrefs.getBoolean(ModePrefs.KEY_MODE_ENABLE, false));
         sw.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -271,7 +266,8 @@ public class MainActivity extends Activity {
                     // 前置条件不齐：弹回 + 指出缺项
                     sw.setChecked(false);
                     Toast.makeText(MainActivity.this,
-                            "无法启用：" + missingGateText(), Toast.LENGTH_LONG).show();
+                            getString(R.string.cannot_enable, missingGateText()),
+                            Toast.LENGTH_LONG).show();
                     return;
                 }
                 mPrefs.edit().putBoolean(ModePrefs.KEY_MODE_ENABLE, on).apply();
@@ -310,7 +306,7 @@ public class MainActivity extends Activity {
         root.addView(portHint);
 
         Button restore = new Button(this);
-        restore.setText("恢复原生桌面（发广播关闭自定义模式）");
+        restore.setText(getString(R.string.restore_native));
         restore.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -402,7 +398,7 @@ public class MainActivity extends Activity {
         mPrefs.edit().putBoolean(ModePrefs.KEY_MODE_ENABLE, false).apply();
         if (mModeSwitch != null) mModeSwitch.setChecked(false);
         sendToggle(false);
-        Toast.makeText(this, "前置条件丢失（" + missingGateText() + "），已自动恢复原生桌面",
+        Toast.makeText(this, getString(R.string.gate_lost, missingGateText()),
                 Toast.LENGTH_LONG).show();
     }
 
@@ -422,36 +418,44 @@ public class MainActivity extends Activity {
     /** 范围选择：1h / 30m / 10m / 5m / 1m */
     private void showLogExportDialog() {
         final CharSequence[] ranges = new CharSequence[]{
-                "最近 1 小时", "最近 30 分钟", "最近 10 分钟", "最近 5 分钟", "最近 1 分钟"};
+                rangeLabel(60), rangeLabel(30), rangeLabel(10), rangeLabel(5), rangeLabel(1)};
         final int[] minutes = new int[]{60, 30, 10, 5, 1};
         new AlertDialog.Builder(this)
-                .setTitle("导出日志范围（保存到 Download 文件夹，上限 10MB）")
+                .setTitle(getString(R.string.log_export_range_title))
                 .setItems(ranges, new android.content.DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(android.content.DialogInterface d, int which) {
                         doExportLog(minutes[which]);
                     }
                 })
-                .setNegativeButton("取消", null)
+                .setNegativeButton(getString(R.string.cancel), null)
                 .show();
     }
 
+    /** 时间范围 → 本地化文案（对话框选项与导出 Toast 共用） */
+    private String rangeLabel(int minutes) {
+        switch (minutes) {
+            case 60: return getString(R.string.log_range_1h);
+            case 30: return getString(R.string.log_range_30m);
+            case 10: return getString(R.string.log_range_10m);
+            case 5:  return getString(R.string.log_range_5m);
+            default: return getString(R.string.log_range_1m);
+        }
+    }
+
     private void doExportLog(final int minutes) {
-        Toast.makeText(this, "正在导出日志…（范围：最近 "
-                + (minutes >= 60 ? (minutes / 60) + " 小时" : minutes + " 分钟") + "）",
+        Toast.makeText(this, getString(R.string.log_exporting, rangeLabel(minutes)),
                 Toast.LENGTH_SHORT).show();
         com.homemode4miui.util.LogExporter.export(this, minutes,
                 new com.homemode4miui.util.LogExporter.Callback() {
                     @Override
-                    public void onDone(String message) {
+                    public void onDone(boolean success, String message, String path) {
                         Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
                         // 路径常驻显示在导出按钮下方（失败信息也回显，方便截图反馈）
                         if (mExportPath != null) {
-                            String pathLine = com.homemode4miui.util.LogExporter
-                                    .pathLineOf(message);
                             mExportPath.setVisibility(View.VISIBLE);
-                            mExportPath.setText(message.startsWith("已导出")
-                                    ? "上次导出路径：\n" + pathLine
+                            mExportPath.setText(success && path != null
+                                    ? getString(R.string.last_export_path, path)
                                     : message);
                         }
                     }
@@ -488,14 +492,13 @@ public class MainActivity extends Activity {
     }
 
     private String missingGateText() {
-        if (!mHookLive) return "LSPosed hook 未生效（启用模块+勾选系统桌面作用域，且强停系统桌面/重启手机让 hook 注入）";
+        if (!mHookLive) return getString(R.string.gate_missing_hook);
         if (criticalHookFailed(mHookFailed)) {
-            return "无法 hook 当前系统桌面（核心 hook 未生效：" + failedSummary()
-                    + "）—— 桌面版本可能暂不受支持，请导出日志反馈";
+            return getString(R.string.gate_missing_hook_failed, failedSummary());
         }
-        if (!gateNotif()) return "缺少通知使用权";
-        if (!mRootReady) return "未确认 root 权限（点击上方检测按钮）";
-        if (mAutoStartState == AutoStartProbe.DENIED) return "MIUI 自启动未开启（点击上方按钮进入自启动设置开启 HomeMode4Miui）";
+        if (!gateNotif()) return getString(R.string.gate_missing_notif);
+        if (!mRootReady) return getString(R.string.gate_missing_root);
+        if (mAutoStartState == AutoStartProbe.DENIED) return getString(R.string.gate_missing_autostart);
         return "";
     }
 
@@ -503,25 +506,25 @@ public class MainActivity extends Activity {
         boolean notif = gateNotif();
         setTextState(mHookStatus, hookStatusText(), hookStatusColor());
         setTextState(mNotifStatus, notif
-                        ? "② 通知使用权：已授权 ✓"
-                        : "② 通知使用权：未授权 ✗（点击下方按钮，在列表中允许 HomeMode4Miui）",
+                        ? getString(R.string.notif_status_ok)
+                        : getString(R.string.notif_status_missing),
                 notif);
         setTextState(mRootStatus, mRootReady
-                        ? "③ root 保活：已就绪 ✓"
-                        : "③ root 保活：未确认 ✗（点击下方检测按钮，Magisk 授权框选允许）",
+                        ? getString(R.string.root_status_ok)
+                        : getString(R.string.root_status_missing),
                 mRootReady);
         // gate6：自启动三态回显（UNKNOWN 黄色：无法检测时不阻断，仅提示）
         if (mAutoStartStatus != null) {
             String text;
             int color;
             if (mAutoStartState == AutoStartProbe.GRANTED) {
-                text = "④ MIUI 自启动：已开启 ✓";
+                text = getString(R.string.autostart_status_ok);
                 color = color(R.color.status_ok);
             } else if (mAutoStartState == AutoStartProbe.DENIED) {
-                text = "④ MIUI 自启动：未开启 ✗（点击下方按钮开启，否则模块后台进程无法被拉起）";
+                text = getString(R.string.autostart_status_missing);
                 color = color(R.color.status_error);
             } else {
-                text = "④ MIUI 自启动：无法检测（不阻断；若被省电策略杀后台请手动开启）";
+                text = getString(R.string.autostart_status_unknown);
                 color = color(R.color.status_warn);
             }
             mAutoStartStatus.setText(text);
@@ -531,8 +534,8 @@ public class MainActivity extends Activity {
         }
         boolean all = gateSatisfied();
         mGateSummary.setText(all
-                ? "✓ 前置条件全部就绪，可以启用第四桌面"
-                : "✗ 尚未就绪：" + missingGateText());
+                ? getString(R.string.gate_summary_ok)
+                : getString(R.string.gate_summary_not_ready, missingGateText()));
         mGateSummary.setTextColor(all ? color(R.color.status_ok) : color(R.color.status_error));
         if (mModeSwitch != null) mModeSwitch.setEnabled(all);
         refreshBridgeDiag();
@@ -580,35 +583,30 @@ public class MainActivity extends Activity {
 
     private String hookStatusText() {
         if (!mHookLive) {
-            return "① LSPosed hook：未检测到 ✗（若刚更新模块：先强停「系统桌面」再点重新检测）";
+            return getString(R.string.hook_status_not_detected);
         }
-        String host = "宿主桌面 " + mHookHostVersion
+        String host = getString(R.string.hook_host_label, mHookHostVersion)
                 + (mHookFamily != null ? " · " + mHookFamily : "");
         boolean critical = criticalHookFailed(mHookFailed);
         int failedCount = mHookFailed == null ? 0 : mHookFailed.size();
         if (critical || failedCount >= 3) {
             // 无法 hook 当前桌面：核心链路失败或大面积失败 —— 明确引导反馈
-            return "① LSPosed hook：无法 hook 当前桌面 ✗（" + host + "）\n"
-                    + "未生效：" + failedSummary() + "\n"
-                    + "当前系统桌面版本可能暂不受模块支持 —— 请点上方「导出日志（bug 反馈用）」"
-                    + "并把日志文件发给我们";
+            return getString(R.string.hook_status_failed, host, failedSummary());
         }
         if (failedCount > 0) {
-            return "① LSPosed hook：部分生效 ⚠（" + host + "）\n"
-                    + "未生效 " + failedCount + " 项：" + failedSummary() + "\n"
-                    + "相关功能可能受限；建议「导出日志」反馈";
+            return getString(R.string.hook_status_partial, host, failedCount, failedSummary());
         }
-        return "① LSPosed hook：已生效 ✓（" + host + "）";
+        return getString(R.string.hook_status_ok, host);
     }
 
     private String failedSummary() {
-        if (mHookFailed == null || mHookFailed.isEmpty()) return "无";
+        if (mHookFailed == null || mHookFailed.isEmpty()) return getString(R.string.hook_failed_none);
         StringBuilder sb = new StringBuilder();
         for (String f : mHookFailed) {
-            if (sb.length() > 0) sb.append("；");
+            if (sb.length() > 0) sb.append(getString(R.string.hook_failed_join));
             sb.append(f);
             if (sb.length() > 150) {
-                sb.append("…（共 ").append(mHookFailed.size()).append(" 项）");
+                sb.append(getString(R.string.hook_failed_more, mHookFailed.size()));
                 break;
             }
         }
@@ -621,16 +619,16 @@ public class MainActivity extends Activity {
         mPrefs.edit().putBoolean(ModePrefs.KEY_ROOT_READY, ok).apply();
         sendRootReady(ok);
         refreshGateUi();
-        Toast.makeText(this, ok ? "root 保活已启用（Doze 白名单 + MIUI 省电策略豁免）"
-                        : "root 不可用：未授权或未刷入 root（自愈链仍会兜底，但通知可能被 MIUI 解绑）",
+        Toast.makeText(this, ok ? getString(R.string.root_probe_ok_toast)
+                        : getString(R.string.root_probe_fail_toast),
                 Toast.LENGTH_LONG).show();
     }
 
     private void refreshMediaStatus(TextView status) {
         mMediaStatusRef = status;
         boolean granted = com.galaxyrio.gracelauncher.data.media.MediaAccess.INSTANCE.isGranted(this);
-        status.setText(granted ? "授权状态：已开启 ✓（回桌面即可使用媒体控制与通知预览）"
-                : "授权状态：未开启 ✗（点击下方按钮，在列表中允许 HomeMode4Miui）");
+        status.setText(granted ? getString(R.string.media_status_ok)
+                : getString(R.string.media_status_missing));
         status.setTextSize(14);
         status.setTextColor(granted ? color(R.color.status_ok) : color(R.color.status_error));
         status.setPadding(0, dp(8), 0, dp(8));
@@ -640,26 +638,28 @@ public class MainActivity extends Activity {
     /** hotfix4：桥自诊断 —— 把系统授权记录与活动媒体会话直接显示出来。 */
     private void refreshBridgeDiag() {
         if (bridgeDiag == null) return;
-        StringBuilder sb = new StringBuilder("\n[桥自诊断]\n");
+        StringBuilder sb = new StringBuilder(getString(R.string.diag_header));
         // ① 系统层授权记录（NotificationManagerService 持久化的 listener 列表）
         String enabled = android.provider.Settings.Secure.getString(
                 getContentResolver(), "enabled_notification_listeners");
         boolean registered = enabled != null && enabled.contains("com.homemode4miui");
-        sb.append("系统授权记录: ").append(registered ? "含本模块 ✓" : "不含本模块 ✗").append('\n');
+        sb.append(getString(R.string.diag_system_record,
+                registered ? getString(R.string.diag_record_ok)
+                        : getString(R.string.diag_record_missing))).append('\n');
         // ② 活动媒体会话（有监听权限才能查询；播放中应有 ≥1 条）
         try {
             android.media.session.MediaSessionManager msm =
                     (android.media.session.MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
             java.util.List<android.media.session.MediaController> sessions = msm.getActiveSessions(
                     com.galaxyrio.gracelauncher.data.media.MediaAccess.INSTANCE.component(this));
-            sb.append("活动媒体会话: ").append(sessions.size()).append(" 条");
+            sb.append(getString(R.string.diag_sessions, sessions.size()));
             for (android.media.session.MediaController c : sessions) {
                 sb.append("\n  · ").append(c.getPackageName());
             }
         } catch (SecurityException e) {
-            sb.append("活动媒体会话: 查询被拒（SecurityException —— 系统授权记录与实际权限不同步）");
+            sb.append(getString(R.string.diag_sessions_denied));
         } catch (Throwable t) {
-            sb.append("活动媒体会话: 查询失败 ").append(t);
+            sb.append(getString(R.string.diag_sessions_failed, t));
         }
         sb.append('\n');
         bridgeDiag.setText(sb.toString());

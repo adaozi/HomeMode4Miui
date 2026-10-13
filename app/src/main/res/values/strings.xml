@@ -614,4 +614,96 @@
     <string name="work_profile_indicator_summary">Show a work badge on work app icons</string>
     <string name="work_profile_setup_summary">Manage your work profile in Android settings</string>
     <string name="work_profile_summary">Organize apps in your Android work profile</string>
+
+    <!-- ===================== 模块专属（MainActivity 门禁页 / LogExporter / 占位视图） ===================== -->
+
+    <!-- Manifest 引用 -->
+    <string name="xposed_description">Adds a custom home mode base to com.miui.home (native-style mode registration, view mounting and gesture isolation); UI is provided via HomeView</string>
+    <string name="accessibility_service_name">HomeMode4Miui system actions</string>
+
+    <!-- 首页头部说明 -->
+    <string name="module_desc">\nAdds a fourth home mode to Xiaomi Home (com.miui.home, adaptive across OS2/OS3).\nSwitching goes through the native chain and never conflicts with the three native modes.\nNote: turn off the system “Simple mode” first.</string>
+
+    <!-- gate1 前置条件区 -->
+    <string name="gate_title">\nPrerequisites (all required before enabling the fourth home)</string>
+    <string name="gate_reprobe_hook">Re-check hook</string>
+    <string name="gate_hook_hint">If you just updated the module APK, hook code is only injected when the home process starts —\nforce-stop “System Home” (or reboot) before re-checking.</string>
+    <string name="gate_open_autostart">Open MIUI autostart settings</string>
+    <string name="autostart_fallback_toast">Could not open the autostart page directly. Enable “Autostart” for HomeMode4Miui in App info.</string>
+    <string name="gate_probe_root">Check root and enable keep-alive</string>
+    <string name="root_probing">root status: checking… (Magisk prompt on first run — choose Allow)</string>
+    <string name="gate_open_notif">Open notification access settings</string>
+    <string name="gate_hint">root keep-alive prevents MIUI battery saver from unbinding the notification listener service (a\nprerequisite of the media/notification row); if notification access is lost the home screen falls back\nto native automatically and restores once access returns — no re-toggle needed. Notification content\nis bridged in memory only, never stored or uploaded.</string>
+    <string name="gate_enable_switch">Enable fourth home</string>
+    <string name="restore_native">Restore native home (broadcast to disable custom mode)</string>
+
+    <!-- 开关/拒绝/回落 Toast -->
+    <string name="toggle_rejected">Home rejected enabling the fourth home: host side %1$s</string>
+    <string name="toggle_rejected_notif">did not see notification access (return to the home page and retry)</string>
+    <string name="toggle_rejected_autostart">MIUI autostart is off (see item ④ on the home page)</string>
+    <string name="toggle_rejected_root">root flag not synced (returning to the home page resends it, or re-check root)</string>
+    <string name="cannot_enable">Cannot enable: %1$s</string>
+    <string name="gate_lost">Prerequisites lost (%1$s); native home restored automatically</string>
+
+    <!-- gate 缺项清单 -->
+    <string name="gate_missing_hook">LSPosed hook not active (enable the module + check System Home scope, then force-stop System Home/reboot so the hook injects)</string>
+    <string name="gate_missing_hook_failed">Cannot hook the current System Home (core hooks failed: %1$s) — this Home version may be unsupported; please export logs and report</string>
+    <string name="gate_missing_notif">Notification access missing</string>
+    <string name="gate_missing_root">root not confirmed (tap the check button above)</string>
+    <string name="gate_missing_autostart">MIUI autostart is off (tap the button above and enable HomeMode4Miui in autostart settings)</string>
+
+    <!-- 前置条件状态行 -->
+    <string name="notif_status_ok">② Notification access: granted ✓</string>
+    <string name="notif_status_missing">② Notification access: not granted ✗ (tap the button below and allow HomeMode4Miui in the list)</string>
+    <string name="root_status_ok">③ root keep-alive: ready ✓</string>
+    <string name="root_status_missing">③ root keep-alive: not confirmed ✗ (tap the check button below, choose Allow in the Magisk prompt)</string>
+    <string name="autostart_status_ok">④ MIUI autostart: on ✓</string>
+    <string name="autostart_status_missing">④ MIUI autostart: off ✗ (tap the button below to enable, otherwise the module’s background process cannot be started)</string>
+    <string name="autostart_status_unknown">④ MIUI autostart: cannot detect (non-blocking; enable manually if the background process gets killed)</string>
+    <string name="gate_summary_ok">✓ All prerequisites ready — you can enable the fourth home</string>
+    <string name="gate_summary_not_ready">✗ Not ready: %1$s</string>
+
+    <!-- hook 状态分级 -->
+    <string name="hook_status_not_detected">① LSPosed hook: not detected ✗ (if you just updated the module: force-stop “System Home” first, then re-check)</string>
+    <string name="hook_host_label">host home %1$s</string>
+    <string name="hook_status_failed">① LSPosed hook: cannot hook the current home ✗ (%1$s)\nFailed: %2$s\nThis System Home version may be unsupported — tap “Export logs (for bug reports)” above and send us the log file</string>
+    <string name="hook_status_partial">① LSPosed hook: partially active ⚠ (%1$s)\n%2$d hook(s) failed: %3$s\nRelated features may be limited; exporting logs is appreciated</string>
+    <string name="hook_status_ok">① LSPosed hook: active ✓ (%1$s)</string>
+    <string name="hook_failed_none">none</string>
+    <string name="hook_failed_join">; </string>
+    <string name="hook_failed_more">… (%1$d in total)</string>
+
+    <!-- root 探测结果 -->
+    <string name="root_probe_ok_toast">root keep-alive enabled (Doze whitelist + MIUI battery-saver exemption)</string>
+    <string name="root_probe_fail_toast">root unavailable: not granted or not flashed (self-heal chain still applies, but notifications may be unbound by MIUI)</string>
+
+    <!-- 媒体/通知授权状态回显 -->
+    <string name="media_status_ok">Access: granted ✓ (return to the home screen to use media controls and notification previews)</string>
+    <string name="media_status_missing">Access: not granted ✗ (tap the button below and allow HomeMode4Miui in the list)</string>
+
+    <!-- 桥自诊断 -->
+    <string name="diag_header">\n[Bridge self-check]\n</string>
+    <string name="diag_system_record">System grant record: %1$s</string>
+    <string name="diag_record_ok">includes this module ✓</string>
+    <string name="diag_record_missing">does not include this module ✗</string>
+    <string name="diag_sessions">Active media sessions: %1$d</string>
+    <string name="diag_sessions_denied">Active media sessions: query denied (SecurityException — system grant record out of sync with actual permission)</string>
+    <string name="diag_sessions_failed">Active media sessions: query failed %1$s</string>
+
+    <!-- 日志导出 -->
+    <string name="log_export_button">Export logs (for bug reports)</string>
+    <string name="log_export_range_title">Choose log range (saved to Downloads, 10 MB max)</string>
+    <string name="log_range_1h">Last 1 hour</string>
+    <string name="log_range_30m">Last 30 minutes</string>
+    <string name="log_range_10m">Last 10 minutes</string>
+    <string name="log_range_5m">Last 5 minutes</string>
+    <string name="log_range_1m">Last 1 minute</string>
+    <string name="log_exporting">Exporting logs… (range: %1$s)</string>
+    <string name="log_export_busy">An export is already running, please wait</string>
+    <string name="log_export_failed">Export failed: %1$s</string>
+    <string name="log_export_done">Exported (%1$s; older logs beyond 10 MB trimmed, newest kept):</string>
+    <string name="last_export_path">Last export path:\n%1$s</string>
+
+    <!-- 占位视图（宿主进程，经包上下文解析） -->
+    <string name="placeholder_tip">Custom home mode base mounted\n\nHomeViewFactory.create() → swap in your home UI</string>
 </resources>

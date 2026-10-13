@@ -16,19 +16,24 @@
     </queries>
 
     <application
-        android:label="HomeMode4Miui"
+        android:label="@string/app_name"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher">
 
         <!-- LSPosed 模块声明 -->
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data android:name="xposeddescription"
-            android:value="为 com.miui.home 增加自定义桌面模式底座（原生式模式注册 + 视图挂载 + 手势隔离），UI 由 HomeView 接入" />
+            android:value="@string/xposed_description" />
         <meta-data android:name="xposedminversion" android:value="93" />
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
 
-        <!-- 模块开关界面 -->
-        <activity android:name=".MainActivity" android:exported="true">
+        <!-- 模块开关界面。excludeFromRecents：模块页不出现在多任务界面
+             （task 根为 MainActivity，LAUNCHER 入口排除即整任务不进 recents；
+             路由转发的 SettingsActivity 同声明兜底独立 task 场景）。 -->
+        <activity
+            android:name=".MainActivity"
+            android:excludeFromRecents="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -36,9 +41,11 @@
         </activity>
 
         <!-- C 组（C1）：Grace 设置页（模块 App 进程，正常 Compose Activity，不碰宿主）。
-             exported=false：入口统一走 MainActivity route 转发（BAL 可行路径）。 -->
+             exported=false：入口统一走 MainActivity route 转发（BAL 可行路径）。
+             excludeFromRecents：同 MainActivity，设置页也不进多任务界面。 -->
         <activity
             android:name=".SettingsActivity"
+            android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleTop"
             android:label="@string/settings_title"
@@ -49,7 +56,7 @@
         <service
             android:name="com.galaxyrio.gracelauncher.data.media.MediaNotificationListener"
             android:exported="false"
-            android:label="HomeMode4Miui notifications and media"
+            android:label="@string/media_service_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
@@ -63,7 +70,7 @@
         <service
             android:name="com.galaxyrio.gracelauncher.platform.GraceAccessibilityService"
             android:exported="false"
-            android:label="HomeMode4Miui system actions"
+            android:label="@string/accessibility_service_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

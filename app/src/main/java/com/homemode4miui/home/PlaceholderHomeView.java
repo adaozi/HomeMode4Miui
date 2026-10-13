@@ -16,7 +16,7 @@ public class PlaceholderHomeView extends HomeView {
         super(launcher);
 
         TextView tip = new TextView(launcher);
-        tip.setText("自定义模式底座已挂载\n\nHomeViewFactory.create() → 换成你的桌面 UI");
+        tip.setText(resolveTipText(launcher));
         // 语义色（铁律）：优先模块资源表 fallback_text（宿主进程经包上下文解析）；
         // 模块资源不可达时回落系统语义色 secondary_text_light，不再硬编码字面量
         tip.setTextColor(resolveSemanticColor(launcher));
@@ -31,6 +31,25 @@ public class PlaceholderHomeView extends HomeView {
     @Override
     public void onHomeAttached(Activity launcher) {
         // 占位无数据可装载；真实实现在此初始化 UI / 加载应用列表
+    }
+
+    /**
+     * 占位提示文本（strings2 适配）：本视图运行在宿主 com.miui.home 进程，
+     * 不能直接引用模块 R.string —— 经包上下文解析模块 placeholder_tip 资源
+     * （随设备语言走 values/values-zh-rCN）；模块资源不可达时回落中文原样。
+     */
+    private static String resolveTipText(Activity host) {
+        try {
+            android.content.Context module = host.createPackageContext(
+                    "com.homemode4miui", android.content.Context.CONTEXT_IGNORE_SECURITY);
+            int id = module.getResources().getIdentifier("placeholder_tip", "string", "com.homemode4miui");
+            if (id != 0) {
+                return module.getString(id);
+            }
+        } catch (Throwable t) {
+            com.homemode4miui.util.ModLog.e("PlaceholderHomeView module text resolve failed", t);
+        }
+        return "自定义模式底座已挂载\n\nHomeViewFactory.create() → 换成你的桌面 UI";
     }
 
     private static int resolveSemanticColor(Activity host) {

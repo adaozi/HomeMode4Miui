@@ -38,9 +38,14 @@ import java.util.regex.Pattern;
  */
 public final class LogExporter {
 
-    /** 回调（主线程） */
+    /**
+     * 回调（主线程）。
+     * strings2（适配）：回调带结构化结果 —— success 标志 + path 独立字段，
+     * 替代旧版"已导出"前缀字符串匹配（消息文案资源化后前缀不再稳定）。
+     * message 为已本地化的完整展示文案；path 仅成功时非 null。
+     */
     public interface Callback {
-        void onDone(String message);
+        void onDone(boolean success, String message, String path);
     }
 
     /** LSPosed 模块日志候选路径（新旧版本布局漂移，依次探测） */
@@ -72,27 +77,34 @@ public final class LogExporter {
 
     /** 异步导出：minutes ∈ {60,30,10,5,1}；结果经主线程回调 */
     public static void export(Context ctx, final int minutes, final Callback cb) {
+        final Context app = ctx.getApplicationContext();
         if (!sExporting.compareAndSet(false, true)) {
-            cb.onDone("已有导出在进行中，请稍候");
+            cb.onDone(false, app.getString(com.homemode4miui.R.string.log_export_busy), null);
             return;
         }
-        final Context app = ctx.getApplicationContext();
         new Thread(new Runnable() {
             @Override
             public void run() {
-                String result;
+                boolean ok = false;
+                String message;
+                String path = null;
                 try {
-                    result = doExport(app, minutes);
+                    String[] r = doExport(app, minutes);
+                    message = r[0];
+                    path = r[1];
+                    ok = true;
                 } catch (Throwable t) {
-                    result = "导出失败：" + t;
+                    message = app.getString(com.homemode4miui.R.string.log_export_failed, t);
                 }
-                final String msg = result;
+                final boolean fOk = ok;
+                final String msg = message;
+                final String fPath = path;
                 android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
                 h.post(new Runnable() {
                     @Override
                     public void run() {
                         sExporting.set(false);
-                        cb.onDone(msg);
+                        cb.onDone(fOk, msg, fPath);
                     }
                 });
             }
@@ -101,7 +113,11 @@ public final class LogExporter {
 
     /* ==================== 主流程 ==================== */
 
-    private static String doExport(Context ctx, int minutes) throws Exception {
+    /**
+     * @return 二元组 {本地化成功文案, 落盘绝对路径}（导出文件头为文件内容而非 UI，
+     *         保持中文原样 —— 反馈文件不随设备语言变化，便于问题定位）
+     */
+    private static String[] doExport(Context ctx, int minutes) throws Exception {
         long startMs = System.currentTimeMillis() - minutes * 60_000L;
 
         StringBuilder body = new StringBuilder();
@@ -151,6 +167,7 @@ public final class LogExporter {
     }
 
     /* ==================== 来源采集 ==================== */
+    // 来源描述（source）与文件头同属导出文件内容，非设备 UI，保持中文原样。
 
     /** 逐路径探测 LSPosed 模块日志；按 tag 过滤后非空即返回，全失败返回 null */
     private static String tryLspLog(long startMs) {
@@ -339,7 +356,7 @@ public final class LogExporter {
 
     /* ==================== 落盘（Download） ==================== */
 
-    private static String writeToDownloads(Context ctx, String content, int minutes)
+    private static String[] writeToDownloads(Context ctx, String content, int minutes)
             throws Exception {
         String name = "HomeMode4Miui_log_"
                 + now("yyyyMMdd_HHmmss") + "_"
@@ -400,15 +417,10 @@ public final class LogExporter {
             fullPath = "/storage/emulated/0/Download/" + finalName;
         }
 
-        return "已导出（" + humanSize(data.length) + "，超 10MB 的旧日志已裁剪保留最新）：\n"
-                + fullPath;
-    }
-
-    /** 供首页常驻回显使用：导出成功后可从消息中提取路径行（最后一段非空行） */
-    public static String pathLineOf(String message) {
-        if (message == null) return null;
-        int idx = message.lastIndexOf("/storage/");
-        return idx >= 0 ? message.substring(idx) : message;
+        return new String[]{
+                ctx.getString(com.homemode4miui.R.string.log_export_done,
+                        humanSize(data.length)) + "\n" + fullPath,
+                fullPath};
     }
 
     /* ==================== 小工具 ==================== */
