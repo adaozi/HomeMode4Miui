@@ -9,6 +9,7 @@ import android.content.IntentFilter;
 import com.miui.home.launcher.allapps.LauncherMode;
 import com.miui.home.launcher.allapps.LauncherModeController;
 import com.homemode4miui.hook.GestureIsolator;
+import com.homemode4miui.util.ModLog;
 import com.homemode4miui.hook.HomeController;
 import com.homemode4miui.hook.HostCompat;
 import com.homemode4miui.mode.CustomLauncherMode;
@@ -92,11 +93,6 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final java.util.List<String> sFailedHooks =
             new java.util.concurrent.CopyOnWriteArrayList<String>();
 
-    /** 未生效 hook 快照（主 hook 线程写、广播线程读，CopyOnWrite 保证安全） */
-    public static java.util.List<String> failedHooksSnapshot() {
-        return new java.util.ArrayList<String>(sFailedHooks);
-    }
-
     /** 单个 hook 任务（允许抛 Throwable，由 tryHook 统一隔离降级） */
     private interface HookTask {
         void run() throws Throwable;
@@ -105,6 +101,12 @@ public class MainHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpp) {
         if (!HOME_PKG.equals(lpp.packageName)) return;
+        // hotfix：仅主进程装载全套 hook —— 宿主若派生子进程（内容中心/推送等），
+        // 每进程都装 hook + 注册接收器会造成多份 pong 响应与静态状态分裂
+        if (!HOME_PKG.equals(lpp.processName)) {
+            log("skip non-main process: " + lpp.processName);
+            return;
+        }
         log("loaded into " + lpp.packageName + " / " + lpp.processName
                 + " | host " + hostVersion(lpp));
         final ClassLoader cl = lpp.classLoader;
@@ -253,7 +255,9 @@ public class MainHook implements IXposedHookLoadPackage {
         if (sAdjudicationInstalled) {
             try {
                 return LauncherModeController.getCurrentMode() == CustomLauncherMode.getInstance();
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                // 裁决链路异常最需留痕：静默回退 SP 分支会掩盖宿主签名漂移
+                ModLog.e("MainHook isCustomModeActive adjudication read failed", t);
             }
         }
         Activity launcher = sLauncher;
@@ -432,19 +436,9 @@ public class MainHook implements IXposedHookLoadPackage {
         }
     }
 
-    /** 宿主桌面版本号（用于日志比对签名漂移来源） */
+    /** 宿主桌面版本号（用于日志比对签名漂移来源；app 未就绪阶段 ctx 为 null 属预期） */
     private static String hostVersion(XC_LoadPackage.LoadPackageParam lpp) {
-        try {
-            Context ctx = (Context) XposedHelpers.callStaticMethod(
-                    XposedHelpers.findClass("android.app.ActivityThread", lpp.classLoader),
-                    "currentApplication");
-            if (ctx == null) return "version-unknown(app-not-ready)";
-            android.content.pm.PackageInfo pi =
-                    ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
-            return pi.versionName + " (" + pi.getLongVersionCode() + ")";
-        } catch (Throwable t) {
-            return "version-unknown(" + t + ")";
-        }
+        return hostVersion(lpp.classLoader, true);
     }
 
     /* ================================================================
@@ -580,17 +574,22 @@ public class MainHook implements IXposedHookLoadPackage {
         }
     }
 
-    /** 宿主桌面版本号（gate2：pong 回显；与 hostVersion 不同的独立安全包装） */
+    /** 宿主桌面版本号（gate2：pong 回显）。两入口合一：withCode 控制是否附 versionCode。 */
     private static String hostVersionSafe() {
+        return hostVersion(LauncherModeController.class.getClassLoader(), false);
+    }
+
+    private static String hostVersion(ClassLoader cl, boolean withCode) {
         try {
             Context ctx = (Context) XposedHelpers.callStaticMethod(
-                    XposedHelpers.findClass("android.app.ActivityThread", LauncherModeController.class.getClassLoader()),
+                    XposedHelpers.findClass("android.app.ActivityThread", cl),
                     "currentApplication");
-            if (ctx == null) return "unknown";
-            android.content.pm.PackageInfo pi = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
-            return pi.versionName;
+            if (ctx == null) return withCode ? "version-unknown(app-not-ready)" : "unknown";
+            android.content.pm.PackageInfo pi =
+                    ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
+            return withCode ? pi.versionName + " (" + pi.getLongVersionCode() + ")" : pi.versionName;
         } catch (Throwable t) {
-            return "unknown";
+            return withCode ? "version-unknown(" + t + ")" : "unknown";
         }
     }
 
@@ -602,6 +601,6 @@ public class MainHook implements IXposedHookLoadPackage {
     }
 
     private static void log(String msg) {
-        XposedBridge.log("[" + TAG + "] " + msg);
+        ModLog.i(msg);
     }
 }

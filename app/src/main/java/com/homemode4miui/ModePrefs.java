@@ -2,6 +2,8 @@ package com.homemode4miui;
 
 import android.content.Context;
 
+import com.homemode4miui.util.ModLog;
+
 /**
  * 自定义模式持久化 —— 完全复用宿主原生存储：
  * 与原生抽屉模式开关（PreferenceUtils → BaseSharePreference）同机制，
@@ -75,7 +77,8 @@ public final class ModePrefs {
     public static void setRootKeepAliveReady(Context ctx, boolean ready) {
         try {
             sp(ctx).edit().putBoolean(KEY_ROOT_READY, ready).commit();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            ModLog.e("ModePrefs setRootKeepAliveReady failed", t);
         }
     }
 
@@ -92,7 +95,8 @@ public final class ModePrefs {
     public static void setAutoStartReady(Context ctx, boolean ready) {
         try {
             sp(ctx).edit().putBoolean(KEY_AUTOSTART_READY, ready).commit();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            ModLog.e("ModePrefs setAutoStartReady failed", t);
         }
     }
 
@@ -134,13 +138,9 @@ public final class ModePrefs {
 
     /* ================= Grace Compose 熔断 ================= */
 
-    private static android.content.SharedPreferences graceSp(Context ctx) {
-        return ctx.getSharedPreferences(HOST_SP_FILE, Context.MODE_PRIVATE);
-    }
-
     public static boolean isGraceComposeDead(Context ctx) {
         try {
-            return graceSp(ctx).getBoolean(KEY_GRACE_DEAD, false);
+            return sp(ctx).getBoolean(KEY_GRACE_DEAD, false);
         } catch (Throwable t) {
             return false;
         }
@@ -148,8 +148,9 @@ public final class ModePrefs {
 
     public static void markGraceComposeDead(Context ctx) {
         try {
-            graceSp(ctx).edit().putBoolean(KEY_GRACE_DEAD, true).commit();
-        } catch (Throwable ignored) {
+            sp(ctx).edit().putBoolean(KEY_GRACE_DEAD, true).commit();
+        } catch (Throwable t) {
+            ModLog.e("ModePrefs markGraceComposeDead failed", t);
         }
     }
 
@@ -160,7 +161,7 @@ public final class ModePrefs {
      */
     public static int onGraceComposeMountAttempt(Context ctx, int versionCode) {
         try {
-            android.content.SharedPreferences sp = graceSp(ctx);
+            android.content.SharedPreferences sp = sp(ctx);
             android.content.SharedPreferences.Editor e = sp.edit();
             if (sp.getInt(KEY_GRACE_VERSION, -1) != versionCode) {
                 e.putInt(KEY_GRACE_VERSION, versionCode)
@@ -196,26 +197,28 @@ public final class ModePrefs {
             // 崩溃安全性评估：pending 需要跨进程死亡存活，但进程死亡发生在首帧
             // traversal（挂载数百 ms 后），此时 apply 的异步落盘早已完成 ——
             // 熔断语义不受影响，主线程磁盘 IO 从关键路径移除。
-            graceSp(ctx).edit().putBoolean(KEY_GRACE_PENDING, true).apply();
-        } catch (Throwable ignored) {
+            sp(ctx).edit().putBoolean(KEY_GRACE_PENDING, true).apply();
+        } catch (Throwable t) {
+            ModLog.e("ModePrefs markGraceComposePending failed", t);
         }
     }
 
     /** 首帧心跳：组合+应用已成功，清 pending 与失败计数 */
     public static void onGraceComposeHeartbeat(Context ctx) {
         try {
-            graceSp(ctx).edit()
+            sp(ctx).edit()
                     .putBoolean(KEY_GRACE_PENDING, false)
                     .putInt(KEY_GRACE_FAILURES, 0)
                     .apply();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            ModLog.e("ModePrefs onGraceComposeHeartbeat failed", t);
         }
     }
 
     /** 挂载链路内捕获到的失败：清 pending（进程还活着，别让下次重复计数）并 +1 */
     public static void onGraceComposeMountFailure(Context ctx) {
         try {
-            android.content.SharedPreferences sp = graceSp(ctx);
+            android.content.SharedPreferences sp = sp(ctx);
             int failures = sp.getInt(KEY_GRACE_FAILURES, 0) + 1;
             android.content.SharedPreferences.Editor e = sp.edit()
                     .putBoolean(KEY_GRACE_PENDING, false)
@@ -227,15 +230,17 @@ public final class ModePrefs {
                                 + "x -> permanent degrade to placeholder");
             }
             e.apply();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            ModLog.e("ModePrefs onGraceComposeMountFailure failed", t);
         }
     }
 
     /** 正常卸载（模式切换等，进程未死）：清 pending 防误计 */
     public static void clearGraceComposePending(Context ctx) {
         try {
-            graceSp(ctx).edit().putBoolean(KEY_GRACE_PENDING, false).apply();
-        } catch (Throwable ignored) {
+            sp(ctx).edit().putBoolean(KEY_GRACE_PENDING, false).apply();
+        } catch (Throwable t) {
+            ModLog.e("ModePrefs clearGraceComposePending failed", t);
         }
     }
 }

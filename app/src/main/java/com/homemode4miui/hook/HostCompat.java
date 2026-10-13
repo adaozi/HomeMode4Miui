@@ -6,8 +6,9 @@ import android.content.pm.PackageInfo;
 import java.util.HashMap;
 import java.util.Map;
 
-import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
+
+import com.homemode4miui.util.ModLog;
 
 /**
  * 宿主版本兼容层 —— OS2（5.x）/ OS3（6.x）桌面双版本适配的路由中枢。
@@ -81,7 +82,8 @@ public final class HostCompat {
                 code = pi.getLongVersionCode();
                 name = pi.versionName;
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            log("HostCompat detect(currentApplication) failed: " + t);
         }
         if (code < 0) {
             // app 未就绪：从 APK 文件直接解析版本（systemContext 在此阶段已可用）
@@ -101,7 +103,8 @@ public final class HostCompat {
                         name = pi.versionName;
                     }
                 }
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                log("HostCompat detect(packageArchive) failed: " + t);
             }
         }
         applyFamily(code, name);
@@ -125,7 +128,8 @@ public final class HostCompat {
                 code = pi.getLongVersionCode();
                 name = pi.versionName;
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            log("HostCompat redetect(currentApplication) failed: " + t);
         }
         if (applyFamily(code, name)) {
             log("host family corrected at Application.onCreate -> " + label());
@@ -148,11 +152,6 @@ public final class HostCompat {
         sFamily = newFamily;
         log("host family = " + label() + " (versionName=" + name + ", versionCode=" + code + ")");
         return changed && sDetected;
-    }
-
-    /** 宿主版本家族（detect 之前调用返回 UNKNOWN） */
-    public static int family() {
-        return sFamily;
     }
 
     public static boolean isOS3() {
@@ -231,6 +230,6 @@ public final class HostCompat {
     }
 
     private static void log(String msg) {
-        XposedBridge.log("[" + TAG + "] " + msg);
+        ModLog.i(msg);
     }
 }

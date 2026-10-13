@@ -361,3 +361,12 @@ DIFF vs 桩文件:
 - [x] **RootKeepAlive（P0-5b）**：ensure/apply 双入口收敛到 `tryRun()` 单飞（同一把 gate 锁 + 同一 attempted/applied 协议，消除并发重复 root 写）；su() 输出改 AtomicReference 跨线程传递（局部捕获变量可见性无保证）+ join 5s；PowerKeeper 校验收紧 —— `UPDATE; SELECT changes()` 同连接校验实改行数（退出码 0 ≠ 生效）。
 - [x] 构建：assembleRelease 通过，versionCode 70。
 - [ ] **遗留**：P1 铁律批（ModePrefs/PermissionGate/HostCompat 等吞异常、MainActivity 16 处 + PlaceholderHomeView 硬编码色值、GracePinItemHook 丢栈）与 P2 批（死代码 ~500 行、MiuiWeatherRepository 诊断 Log.d 摘除、引擎主线程 JSON 编码、组合期写状态、反射缓存）待后续批次。
+
+### colorlaw（v2.9.38-colorlaw / versionCode 71，2026-10-14）—— P1 铁律整改批
+
+- [x] **吞异常清零**：ModePrefs 7 处（熔断/root/autostart 标志读写全链记 ModLog.e）、MainHook isCustomModeActive 裁决读取（裁决链路异常最需留痕）、HostCompat 两级版本探测失败（UNKNOWN 落定留因）、PermissionGate Settings.Secure 读失败、MainActivity 2 处（自启动降级/onStop 反注册）、GracePinItemHook 3 处丢栈（t.message → ModLog.e 全栈）。catch (Throwable ignored) 全仓归零。
+- [x] **日志出口统一**：MainHook/HomeController/HostCompat 三处私有 log() 委托 ModLog.i（补齐 logcat 双写腿，LogExporter tag 过滤从此覆盖宿主 hook 日志）；AutoStartProbe 直写 logcat 改 ModLog.i。
+- [x] **硬编码色值清零（自研侧）**：colors.xml 新增 6 个语义 token（status_ok/error/warn、text_hint/secondary、fallback_text）；MainActivity 16 处 → R.color 引用（新增 color() helper）；PlaceholderHomeView（宿主进程熔断常驻降级 UI）经包上下文解析模块 fallback_text，不可达时回落系统 secondary_text_light；0xFF6750A4 三处（GraceSettingsRepository seed / GraceSettingsBridge 解码默认 / GraceHomeViewModel 回退）收敛到 LauncherSettings.DEFAULT_THEME_COLOR 单一事实源（companion 常量，上游默认值唯一保留点）。上游原文色值（Theme.kt 调色板/ThemeSettings 种子清单等）按判定保留。
+- [x] **顺手加固**：MainHook 子进程守卫（processName ≠ 主进程只打日志不装 hook，防多份 pong 与静态状态分裂）；MainHook hostVersion/hostVersionSafe 合并为单实现（withCode 参数）；failedHooksSnapshot 死方法删除；HostCompat.family() 死方法删除；ModePrefs graceSp 与 sp() 重复实现去重；PermissionGate 通知授权匹配改正则精确段匹配（子串撞包防护）；AutoStartProbe checkOpNoThrow 反射缓存；GracePinItemHook launcherApps 死方法删除。
+- [x] 构建：assembleRelease 通过，versionCode 71。
+- [ ] **遗留**：P2 批（死代码 ~450 行、MiuiWeatherRepository 诊断 Log.d 摘除、GraceBridgeEngine 通知快照主线程 JSON 编码、GraceLauncherRoute 组合期写状态、热路径反射缓存、60s 时钟循环抽公共组件）待后续批次。

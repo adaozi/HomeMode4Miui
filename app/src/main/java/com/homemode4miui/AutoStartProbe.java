@@ -31,6 +31,9 @@ public final class AutoStartProbe {
     /** MIUI 私有 op：AUTO_START（SecurityCenter 自启动开关） */
     private static final int OP_AUTO_START = 10008;
 
+    /** checkOpNoThrow 反射结果缓存（每次 onResume 全量反射开销；非 MIUI 环境保持 null 反复小代价探测） */
+    private static volatile java.lang.reflect.Method sCheckOpNoThrow;
+
     private AutoStartProbe() {
     }
 
@@ -40,8 +43,11 @@ public final class AutoStartProbe {
             android.app.AppOpsManager ops =
                     (android.app.AppOpsManager) ctx.getSystemService(Context.APP_OPS_SERVICE);
             if (ops == null) return UNKNOWN;
-            java.lang.reflect.Method m = ops.getClass().getMethod("checkOpNoThrow",
-                    int.class, int.class, String.class);
+            java.lang.reflect.Method m = sCheckOpNoThrow;
+            if (m == null) {
+                m = ops.getClass().getMethod("checkOpNoThrow", int.class, int.class, String.class);
+                sCheckOpNoThrow = m;
+            }
             Object result = m.invoke(ops, OP_AUTO_START,
                     android.os.Process.myUid(), ctx.getPackageName());
             int mode = (Integer) result;
@@ -50,7 +56,7 @@ public final class AutoStartProbe {
             return DENIED; // MODE_IGNORED / MODE_DEFAULT / 其余按未开启处理
         } catch (Throwable t) {
             // 反射失败（方法签名变更/op 不存在/非 MIUI 环境）→ 不阻断
-            android.util.Log.i("HomeMode4Miui", "autostart probe unknown: " + t);
+            com.homemode4miui.util.ModLog.i("AutoStartProbe unknown (non-MIUI or op drift): " + t);
             return UNKNOWN;
         }
     }

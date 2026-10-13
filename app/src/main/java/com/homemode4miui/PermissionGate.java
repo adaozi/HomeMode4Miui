@@ -3,6 +3,8 @@ package com.homemode4miui;
 import android.content.Context;
 import android.os.SystemClock;
 
+import com.homemode4miui.util.ModLog;
+
 /**
  * gate1：第四桌面使用前置条件 —— 新建文件（非搬运）。
  *
@@ -46,10 +48,14 @@ public final class PermissionGate {
         try {
             String listeners = android.provider.Settings.Secure.getString(
                     ctx.getContentResolver(), "enabled_notification_listeners");
-            granted = listeners != null
-                    && listeners.contains("com.homemode4miui/");
+            // 精确匹配：列表以 ':' 分隔 pkg/component，子串 contains 会误命中
+            // "xx.com.homemode4miui/" 这类前缀撞包
+            granted = listeners != null && listeners.contains("com.homemode4miui/")
+                    && java.util.regex.Pattern.compile("(^|:)[^:]*com\\.homemode4miui/")
+                    .matcher(listeners).find();
         } catch (Throwable t) {
             granted = false;
+            ModLog.e("PermissionGate notification listeners read failed", t);
         }
         sNotifGranted = granted;
         sNotifCheckedAt = now;

@@ -516,7 +516,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         val row = LauncherDatabase.getInstance(getApplication()).settingsDao().readSettings()
         return com.galaxyrio.gracelauncher.data.LauncherSettings(
             useDynamicColors = row?.useDynamicColors ?: true,
-            themeColor = row?.themeColor ?: 0xFF6750A4.toInt(),
+            themeColor = row?.themeColor ?: com.galaxyrio.gracelauncher.data.LauncherSettings.DEFAULT_THEME_COLOR,
             darkMode = row?.darkMode
                 ?.let { runCatching { com.galaxyrio.gracelauncher.data.ThemeMode.valueOf(it) }.getOrNull() }
                 ?: com.galaxyrio.gracelauncher.data.ThemeMode.System,

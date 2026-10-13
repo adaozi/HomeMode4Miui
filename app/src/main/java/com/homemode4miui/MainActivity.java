@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+
+import com.homemode4miui.util.ModLog;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
@@ -162,7 +164,7 @@ public class MainActivity extends Activity {
         hookHint.setText("刚更新模块 APK 的话，hook 代码只在桌面进程启动时注入 ——\n"
                 + "必须强停「系统桌面」（或重启手机）后重新检测。");
         hookHint.setTextSize(13);
-        hookHint.setTextColor(0xFF888888);
+        hookHint.setTextColor(color(R.color.text_hint));
         root.addView(hookHint);
 
         // 日志导出（bug 反馈用）：导出到 Download 文件夹，范围可选
@@ -179,7 +181,7 @@ public class MainActivity extends Activity {
         // 上次导出路径常驻回显（导出后显示完整落盘路径，方便用户到文件管理器取文件）
         mExportPath = new TextView(this);
         mExportPath.setTextSize(12);
-        mExportPath.setTextColor(0xFF555555);
+        mExportPath.setTextColor(color(R.color.text_secondary));
         mExportPath.setPadding(0, dp(2), 0, dp(8));
         mExportPath.setVisibility(View.GONE);
         root.addView(mExportPath);
@@ -210,7 +212,8 @@ public class MainActivity extends Activity {
                         Toast.makeText(MainActivity.this,
                                 "未能直达自启动页，请在应用详情里找到「自启动」开关并开启",
                                 Toast.LENGTH_LONG).show();
-                    } catch (Throwable ignored) {
+                    } catch (Throwable fallbackEx) {
+                        ModLog.e("MainActivity autostart app-details fallback failed", fallbackEx);
                     }
                 }
             }
@@ -249,7 +252,7 @@ public class MainActivity extends Activity {
                 + "前置）；通知权限丢失时桌面会自动回落原生，权限补齐后自动恢复，\n"
                 + "无需重新开关。通知内容仅内存桥接，从不落盘或上传。");
         gateHint.setTextSize(13);
-        gateHint.setTextColor(0xFF888888);
+        gateHint.setTextColor(color(R.color.text_hint));
         root.addView(gateHint);
 
         // ==================== 模式开关 ====================
@@ -283,7 +286,7 @@ public class MainActivity extends Activity {
         // hotfix6：授权状态之后（用户最关心），根布局 ScrollView 防截断
         bridgeDiag = new TextView(this);
         bridgeDiag.setTextSize(12);
-        bridgeDiag.setTextColor(0xFF555555);
+        bridgeDiag.setTextColor(color(R.color.text_secondary));
         root.addView(bridgeDiag);
 
         // 从本 Activity 前台拉起桥引擎（幂等）：即使 listener 尚未被系统 bind，
@@ -300,7 +303,7 @@ public class MainActivity extends Activity {
                 + "2. 把 home/HomeViewFactory.create() 的返回值换成你的根视图；\n"
                 + "3. 完事。挂载/隐藏/手势隔离/切换链全部由底座处理。");
         portHint.setTextSize(13);
-        portHint.setTextColor(0xFF888888);
+        portHint.setTextColor(color(R.color.text_hint));
         root.addView(portHint);
 
         Button restore = new Button(this);
@@ -406,7 +409,8 @@ public class MainActivity extends Activity {
         mHandler.removeCallbacks(mHookTimeout);
         try {
             unregisterReceiver(mHookLiveReceiver);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            ModLog.e("MainActivity unregister hookLiveReceiver failed", t);
         }
     }
 
@@ -509,13 +513,13 @@ public class MainActivity extends Activity {
             int color;
             if (mAutoStartState == AutoStartProbe.GRANTED) {
                 text = "④ MIUI 自启动：已开启 ✓";
-                color = 0xFF2E7D32;
+                color = color(R.color.status_ok);
             } else if (mAutoStartState == AutoStartProbe.DENIED) {
                 text = "④ MIUI 自启动：未开启 ✗（点击下方按钮开启，否则模块后台进程无法被拉起）";
-                color = 0xFFC62828;
+                color = color(R.color.status_error);
             } else {
                 text = "④ MIUI 自启动：无法检测（不阻断；若被省电策略杀后台请手动开启）";
-                color = 0xFFF57F17;
+                color = color(R.color.status_warn);
             }
             mAutoStartStatus.setText(text);
             mAutoStartStatus.setTextSize(14);
@@ -526,13 +530,18 @@ public class MainActivity extends Activity {
         mGateSummary.setText(all
                 ? "✓ 前置条件全部就绪，可以启用第四桌面"
                 : "✗ 尚未就绪：" + missingGateText());
-        mGateSummary.setTextColor(all ? 0xFF2E7D32 : 0xFFC62828);
+        mGateSummary.setTextColor(all ? color(R.color.status_ok) : color(R.color.status_error));
         if (mModeSwitch != null) mModeSwitch.setEnabled(all);
         refreshBridgeDiag();
     }
 
+    /** 语义色解析（铁律：UI 色值一律走 colors.xml 资源，禁止字面量） */
+    private int color(int res) {
+        return androidx.core.content.ContextCompat.getColor(this, res);
+    }
+
     private void setTextState(TextView tv, String text, boolean ok) {
-        setTextState(tv, text, ok ? 0xFF2E7D32 : 0xFFC62828);
+        setTextState(tv, text, ok ? color(R.color.status_ok) : color(R.color.status_error));
     }
 
     private void setTextState(TextView tv, String text, int color) {
@@ -560,10 +569,10 @@ public class MainActivity extends Activity {
     }
 
     private int hookStatusColor() {
-        if (!mHookLive) return 0xFFC62828;                 // 红：未检测到
-        if (criticalHookFailed(mHookFailed)) return 0xFFC62828; // 红：核心 hook 失败
-        if (mHookFailed != null && !mHookFailed.isEmpty()) return 0xFFF57F17; // 黄：部分失败
-        return 0xFF2E7D32;                                  // 绿：全部生效
+        if (!mHookLive) return color(R.color.status_error);                 // 红：未检测到
+        if (criticalHookFailed(mHookFailed)) return color(R.color.status_error); // 红：核心 hook 失败
+        if (mHookFailed != null && !mHookFailed.isEmpty()) return color(R.color.status_warn); // 黄：部分失败
+        return color(R.color.status_ok);                                  // 绿：全部生效
     }
 
     private String hookStatusText() {
@@ -620,7 +629,7 @@ public class MainActivity extends Activity {
         status.setText(granted ? "授权状态：已开启 ✓（回桌面即可使用媒体控制与通知预览）"
                 : "授权状态：未开启 ✗（点击下方按钮，在列表中允许 HomeMode4Miui）");
         status.setTextSize(14);
-        status.setTextColor(granted ? 0xFF2E7D32 : 0xFFC62828);
+        status.setTextColor(granted ? color(R.color.status_ok) : color(R.color.status_error));
         status.setPadding(0, dp(8), 0, dp(8));
         refreshBridgeDiag();
     }

@@ -167,7 +167,7 @@ object GraceSettingsBridge {
         showBatteryPercentage = v.optBoolean("showBatteryPercentage", true),
         allowHapticFeedback = v.optBoolean("allowHapticFeedback", true),
         useDynamicColors = v.optBoolean("useDynamicColors", true),
-        themeColor = v.optInt("themeColor", 0xFF6750A4.toInt()),
+        themeColor = v.optInt("themeColor", com.galaxyrio.gracelauncher.data.LauncherSettings.DEFAULT_THEME_COLOR),
         darkMode = ThemeMode.entries.firstOrNull { it.name == v.optString("darkMode") } ?: ThemeMode.System,
         amoledMode = v.optBoolean("amoledMode", false),
         iconPackPackage = v.opt("iconPackPackage") as? String,

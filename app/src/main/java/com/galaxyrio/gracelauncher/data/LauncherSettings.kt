@@ -11,7 +11,7 @@ data class LauncherSettings(
     val showBatteryPercentage: Boolean = true,
     val allowHapticFeedback: Boolean = true,
     val useDynamicColors: Boolean = true,
-    val themeColor: Int = 0xFF6750A4.toInt(),
+    val themeColor: Int = DEFAULT_THEME_COLOR,
     val darkMode: ThemeMode = ThemeMode.System,
     val amoledMode: Boolean = false,
     /** Retained for installations that used the original single-pack setting. */
@@ -60,6 +60,11 @@ data class LauncherSettings(
     fun gestureSettings(home: Boolean): GraceButtonSettings = if (home) homeGestures else graceButton
     fun withGestureSettings(home: Boolean, transform: (GraceButtonSettings) -> GraceButtonSettings): LauncherSettings =
         if (home) copy(homeGestures = transform(homeGestures)) else copy(graceButton = transform(graceButton))
+
+    companion object {
+        /** 铁律整改：默认主题种子色单一事实源（上游默认值；seed/解码默认值统一引用本常量） */
+        const val DEFAULT_THEME_COLOR = 0xFF6750A4.toInt()
+    }
 }
 
 enum class FolderPlacement(val inFavorites: Boolean, val inAppList: Boolean) {

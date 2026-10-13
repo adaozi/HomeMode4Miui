@@ -19,10 +19,10 @@
  */
 package com.homemode4miui.hook
 
-import android.content.pm.LauncherApps
 import android.net.Uri
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import com.homemode4miui.util.ModLog
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -77,7 +77,7 @@ object GracePinItemHook {
                     val manager = android.appwidget.AppWidgetManager.getInstance(context)
                     val bound = runCatching {
                         manager.bindAppWidgetIdIfAllowed(id, info.profile, info.provider, options)
-                    }.onFailure { XposedBridge.log("[$TAG] bind failed: ${it.message}") }.getOrDefault(false)
+                    }.onFailure { ModLog.e("GracePinItemHook bind failed", it) }.getOrDefault(false)
                     if (!bound) {
                         runCatching { host.deleteAppWidgetId(id) }
                         XposedBridge.log("[$TAG] appwidget bind rejected, letting host handle")
@@ -103,7 +103,7 @@ object GracePinItemHook {
                     param.result = true  // 拦截 MIUI 原方法（避免宿主重复 allocate）
                     XposedBridge.log("[$TAG] appwidget pin adopted: id=$id provider=${info.provider.flattenToString()}")
                 } catch (t: Throwable) {
-                    XposedBridge.log("[$TAG] beforeHookedMethod failed: ${t.message}")
+                    ModLog.e("GracePinItemHook beforeHookedMethod failed", t)
                 }
             }
 
@@ -119,7 +119,7 @@ object GracePinItemHook {
                     val info = XposedHelpers.callMethod(compat, "getShortcutInfo") ?: return
                     persist(info)
                 } catch (t: Throwable) {
-                    XposedBridge.log("[$TAG] afterHookedMethod failed: ${t.message}")
+                    ModLog.e("GracePinItemHook afterHookedMethod failed", t)
                 }
             }
         })
@@ -174,8 +174,4 @@ object GracePinItemHook {
         }
     }
 
-    /** LauncherApps 兜底引用（保持 classloader 上 LauncherApps 可达性；供后续 appwidget pin 用）。 */
-    @Suppress("unused")
-    private fun launcherApps(context: android.content.Context): LauncherApps? =
-        context.getSystemService(LauncherApps::class.java)
 }

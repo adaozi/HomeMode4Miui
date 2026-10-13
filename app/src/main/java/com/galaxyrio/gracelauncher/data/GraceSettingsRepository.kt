@@ -132,7 +132,7 @@ class GraceSettingsRepository(context: Context) {
         showBatteryPercentage = settings.showBatteryPercentage,
         allowHapticFeedback = true,
         useDynamicColors = true,
-        themeColor = 0xFF6750A4.toInt(),
+        themeColor = com.galaxyrio.gracelauncher.data.LauncherSettings.DEFAULT_THEME_COLOR,
         darkMode = "System",
         clockStyleJson = settings.clockStyle.encode(),
         hideFavoriteNames = settings.hideFavoriteNames,

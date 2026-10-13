@@ -2,4 +2,13 @@
 <resources>
     <!-- 自适应图标背景：深灰蓝 -->
     <color name="ic_launcher_background">#232833</color>
+
+    <!-- 铁律整改（v2.9.38-colorlaw）：模块自有 UI 语义色 —— MainActivity（模块进程）/
+         PlaceholderHomeView（宿主进程熔断降级 UI，经包上下文解析）统一引用 -->
+    <color name="status_ok">#2E7D32</color>
+    <color name="status_error">#C62828</color>
+    <color name="status_warn">#F57F17</color>
+    <color name="text_hint">#888888</color>
+    <color name="text_secondary">#555555</color>
+    <color name="fallback_text">#CCCCCC</color>
 </resources>
