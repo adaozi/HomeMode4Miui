@@ -54,6 +54,7 @@ import com.galaxyrio.gracelauncher.data.weather.WeatherStatus
 import com.galaxyrio.gracelauncher.ui.components.LauncherIcon
 import com.galaxyrio.gracelauncher.ui.components.LauncherSymbol
 import com.galaxyrio.gracelauncher.ui.components.eventRemainingText
+import com.galaxyrio.gracelauncher.ui.components.rememberMinuteTick
 import com.galaxyrio.gracelauncher.ui.weather.DailyWeather
 import com.galaxyrio.gracelauncher.ui.weather.HourlyWeather
 import com.galaxyrio.gracelauncher.ui.weather.WeatherSourceNote
@@ -90,13 +91,8 @@ fun AgendaSheet(
     val configuration = LocalConfiguration.current
     val locale = configuration.locales[0]
     val zone = ZoneId.systemDefault()
-    var now by remember { mutableStateOf(Instant.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = Instant.now()
-            delay(60_000 - System.currentTimeMillis() % 60_000)
-        }
-    }
+    // perf3 公共组件（v2.9.41）：repeatOnLifecycle(STARTED) 节拍（原实现裸 while(true)）
+    val now = rememberMinuteTick()
     val today = now.atZone(zone).toLocalDate()
     val snapshot = weather.snapshot.takeIf { weatherEnabled }
     val forecastDays = weatherForecastDays.coerceIn(1, 14)

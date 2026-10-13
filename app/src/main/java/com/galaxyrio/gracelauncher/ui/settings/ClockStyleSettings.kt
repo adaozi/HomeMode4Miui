@@ -52,6 +52,7 @@ import com.galaxyrio.gracelauncher.data.ClockFontStore
 import com.galaxyrio.gracelauncher.data.ClockLayout
 import com.galaxyrio.gracelauncher.data.ClockStyle
 import com.galaxyrio.gracelauncher.ui.LauncherActions
+import com.galaxyrio.gracelauncher.ui.components.rememberMinuteTick
 import com.galaxyrio.gracelauncher.ui.LauncherUiState
 import com.galaxyrio.gracelauncher.ui.home.ClockFace
 import com.galaxyrio.gracelauncher.ui.home.HomeClockHeader
@@ -306,9 +307,9 @@ private fun ClockStylePreview(
     modifier: Modifier = Modifier,
 ) {
     val appearance = rememberLauncherAppearance(uiState.textMode, uiState.themedIcons, uiState.settings.iconDesign?.design?.iconSize ?: 100)
-    val now by produceState(Instant.now()) {
-        while (true) { value = Instant.now(); delay(60_000 - System.currentTimeMillis() % 60_000) }
-    }
+    // perf3 公共组件（v2.9.41）：repeatOnLifecycle(STARTED) 节拍（原实现永续循环，
+    // 设置页留在组合树期间退后台仍每分钟醒主线程）
+    val now = rememberMinuteTick()
     val shape = ListItemDefaults.segmentedShapes(index = 0, count = 1).shape
     Box(modifier.fillMaxWidth().testTag("clock_style_preview")
         .animateBounds(

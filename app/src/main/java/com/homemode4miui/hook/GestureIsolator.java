@@ -45,6 +45,13 @@ public final class GestureIsolator {
     private static final String DRAGLAYER_CLS = "com.miui.home.launcher.SuperDraglayer";
     private static final String FLOATING_CLS = "com.miui.home.launcher.AbstractFloatingView";
 
+    /** perf（v2.9.41）：findActiveController 对【每个触摸事件】触发 —— Class/Field
+     *  首次解析后静态缓存（含缺失负缓存，防无 mActivity 字段的宿主版本每事件重抛）。
+     *  触摸事件全部在主线程，ConcurrentHashMap 仅作防御。 */
+    private static volatile Class<?> sFloatingCls;
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Field> sFields =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private GestureIsolator() {
     }
 
@@ -77,8 +84,11 @@ public final class GestureIsolator {
             Object activity = fieldOrNull(dragLayer, "mActivity");
             if (activity == null) activity = fieldOrNull(dragLayer, "mLauncher");
             if (activity == null) return false;
-            Class<?> cls = XposedHelpers.findClass(
-                    FLOATING_CLS, dragLayer.getClass().getClassLoader());
+            Class<?> cls = sFloatingCls;
+            if (cls == null) {
+                cls = XposedHelpers.findClass(FLOATING_CLS, dragLayer.getClass().getClassLoader());
+                sFloatingCls = cls;
+            }
             Object top = XposedHelpers.callStaticMethod(cls, "getTopOpenView", activity);
             return top != null;
         } catch (Throwable t) {
@@ -86,10 +96,19 @@ public final class GestureIsolator {
         }
     }
 
+    /** 缓存版字段读取：null 值 = 已探测过的缺失（OS3 mActivity 上移 BaseDragLayer 等），
+     *  避免每事件重复抛 NoSuchFieldError 全父类链扫描。 */
     private static Object fieldOrNull(Object target, String name) {
         try {
-            return XposedHelpers.getObjectField(target, name);
+            java.lang.reflect.Field f = sFields.get(name);
+            if (f == null) {
+                if (sFields.containsKey(name)) return null; // 负缓存命中
+                f = XposedHelpers.findField(target.getClass(), name);
+                sFields.put(name, f);
+            }
+            return f.get(target);
         } catch (Throwable t) {
+            sFields.put(name, null); // 负缓存
             return null;
         }
     }

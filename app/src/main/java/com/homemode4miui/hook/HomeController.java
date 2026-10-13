@@ -477,16 +477,28 @@ public final class HomeController {
      * com.miui.newhome.*（看点/内容中心独立包），全量扫描必炸 NoClassDefFoundError
      * （OS2 5.39.40 实锤，与 HostCompat.declares 同一条铁律）。
      */
+    /** perf（v2.9.41）：右滑负一屏单次触发 4 个 callMethodSafe —— 惰性单方法查找
+     *  结果按 (类#方法) 缓存（含未命中负缓存；宿主类层级进程内恒定，负缓存安全）。
+     *  惰性 getDeclaredMethod 语义不变（严禁 getDeclaredMethods 全量扫描，见上）。 */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Method> sDeepMethodCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private static Method findMethodDeep(Class<?> cls, String name) {
+        String key = cls.getName() + "#" + name;
+        Method cached = sDeepMethodCache.get(key);
+        if (sDeepMethodCache.containsKey(key)) return cached; // 命中（含负缓存 null）
+        Method found = null;
         for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
             try {
                 Method m = c.getDeclaredMethod(name);
                 m.setAccessible(true);
-                return m;
+                found = m;
+                break;
             } catch (NoSuchMethodException ignored) {
             }
         }
-        return null;
+        sDeepMethodCache.put(key, found);
+        return found;
     }
 
     private static void logOnceNoUse() {

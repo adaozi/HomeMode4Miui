@@ -390,3 +390,11 @@ DIFF vs 桩文件:
 - [x] **修复**：MainActivity 转发 Intent 加 FLAG_ACTIVITY_CLEAR_TOP | FLAG_ACTIVITY_SINGLE_TOP（复用已有实例并清中间层）；SettingsActivity 补 onNewIntent（setIntent + page 变化时 recreate 重定向 NavHost startDestination —— initialPage 只在 onCreate 读，普通字段变更不触发重组导航）；Manifest 补 launchMode="singleTop" 双保险（未来新入口漏 flags 时连续启动仍复用栈顶）。
 - [x] 行为验证（推演）：桌面 N 次进入 → 栈内恒 1 个设置页，返回一次回桌面；模块首页进入 → 返回回首页（CLEAR_TOP 只清设置页之上的层，不影响 MainActivity）。
 - [x] 构建：assembleRelease 通过，versionCode 73。
+
+### perf（v2.9.41-perf / versionCode 74，2026-10-14）—— 热路径缓存 + 时钟节拍统一批
+
+- [x] **热路径反射缓存**：GestureIsolator findActiveController 每触摸事件级的 findClass/字段解析改静态缓存（含缺失负缓存 —— OS3 mActivity 上移 BaseDragLayer 时不再每事件重抛全父类链扫描）；HomeController findMethodDeep 结果按 (类#方法) 缓存（右滑负一屏单次 4 个 callMethodSafe；含负缓存，宿主类层级进程内恒定；惰性 getDeclaredMethod 语义不变）；MainHook resetcache 路径 sCurrentModeField 扫描结果缓存。
+- [x] **60s 时钟节拍统一**：新增 ui/components/MinuteTick.kt `rememberMinuteTick()`（repeatOnLifecycle(STARTED) + 整分对齐），HomeScreen / ClockStyleSettings / AgendaSheet 三处手写循环收敛。TimeText.kt 的 postedAt 键控"通知年龄"节拍器语义不同（新通知需立即归零），不改 —— 已有 perf3 改造。
+- [x] **Compose 重组治理**：GraceLauncherRoute rowGestures（非 @Stable 类实例）按 shortcutsFolders 键 remember —— 旧实现每次 uiState 变化（含通知快照高频桥推送）都新建实例传给 HomeScreen/AppDrawerScreen，大子树跳过不了重组；捕获集（viewModel/launchApp/overlay delegate）均为稳定引用。
+- [x] 构建：assembleRelease 通过，versionCode 74。
+- [ ] **遗留（随 P3+ 推进的结构性项）**：GraceHomeUiState 30+ 字段单一 data class 按消费面拆分；GraceLauncherRoute（~1090 行）/ GraceHomeViewModel（~1030 行）职责拆分（Route: 壁纸效果层/GraceButton 过渡；VM: WidgetController/BridgeCommander/AgendaController）。

@@ -103,6 +103,7 @@ import com.galaxyrio.gracelauncher.ui.components.AppRowGestures
 import com.galaxyrio.gracelauncher.ui.components.FolderRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherAppRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherLayout
+import com.galaxyrio.gracelauncher.ui.components.rememberMinuteTick
 import com.galaxyrio.gracelauncher.ui.components.startPadding
 import com.galaxyrio.gracelauncher.ui.components.endPadding
 import com.galaxyrio.gracelauncher.ui.components.eventRemainingText
@@ -121,8 +122,6 @@ import java.util.Locale
 import kotlinx.coroutines.delay
 // perf3（功耗专项）：时钟 60s 循环 lifecycle-aware 化（桌面退后台挂起）
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import kotlin.math.roundToInt
 
 @Composable
@@ -174,21 +173,9 @@ fun HomeScreen(
     /** B6.2：天气当前况（null = 未启用/未就绪）。 */
     weather: com.galaxyrio.gracelauncher.data.weather.WeatherCurrent? = null,
 ) {
-    val clockLifecycleOwner = LocalLifecycleOwner.current
-    val now by produceState(initialValue = Instant.now()) {
-        // perf3（功耗专项）：原实现 while(true) 永续 —— 桌面（宿主 Launcher）退到
-        // 后台后仍每 60s 醒主线程 + 触发重组。改为 repeatOnLifecycle(STARTED)：
-        // 生命周期 ≤ CREATED 时挂起整个循环（零唤醒），回前台自动重启。
-        // 宿主生命周期同步链路：MainHook hook 5b（Launcher.onPause）→
-        // HomeController.notifyHomePaused → GraceHomeView.onHomePaused（推 STOP）；
-        // hook 未命中的宿主版本上 lifecycle 恒为 RESUMED，行为与旧版一致（安全降级）。
-        clockLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                value = Instant.now()
-                delay(60_000 - System.currentTimeMillis() % 60_000)
-            }
-        }
-    }
+    // perf3 公共组件（v2.9.41）：60s 节拍收敛到 rememberMinuteTick（语义同原 perf3 改造，
+    // repeatOnLifecycle(STARTED)；宿主生命周期同步链路 hook 5b → onHomePaused 推 STOP）
+    val now = rememberMinuteTick()
     val event = if (calendarAgenda) nextVisibleEvent(events, now) else null
     var idleMediaDismissed by rememberSaveable(mediaAlwaysVisible) { mutableStateOf(false) }
     LaunchedEffect(homeMedia?.sessionId, homeMedia?.revision) {

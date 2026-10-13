@@ -618,27 +618,32 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             ?: return@openFirst
         launchApp(app, bounds)
     }
-    val rowGestures = AppRowGestures(
-        onPrepare = viewModel::prepareShortcuts,
-        onLaunchAt = { app, bounds -> launchApp(app, bounds) },
-        // 上游同步 v1.1.8：弹层使能 + 左滑开首项（开关 = ShortcutsFoldersSettings）
-        popupsEnabled = state.settings.shortcutsFolders.enabled,
-        onOpenFirst = openFirstItem.takeIf { state.settings.shortcutsFolders.swipeLeftToOpenFirst },
-        onDrag = { app, bounds, expanded ->
-            val current = overlay as? LauncherOverlay.Shortcuts
-            if (current?.app?.key == app.key) {
-                current.reveal.expanded = expanded
-            } else {
-                overlay = LauncherOverlay.Shortcuts(app, bounds, ShortcutRevealState(expanded, dragging = true))
-            }
-        },
-        onDragEnd = { commit ->
-            (overlay as? LauncherOverlay.Shortcuts)?.reveal?.let {
-                it.expanded = commit
-                it.dragging = false
-            }
-        },
-    )
+    // perf（v2.9.41）：AppRowGestures 非 @Stable 类实例，旧实现每次重组新建并下传
+    // HomeScreen/AppDrawerScreen —— 大子树在每次 uiState 变化（含通知快照高频桥推送）
+    // 时跳过不了重组。按语义键 remember：捕获集（viewModel/launchApp/overlay delegate）
+    // 均为稳定引用，shortcutsFolders 变化才重建
+    val rowGestures = remember(state.settings.shortcutsFolders) {
+        AppRowGestures(
+            onPrepare = viewModel::prepareShortcuts,
+            onLaunchAt = { app, bounds -> launchApp(app, bounds) },
+            popupsEnabled = state.settings.shortcutsFolders.enabled,
+            onOpenFirst = openFirstItem.takeIf { state.settings.shortcutsFolders.swipeLeftToOpenFirst },
+            onDrag = { app, bounds, expanded ->
+                val current = overlay as? LauncherOverlay.Shortcuts
+                if (current?.app?.key == app.key) {
+                    current.reveal.expanded = expanded
+                } else {
+                    overlay = LauncherOverlay.Shortcuts(app, bounds, ShortcutRevealState(expanded, dragging = true))
+                }
+            },
+            onDragEnd = { commit ->
+                (overlay as? LauncherOverlay.Shortcuts)?.reveal?.let {
+                    it.expanded = commit
+                    it.dragging = false
+                }
+            },
+        )
+    }
     // 收藏弹层附加行（零功能回退：P1/P2 临时菜单的收藏增删入口迁入弹层尾部）
     val menuEntriesProvider: (LauncherApp) -> List<PopupEntry> = { app ->
         buildList {

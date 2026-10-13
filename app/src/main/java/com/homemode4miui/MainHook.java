@@ -325,7 +325,7 @@ public class MainHook implements IXposedHookLoadPackage {
                     try {
                         Context ctx = contextOf(param, null);
                         if (ctx == null || !ModePrefs.isModeEnabled(ctx) || !notElderlyMan()) return;
-                        java.lang.reflect.Field f = sCurrentModeField();
+                        java.lang.reflect.Field f = sCurrentModeFieldCached();
                         if (f != null) f.set(null, CustomLauncherMode.getInstance());
                     } catch (Throwable t) {
                         log("resetcache callback failed: " + t);
@@ -390,6 +390,18 @@ public class MainHook implements IXposedHookLoadPackage {
      * 定位宿主当前模式字段（版本漂移防护）：
      * 扫描"静态 + LauncherMode 类型 + 名称含 CurrentMode"的字段。
      */
+    /** perf（v2.9.41）：字段扫描结果缓存（字段进程内恒定；null = 未命中，每次模式切换重扫代价可接受） */
+    private static volatile java.lang.reflect.Field sCachedCurrentModeField;
+
+    private static java.lang.reflect.Field sCurrentModeFieldCached() throws Throwable {
+        java.lang.reflect.Field f = sCachedCurrentModeField;
+        if (f == null) {
+            f = sCurrentModeField();
+            sCachedCurrentModeField = f;
+        }
+        return f;
+    }
+
     private static java.lang.reflect.Field sCurrentModeField() throws Throwable {
         for (java.lang.reflect.Field f : LauncherModeController.class.getDeclaredFields()) {
             if (!Modifier.isStatic(f.getModifiers())) continue;
