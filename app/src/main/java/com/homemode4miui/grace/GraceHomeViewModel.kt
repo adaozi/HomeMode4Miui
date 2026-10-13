@@ -107,7 +107,7 @@ data class GraceHomeUiState(
     /** B6.2：日程（宿主进程直读 CalendarProvider）。 */
     val events: List<ScheduleEvent> = emptyList(),
     val scheduleStatus: GraceScheduleStatus = GraceScheduleStatus.PermissionRequired,
-    /** B6.2：天气（模块 App 进程读 Breezy provider 快照桥接）。 */
+    /** B6.2：天气（模块 App 进程读小米天气 provider 快照桥接）。 */
     val weather: WeatherState = WeatherState(),
     // ---- hotfix7：隐藏应用（Room hidden_apps 表直读）----
     val hiddenAppKeys: Set<String> = emptySet(),
@@ -198,8 +198,28 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** P6（B6.1/B6.2/B6.3）：桥快照接收（模块 App 进程 → 宿主进程显式广播）。 */
     private val bridgeReceiver = GraceBridgeReceiver(this)
     /** C 组（C3）：设置命令引擎（模块设置页 → 本进程落 Room/SP → 快照回推）。 */
-    private val settingsHostEngine = GraceSettingsHostEngine(application, viewModelScope, ::onSettingsMutated, ::onBridgeMoveWidget,
-        ::onBridgeAddWidget, ::onBridgeAddPopupWidget, ::onBridgeShortcutQuery)
+    private val settingsHostEngine: GraceSettingsHostEngine by lazy {
+        GraceSettingsHostEngine(application, viewModelScope, ::onSettingsMutated, ::onBridgeMoveWidget,
+            ::onBridgeAddWidget, ::onBridgeAddPopupWidget, ::onBridgeShortcutQuery,
+            weatherJson = {
+                val w = _uiState.value.weather
+                if (w.status == WeatherStatus.Disabled) null else GraceBridge.encodeWeatherWire(w)
+            },
+            onWeatherRefresh = { weatherHostEngine.refresh("settings") })
+    }
+    /**
+     * B6.2 天气宿主引擎：小米天气 provider 白名单放行 com.miui.home、拒绝模块
+     * App 进程（装机实锤 hasAccessProvider 日志），读取在【本进程】进行，
+     * 结果进程内直推 uiState；设置页经快照 weatherJson 回带。
+     * 两个引擎互相引用（设置刷新 ↔ 天气回推快照），by lazy 断开初始化环。
+     */
+    private val weatherHostEngine: GraceWeatherHostEngine by lazy {
+        GraceWeatherHostEngine(
+            application, viewModelScope,
+            preferredLocationId = { settingsHostEngine.currentWeatherLocationId() },
+            onState = ::onWeatherState,
+        )
+    }
     /** 上游同步 v1.1.8 S8b：图标渲染管线（Grace 按钮 artwork 面专用；settings 传入逐次构造）。
      *  context 必须是【模块资源 Context】：ItemIconStore/GraceButtonIcon 解析模块
      *  drawable/string——宿主 MiuiResources 无模块 R id（NotFound）或同 ID 错位
@@ -292,6 +312,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         // notif1：挂载即拉取快照 —— 引擎指纹去重是模块进程持久单例，桌面重启后
         // 重启前的通知/媒体快照不会重发（要等新通知/切歌），必须显式拉取。
         sendBridgeCommand(GraceBridge.Cmd.SNAPSHOT_REFRESH)
+        // B6.2：天气首装载（本进程直读小米天气 provider；后续 ContentObserver 失效）
+        weatherHostEngine.refresh("mount")
         // P3：Room 设置接管 —— SP seed 迁移（一次性）+ 行变化流常驻跟随
         settingsJob = viewModelScope.launch {
             val initial = settingsRepository.loadInitial()
@@ -443,8 +465,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 ModLog.e("GraceHomeViewModel observeSavedShortcuts failed", error)
             }
         }
-        // B6.2：向模块请求一次天气快照（引擎已在监听服务连接时启动；未连接则无回包 = 隐藏）
-        sendBridgeCommand(GraceBridge.Cmd.WEATHER_REFRESH)
+        // B6.2：天气首装载已由 init 的 weatherHostEngine.refresh("mount") 承接
+        // （本进程直读 provider，不再向模块进程请求）
     }
 
     fun refreshApps() {
@@ -944,8 +966,15 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update { it.copy(notifications = notifications) }
     }
 
-    fun onBridgeWeather(weather: WeatherState) {
+    /**
+     * B6.2 天气状态入口：宿主引擎直推（原桥广播路径随天气读取上移废止）。
+     * 更新 uiState 后回推设置快照 —— 设置页天气经快照回带，保证地点选择器/
+     * 状态行与桌面同源。
+     */
+    fun onWeatherState(weather: WeatherState) {
+        if (_uiState.value.weather == weather) return
         _uiState.update { it.copy(weather = weather) }
+        settingsHostEngine.pushSnapshot()
     }
 
     // ---- 命令上行（宿主 → 模块 App 进程；命令在持有 token 的进程内执行）----
@@ -986,9 +1015,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         return true
     }
 
-    /** B6.2：天气刷新请求（模块进程重读 Breezy provider）。 */
+    /** B6.2：天气刷新请求（宿主进程内直读小米天气 provider；ContentObserver 常驻失效）。 */
     fun refreshWeather() {
-        sendBridgeCommand(GraceBridge.Cmd.WEATHER_REFRESH)
+        weatherHostEngine.refresh("manual")
     }
 
     // ---- B6.4：图标包选择（面板数据 + 单选落库）----

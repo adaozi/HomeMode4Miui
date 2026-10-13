@@ -340,3 +340,12 @@ DIFF vs 桩文件:
 **结论**：桩文件与宿主完全对齐，4 个抽象方法齐备 → 这条链路是健康的。
 把这段输出留档，将来换版本时直接 diff 两版输出即可看出差异。
 ```
+
+### miuiweather（v2.9.36-miuiweather / versionCode 69，2026-10-14）—— 天气数据源切换：Breezy Weather → 小米天气（进程内直读）
+
+- [x] **根因（装机实锤）**：小米天气 WeatherProvider（authorities `weather;weatherinfo`，MIUI 主题小部件同一取数入口）有调用方白名单（Wth2:ToolUtils hasAccessProvider 日志）：com.miui.home=true / com.miui.weather2=true / **com.homemode4miui=false** —— 模块 App 进程读 provider 拿 null，桌面显示"无法读取数据"。shell 同样被拒（content query 不可作调试探针）。
+- [x] **架构上移（零新增 hook 目标）**：天气读取整体搬到宿主进程 com.miui.home（白名单放行，hook 代码本就运行其中）。新建 GraceWeatherHostEngine（MiuiWeatherRepository + ContentObserver(content://weather) + encodeWeatherWire 指纹去重），进程内直推 GraceHomeViewModel.onWeatherState；ACTION_WEATHER 广播 / GraceBridge.Cmd.WEATHER_REFRESH / GraceBridgeEngine 天气链废止；设置页天气经 GraceSettingsBridge.Snapshot.weatherJson 回带，刷新走 SETTINGS_COMMAND "settings_weather_refresh"。两引擎互引用 by lazy 断环。
+- [x] **Provider 逆向（天气.apk 16.0.7.17）**：selected_city 表（posID/flag/position/name）；weather 表主键 (city_id, day)，实机实锤 **day=1 = 实况（forecast_type=0）、day≥2 = 预报（ft=1）**；hourlyData/<cityId> 25 行 = 未来 25 整点，**date_time/sunrise/sunset 均为发布日零点起的毫秒偏移**（sunrise mod 24h = 实际日出）；temperature_range 实测 "17℃~28℃" 格式；publish_time = epoch ms；weather_type 为 V7 编码，V7V6_MAP 自 WeatherType clinit 逐条还原（V7 11 = 晴夜，特判 Clear）。
+- [x] **清理**：BreezyWeather{Repository,Parser,Updates} 删除；manifest 去 org.breezyweather.READ_PROVIDER + BreezyWeatherUpdateReceiver，queries 补 `<provider android:authorities="weather"/>`（Android 11+ 包可见性）；UI 动作收敛 openWeatherApp（install 入口删除）；双语字符串换"小米天气"。
+- [x] 构建：assembleRelease 通过，versionCode 69；实机验证 status=Ready locs=2 cur=true、hourly parsed=25（now + 24 小时全渲染）、设置页快照回带带天气，User 目检确认 OK。
+- [ ] **遗留**：① provider 无更新推送 → 依赖 ContentObserver + 挂载首载，若小米天气长期后台不刷新需评估主动唤醒；② weatherappconfig.unit（℃/℉）未消费（恒摄氏）；③ 诊断日志（MiuiWeather rows/hourly）保留至下批清理。

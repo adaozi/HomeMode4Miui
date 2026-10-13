@@ -100,12 +100,8 @@ internal fun WeatherSettings(uiState: LauncherUiState, actions: LauncherActions,
             }
             if (settings.weatherEnabled) {
                 when (status) {
-                    WeatherStatus.NotInstalled -> item {
-                        SettingsActionItem(
-                            stringResource(R.string.weather_settings_install), null, 0, 1, "weather_install",
-                            onClick = actions.installBreezyWeather,
-                        )
-                    }
+                    // 小米天气为系统预装，NotInstalled 实际不可达；无安装入口（固化行为）
+                    WeatherStatus.NotInstalled -> Unit
                     WeatherStatus.PermissionRequired -> item {
                         SettingsActionItem(
                             stringResource(R.string.weather_settings_allow), null, 0, 1, "weather_allow_access",
@@ -116,8 +112,8 @@ internal fun WeatherSettings(uiState: LauncherUiState, actions: LauncherActions,
                     else -> {
                         item {
                             SettingsActionItem(
-                                stringResource(R.string.weather_settings_open), null, 0, 2, "weather_open_breezy",
-                                onClick = actions.openBreezyWeather,
+                                stringResource(R.string.weather_settings_open), null, 0, 2, "weather_open_app",
+                                onClick = actions.openWeatherApp,
                             )
                         }
                         item {

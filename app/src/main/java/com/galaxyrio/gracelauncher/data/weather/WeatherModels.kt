@@ -34,7 +34,7 @@ data class WeatherSnapshot(
     val sourceLinks: Map<String, String> = emptyMap(),
 )
 
-/** The unit is sent by Breezy Weather in the user's preferred scale. */
+/** The unit comes from the weather source (MIUI provider always reports Celsius). */
 data class WeatherTemperature(val value: Double, val unit: String) {
     fun format(showUnit: Boolean = false): String = when (unit) {
         "c" -> "${value.roundToInt()}°${if (showUnit) "C" else ""}"

@@ -41,12 +41,9 @@ class GraceBridgeReceiver(private val viewModel: GraceHomeViewModel) : Broadcast
                 }.getOrDefault(emptyMap())
                 viewModel.onBridgeNotifications(notifications)
             }
-            GraceBridge.ACTION_WEATHER -> {
-                val weather = runCatching {
-                    GraceBridge.decodeWeather(intent.getStringExtra(GraceBridge.EXTRA_JSON))
-                }.getOrNull() ?: return
-                viewModel.onBridgeWeather(weather)
-            }
+            // B6.2 天气不再走广播：provider 白名单（com.miui.home=true /
+            // com.homemode4miui=false）使读取上移宿主进程，GraceWeatherHostEngine
+            // 进程内直推 viewModel.onWeatherState；设置页经快照 weatherJson 回带。
             // C 组（C3）：设置命令（模块设置页 → 本进程落库）。命令面导出后的信任面
             // 评估见 GraceSettingsBridge 头注（伪造 = 等同用户操作设置数据，无宿主安全边界）。
             GraceSettingsBridge.ACTION_SETTINGS_COMMAND -> viewModel.onSettingsCommand(
@@ -64,7 +61,6 @@ class GraceBridgeReceiver(private val viewModel: GraceHomeViewModel) : Broadcast
         fun intentFilter() = android.content.IntentFilter().apply {
             addAction(GraceBridge.ACTION_MEDIA)
             addAction(GraceBridge.ACTION_NOTIFICATIONS)
-            addAction(GraceBridge.ACTION_WEATHER)
             addAction(GraceSettingsBridge.ACTION_SETTINGS_COMMAND)
         }
     }

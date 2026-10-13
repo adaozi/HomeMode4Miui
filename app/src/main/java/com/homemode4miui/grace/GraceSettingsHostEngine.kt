@@ -55,6 +55,10 @@ class GraceSettingsHostEngine(
     /** folders 阶段（hotfix folders2）：弹层 widget 添加（宿主开 WidgetPicker 弹层模式）与快捷方式代查。 */
     private val onAddPopupWidget: (String) -> Unit = {},
     private val onShortcutQuery: (String) -> Unit = {},
+    /** B6.2 天气上移宿主后：当前天气 wire（随快照回带设置页；模块进程被 provider 白名单拒绝）。 */
+    private val weatherJson: () -> String? = { null },
+    /** B6.2：设置页「刷新天气」→ 宿主引擎重读（新数据经 onState → VM 推快照回带）。 */
+    private val onWeatherRefresh: () -> Unit = {},
 ) {
     private val database by lazy { runCatching { LauncherDatabase.getInstance(context) }.getOrNull() }
     private val settingsRepository by lazy { database?.let { LauncherSettingsRepository(it) } }
@@ -62,6 +66,10 @@ class GraceSettingsHostEngine(
     private val favoritesStore by lazy { FavoritesStore(context) }
     private val preferences by lazy { LauncherPreferences(context) }
     private val privateSpace by lazy { runCatching { PrivateSpaceController.get(context) }.getOrNull() }
+
+    /** B6.2：当前首选天气城市（宿主 Room LauncherSettings.weatherLocationId；null = 列表首位）。 */
+    suspend fun currentWeatherLocationId(): String? =
+        settingsRepository?.snapshots?.first()?.settings?.weatherLocationId
 
     /** GraceBridgeReceiver 转发入口（onReceive 主线程；落库走 scope 协程）。 */
     fun handle(cmd: String?, arg1: String?, arg2: String?, json: String?) {
@@ -184,6 +192,9 @@ class GraceSettingsHostEngine(
             // folders 阶段（hotfix folders2）：均为 UI 动作/代查，不触发快照回推
             GraceSettingsBridge.Cmd.ADD_POPUP_WIDGET -> { onAddPopupWidget(arg1 ?: return false); false }
             GraceSettingsBridge.Cmd.SHORTCUTS_QUERY -> { onShortcutQuery(json ?: return false); false }
+            // B6.2：设置页「刷新天气」→ 宿主天气引擎重读；返回 false = 不立即回推，
+            // 新天气在装载完成后由 VM 侧主动推快照回带
+            GraceSettingsBridge.Cmd.WEATHER_REFRESH -> { onWeatherRefresh(); false }
             else -> { ModLog.i("GraceSettingsHostEngine: unknown cmd $cmd"); false }
         }
     }
@@ -205,6 +216,7 @@ class GraceSettingsHostEngine(
                 GraceSettingsBridge.Snapshot(
                     ok = true,
                     settings = snapshot.settings,
+                    weatherJson = weatherJson(),
                     hiddenAppKeys = snapshot.hiddenAppKeys,
                     folders = snapshot.folders,
                     popupsJson = popupsJson,

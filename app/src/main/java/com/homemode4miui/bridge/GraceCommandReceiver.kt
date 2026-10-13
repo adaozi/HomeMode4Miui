@@ -55,10 +55,8 @@ class GraceCommandReceiver : BroadcastReceiver() {
                 GraceBridgeEngine.start(context)
                 GraceBridgeEngine.dismissNotification(key, revision)
             }
-            GraceBridge.Cmd.WEATHER_REFRESH -> {
-                GraceBridgeEngine.start(context)
-                GraceBridgeEngine.refreshWeather()
-            }
+            // B6.2 天气：WEATHER_REFRESH 命令废止 —— 读取上移宿主进程
+            // （GraceWeatherHostEngine），设置页刷新走 SETTINGS_COMMAND 通道。
             // notif1：宿主挂载拉取（清指纹 + 重发当前快照）
             GraceBridge.Cmd.SNAPSHOT_REFRESH -> {
                 GraceBridgeEngine.start(context)

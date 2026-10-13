@@ -1,11 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- P6（B6.2）：Breezy Weather 数据共享 provider 的 custom permission。
-         天气在模块 App 进程内读取（宿主 manifest 不可改，拿不到该 permission），
-         快照经广播桥下发宿主。protectionLevel 由 Breezy 声明（normal 则声明即得）。 -->
-    <uses-permission android:name="org.breezyweather.READ_PROVIDER" />
-
     <!-- hotfix7：包可见性。设置页（模块 App 进程）的应用选择列表自建应用清单
          （AppRepository PackageManager MAIN/LAUNCHER 查询），Android 11+ 无此声明
          只能看到系统默认可见的少数应用 —— 隐藏应用/文件夹/图标包等所有选应用入口
@@ -15,6 +10,9 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- B6.2：小米天气 WeatherProvider 包可见性（Android 11+ resolveContentProvider
+             需要 authority 声明，否则 query content://weather 直接读不到）。 -->
+        <provider android:authorities="weather" />
     </queries>
 
     <application
@@ -90,15 +88,9 @@
              onReceive 内校验发送方 uid 必须为 com.miui.home
              （GraceCommandReceiver.fromHost）。 -->
 
-        <!-- P6（B6.2）：Breezy Weather 官方更新通知器可选回调（数据仍以 provider 快照为准）。
-             exported=true：Breezy 的 Location Update Notifier 显式跨包广播（仅 invalidate
-             快照缓存，不带数据 payload，无命令面）。 -->
-        <receiver
-            android:name="com.galaxyrio.gracelauncher.platform.BreezyWeatherUpdateReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="org.breezyweather.ACTION_UPDATE_NOTIFIER" />
-            </intent-filter>
-        </receiver>
+        <!-- B6.2 天气数据源切换为小米天气（com.miui.weather2）WeatherProvider：
+             exported 读无权限门槛，无需任何 uses-permission；数据失效走
+             GraceBridgeEngine 内动态注册的 ContentObserver（content://weather），
+             原 Breezy UPDATE_NOTIFIER manifest receiver 随之移除。 -->
     </application>
 </manifest>

@@ -50,7 +50,7 @@ object GraceBridge {
     // ---- 快照下发（模块 App 进程 → 宿主进程）----
     const val ACTION_MEDIA = "com.homemode4miui.ACTION_GRACE_MEDIA"
     const val ACTION_NOTIFICATIONS = "com.homemode4miui.ACTION_GRACE_NOTIFICATIONS"
-    const val ACTION_WEATHER = "com.homemode4miui.ACTION_GRACE_WEATHER"
+    // ACTION_WEATHER 废止：天气读取上移宿主进程（GraceWeatherHostEngine），不走广播
 
     // ---- 命令上行（宿主进程 → 模块 App 进程）----
     const val ACTION_COMMAND = "com.homemode4miui.ACTION_GRACE_COMMAND"
@@ -76,7 +76,7 @@ object GraceBridge {
         const val MEDIA_DISMISS = "media_dismiss"      // arg1=sessionId, arg2=revision
         const val NOTIFICATION_OPEN = "notification_open"   // arg1=key, arg2=revision
         const val NOTIFICATION_DISMISS = "notification_dismiss" // arg1=key, arg2=revision
-        const val WEATHER_REFRESH = "weather_refresh"
+        // WEATHER_REFRESH 废止：天气读取上移宿主，设置页刷新走 SETTINGS_COMMAND 通道
         // notif1：宿主挂载拉取快照（无参数）。引擎指纹去重是持久单例 —— 宿主桌面重启后
         // （装新 APK / 桌面进程被杀），重启前发出的通知/媒体快照不会重发，必须显式拉取。
         const val SNAPSHOT_REFRESH = "snapshot_refresh"
@@ -185,50 +185,77 @@ object GraceBridge {
         }
     }.getOrDefault(emptyMap())
 
-    // ================= 天气快照 =================
+    // ================= 天气快照（含 locations 的全量 wire 版） =================
 
-    /** 只编码 UI 消费面（HomeWeather/AgendaSheet）；locations 列表属 WeatherSettings（C 组），不跨桥。 */
-    fun encodeWeather(state: WeatherState): String = JSONObject()
+    /**
+     * 全量 wire：status + snapshot（UI 消费面）+ locations（设置页地点选择器）。
+     * 天气读取在宿主进程（com.miui.home 被天气 provider 白名单放行）后，
+     * 该 wire 有两个去向：随 GraceSettingsBridge.Snapshot 回带设置页（wthr 字段），
+     * 以及宿主进程内 GraceWeatherHostEngine 的指纹去重。
+     */
+    fun encodeWeatherWire(state: WeatherState): String = JSONObject()
         .put("status", state.status.name)
-        .apply {
-            val s = state.snapshot ?: return@apply
-            put("snapshot", JSONObject()
-                .put("locName", s.location.name)
-                .put("tz", s.location.timeZone.id)
-                .put("cur", s.current?.let { JSONObject()
-                    .put("t", it.temperature?.value ?: JSONObject.NULL)
-                    .put("u", it.temperature?.unit ?: JSONObject.NULL)
-                    .put("c", it.condition.name)
-                    .put("d", it.isDaylight)
-                    .put("desc", it.description ?: JSONObject.NULL) } ?: JSONObject.NULL)
-                .put("hourly", JSONArray().apply {
-                    s.hourly.forEach { h ->
-                        put(JSONObject()
-                            .put("at", h.at.toEpochMilli())
-                            .put("t", h.temperature?.value ?: JSONObject.NULL)
-                            .put("u", h.temperature?.unit ?: JSONObject.NULL)
-                            .put("c", h.condition.name)
-                            .put("d", h.isDaylight)
-                            .put("desc", h.description ?: JSONObject.NULL))
-                    }
-                })
-                .put("daily", JSONArray().apply {
-                    s.daily.forEach { d ->
-                        put(JSONObject()
-                            .put("date", d.date.toString())
-                            .put("hi", d.high?.let { JSONObject().put("v", it.value).put("u", it.unit) } ?: JSONObject.NULL)
-                            .put("lo", d.low?.let { JSONObject().put("v", it.value).put("u", it.unit) } ?: JSONObject.NULL)
-                            .put("c", d.condition.name)
-                            .put("desc", d.description ?: JSONObject.NULL))
-                    }
-                })
-                .put("upd", s.updatedAt?.toEpochMilli() ?: JSONObject.NULL)
-                .put("attr", s.attribution))
-        }.toString()
+        .put("snapshot", state.snapshot?.let(::encodeWeatherSnapshot) ?: JSONObject.NULL)
+        .put("locs", JSONArray().apply {
+            state.locations.forEach { l ->
+                put(JSONObject()
+                    .put("id", l.id)
+                    .put("name", l.name)
+                    .put("cur", l.isCurrentPosition))
+            }
+        })
+        .toString()
 
-    fun decodeWeather(json: String?): WeatherState = runCatching {
+    private fun encodeWeatherSnapshot(s: WeatherSnapshot): JSONObject = JSONObject()
+        .put("locId", s.location.id)
+        .put("locName", s.location.name)
+        .put("tz", s.location.timeZone.id)
+        .put("cur", s.current?.let { JSONObject()
+            .put("t", it.temperature?.value ?: JSONObject.NULL)
+            .put("u", it.temperature?.unit ?: JSONObject.NULL)
+            .put("c", it.condition.name)
+            .put("d", it.isDaylight)
+            .put("desc", it.description ?: JSONObject.NULL) } ?: JSONObject.NULL)
+        .put("hourly", JSONArray().apply {
+            s.hourly.forEach { h ->
+                put(JSONObject()
+                    .put("at", h.at.toEpochMilli())
+                    .put("t", h.temperature?.value ?: JSONObject.NULL)
+                    .put("u", h.temperature?.unit ?: JSONObject.NULL)
+                    .put("c", h.condition.name)
+                    .put("d", h.isDaylight)
+                    .put("desc", h.description ?: JSONObject.NULL))
+            }
+        })
+        .put("daily", JSONArray().apply {
+            s.daily.forEach { d ->
+                put(JSONObject()
+                    .put("date", d.date.toString())
+                    .put("hi", d.high?.let { JSONObject().put("v", it.value).put("u", it.unit) } ?: JSONObject.NULL)
+                    .put("lo", d.low?.let { JSONObject().put("v", it.value).put("u", it.unit) } ?: JSONObject.NULL)
+                    .put("c", d.condition.name)
+                    .put("desc", d.description ?: JSONObject.NULL))
+            }
+        })
+        .put("upd", s.updatedAt?.toEpochMilli() ?: JSONObject.NULL)
+        .put("attr", s.attribution)
+
+    fun decodeWeatherWire(json: String?): WeatherState = runCatching {
         val v = JSONObject(json ?: return WeatherState(WeatherStatus.Disabled))
         val status = WeatherStatus.entries.firstOrNull { it.name == v.optString("status") } ?: WeatherStatus.Disabled
+        val locations = v.optJSONArray("locs")?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                runCatching {
+                    val l = arr.getJSONObject(i)
+                    WeatherLocation(
+                        id = l.optString("id"),
+                        name = l.optString("name", "—"),
+                        timeZone = ZoneId.systemDefault(),
+                        isCurrentPosition = l.optBoolean("cur", false),
+                    )
+                }.getOrNull()
+            }
+        } ?: emptyList()
         val snapshot = v.optJSONObject("snapshot")?.let { s ->
             fun temp(o: JSONObject?, keyV: String = "t", keyU: String = "u"): WeatherTemperature? {
                 val unit = o?.opt(keyU) as? String ?: return null
@@ -239,8 +266,8 @@ object GraceBridge {
                 .firstOrNull { it.name == name } ?: com.galaxyrio.gracelauncher.data.weather.WeatherCondition.Unknown
             WeatherSnapshot(
                 location = WeatherLocation(
-                    id = "bridge",
-                    name = s.optString("locName", "Breezy Weather"),
+                    id = s.optString("locId", "host"),
+                    name = s.optString("locName", "MIUI Weather"),
                     timeZone = runCatching { ZoneId.of(s.getString("tz")) }.getOrDefault(ZoneId.systemDefault()),
                 ),
                 current = s.optJSONObject("cur")?.let { c ->
@@ -283,7 +310,12 @@ object GraceBridge {
                 attribution = s.optString("attr", ""),
             )
         }
-        WeatherState(status = status, snapshot = snapshot)
+        WeatherState(
+            status = status,
+            snapshot = snapshot,
+            locations = locations,
+            selectedLocationId = snapshot?.location?.id,
+        )
     }.getOrDefault(WeatherState(WeatherStatus.Disabled))
 
     // ================= 命令构造 =================

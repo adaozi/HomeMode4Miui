@@ -72,6 +72,7 @@ object GraceSettingsBridge {
         const val PS_REORDER = "settings_ps_reorder"             // EXTRA_JSON = [key..]
         const val PS_RESET_APPEARANCE = "settings_ps_reset"      // 回传快照 extra 带 ok 标志
         const val MOVE_WIDGET = "settings_move_widget"           // UI 动作命令：桌面进入 widget 编辑模式（无参数，不回推快照）
+        const val WEATHER_REFRESH = "settings_weather_refresh"   // UI 动作命令：宿主重读天气（新天气随下次快照回带）
         const val ADD_WIDGET = "settings_add_widget"             // UI 动作命令：桌面开 WidgetPicker（无参数，不回推快照）
         // folders 阶段（hotfix folders2）：
         const val ADD_POPUP_WIDGET = "settings_add_popup_widget" // UI 动作命令：EXTRA_ARG1 = ownerKey（桌面开 WidgetPicker 弹层模式）
@@ -281,6 +282,12 @@ object GraceSettingsBridge {
         val renames: Map<String, String> = emptyMap(),
         val categories: Map<String, String> = emptyMap(),
         val privateSpace: PrivateSpaceWire? = null,
+        /**
+         * 天气全量 wire（GraceBridge.encodeWeatherWire 产物）：天气读取已上移宿主
+         * 进程（com.miui.home 在天气 provider 白名单内），设置页（模块 App 进程）
+         * 被白名单拒绝，只能随本快照回带。null = 宿主尚无天气数据。
+         */
+        val weatherJson: String? = null,
         /** 已落库标志：false = 宿主引擎不可达（第四模式未挂载），设置页只读。 */
         val ok: Boolean = true,
     )
@@ -316,6 +323,7 @@ object GraceSettingsBridge {
             .put("supported", p.supported).put("serial", p.serial).put("locked", p.locked)
             .put("accessible", p.accessible).put("revision", p.revision).put("lockVersion", p.lockVersion) }
             ?: JSONObject.NULL)
+        .put("wthr", s.weatherJson ?: JSONObject.NULL)
         .toString()
 
     fun decodeSnapshot(json: String?): Snapshot? = runCatching {
@@ -355,6 +363,7 @@ object GraceSettingsBridge {
                 locked = p.optBoolean("locked", true), accessible = p.optBoolean("accessible", false),
                 revision = p.optInt("revision"), lockVersion = p.optInt("lockVersion"),
             ) },
+            weatherJson = v.optString("wthr").takeIf(String::isNotBlank),
         )
     }.getOrNull()
 

@@ -41,7 +41,7 @@ data class GraceHomeSettings(
     val mediaPlayer: Boolean = true,
     /** B6.1：无播放会话时常驻占位播放器（原版默认 false）。 */
     val mediaAlwaysVisible: Boolean = false,
-    /** B6.2：天气（原版默认 false；实际显示还需模块 App 读到 Breezy provider 快照）。 */
+    /** B6.2：天气（原版默认 false；实际显示还需模块 App 读到小米天气 provider 快照）。 */
     val weatherEnabled: Boolean = false,
     /** B6.2：Agenda 面板预报天数（原版默认 7，clamp 1..14）。 */
     val weatherForecastDays: Int = 7,

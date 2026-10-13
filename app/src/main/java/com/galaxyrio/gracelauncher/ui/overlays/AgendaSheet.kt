@@ -12,8 +12,8 @@
  *   - 原版 ModalBottomSheet（独立窗口，hotfix2 资源错位坑）→ 同窗口面板
  *     （LauncherOverlays 分发时已置于宿主 Compose 树内）
  *   - newEvent/openEvent → 系统日历 Intent（原版日历写路径的降级等价）；
- *     requestWeatherAccess → 引导打开模块 App（READ_PROVIDER 运行时授权在模块
- *     进程完成）；installBreezyWeather → 市场/安装意图，失败 Toast。
+ *     requestWeatherAccess → 引导刷新（provider 无权限门槛，本动作即重拉快照）；
+ *     openWeatherApp → 打开小米天气（未装走市场兜底），失败 Toast。
  */
 package com.galaxyrio.gracelauncher.ui.overlays
 
@@ -81,8 +81,7 @@ fun AgendaSheet(
     scheduleStatus: GraceScheduleStatus,
     onRefreshAgenda: () -> Unit,
     onRefreshWeather: () -> Unit,
-    onOpenBreezy: () -> Unit,
-    onInstallBreezy: () -> Unit,
+    onOpenWeather: () -> Unit,
     onRequestCalendar: () -> Unit,
     onOpenEvent: (ScheduleEvent) -> Unit,
     onNewEvent: () -> Unit,
@@ -169,10 +168,10 @@ fun AgendaSheet(
                         if (date == today) {
                             if (snapshot != null) item(key = "today_weather") {
                                 HourlyWeather(snapshot, now)
-                                WeatherSourceNote(snapshot, now, onOpenBreezy)
+                                WeatherSourceNote(snapshot, now, onOpenWeather)
                             }
                             else if (weatherEnabled && weather.status != WeatherStatus.Loading) item(key = "weather_unavailable") {
-                                WeatherConnectionNotice(weather.status, onInstallBreezy, onOpenBreezy, onRefreshWeather)
+                                WeatherConnectionNotice(weather.status, onOpenWeather, onRefreshWeather)
                             }
                             // Calendar access is independent of weather access: keep the forecast visible
                             // when the user has not connected a calendar, or its provider fails.
@@ -209,12 +208,14 @@ fun AgendaSheet(
 }
 
 @Composable
-private fun WeatherConnectionNotice(status: WeatherStatus, onInstall: () -> Unit, onOpen: () -> Unit, onRefresh: () -> Unit) {
+private fun WeatherConnectionNotice(status: WeatherStatus, onOpen: () -> Unit, onRefresh: () -> Unit) {
+    // 小米天气（com.miui.weather2）为系统预装：NotInstalled/UnsupportedVersion 实际不可达，
+    // 统一收敛到"打开天气"动作（未装时 openWeatherApp 内部走市场兜底）。
     val (message, label, onClick) = when (status) {
         WeatherStatus.Disabled, WeatherStatus.Loading -> return
-        WeatherStatus.NotInstalled -> Triple(R.string.weather_settings_not_installed, R.string.weather_settings_install, onInstall)
+        WeatherStatus.NotInstalled -> Triple(R.string.weather_settings_not_installed, R.string.weather_settings_open, onOpen)
         WeatherStatus.PermissionRequired -> Triple(R.string.weather_settings_permission, R.string.weather_settings_open, onOpen)
-        WeatherStatus.UnsupportedVersion -> Triple(R.string.weather_settings_incompatible, R.string.weather_settings_install, onInstall)
+        WeatherStatus.UnsupportedVersion -> Triple(R.string.weather_settings_incompatible, R.string.weather_settings_open, onOpen)
         WeatherStatus.NoLocations -> Triple(R.string.weather_settings_no_locations, R.string.weather_settings_open, onOpen)
         WeatherStatus.NoWeather, WeatherStatus.Ready -> Triple(R.string.weather_settings_no_data, R.string.weather_settings_open, onOpen)
         WeatherStatus.Error -> Triple(R.string.weather_settings_unavailable, R.string.retry, onRefresh)
@@ -296,25 +297,15 @@ object AgendaIntents {
         }
     }
 
-    fun openBreezy(context: android.content.Context) {
+    fun openWeatherApp(context: android.content.Context) {
         runCatching {
-            context.packageManager.getLaunchIntentForPackage("org.breezyweather")?.let {
+            context.packageManager.getLaunchIntentForPackage(
+                com.galaxyrio.gracelauncher.data.weather.MiuiWeatherRepository.PACKAGE_NAME)?.let {
                 it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(it)
             } ?: Toast.makeText(context, R.string.action_unavailable, Toast.LENGTH_SHORT).show()
         }.onFailure { error ->
-            if (error !is ActivityNotFoundException) com.homemode4miui.util.ModLog.e("AgendaIntents openBreezy failed", error)
-            Toast.makeText(context, R.string.action_unavailable, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun installBreezy(context: android.content.Context) {
-        runCatching {
-            val market = Intent(Intent.ACTION_VIEW,
-                Uri.parse("market://details?id=org.breezyweather")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(market)
-        }.getOrElse { error ->
-            if (error !is ActivityNotFoundException) com.homemode4miui.util.ModLog.e("AgendaIntents installBreezy failed", error)
+            if (error !is ActivityNotFoundException) com.homemode4miui.util.ModLog.e("AgendaIntents openWeatherApp failed", error)
             Toast.makeText(context, R.string.action_unavailable, Toast.LENGTH_SHORT).show()
         }
     }

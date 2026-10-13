@@ -192,7 +192,7 @@ private fun HourlyWeatherCell(
 }
 
 @Composable
-fun WeatherSourceNote(snapshot: WeatherSnapshot, now: Instant, onOpenBreezy: () -> Unit) {
+fun WeatherSourceNote(snapshot: WeatherSnapshot, now: Instant, onOpenWeather: () -> Unit) {
     val locale = LocalConfiguration.current.locales[0]
     val use24Hour = DateFormat.is24HourFormat(LocalContext.current)
     val timeFormat = remember(locale, use24Hour, snapshot.location.timeZone) {
@@ -211,7 +211,7 @@ fun WeatherSourceNote(snapshot: WeatherSnapshot, now: Instant, onOpenBreezy: () 
         Text(
             "${snapshot.location.name} · $updateLabel",
             modifier = Modifier.fillMaxWidth().testTag("weather_location")
-                .clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onOpenBreezy)
+                .clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onOpenWeather)
                 .padding(vertical = 4.dp),
             fontSize = 11.sp, lineHeight = 16.sp,
             color = if (stale) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -224,7 +224,7 @@ fun WeatherSourceNote(snapshot: WeatherSnapshot, now: Instant, onOpenBreezy: () 
 @Composable
 fun WeatherAttribution(snapshot: WeatherSnapshot, modifier: Modifier = Modifier) {
     val sourceLabel = snapshot.attribution.takeIf { it.isNotBlank() }
-        ?: stringResource(R.string.weather_via_breezy)
+        ?: stringResource(R.string.weather_via_source)
     val linkColor = MaterialTheme.colorScheme.primary
     val credits = remember(sourceLabel, snapshot.sourceLinks, linkColor) {
         weatherCredits(sourceLabel, snapshot.sourceLinks, linkColor)
@@ -233,7 +233,7 @@ fun WeatherAttribution(snapshot: WeatherSnapshot, modifier: Modifier = Modifier)
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** Preserve the complete credit text and attach source/license links supplied by Breezy. */
+/** Preserve the complete credit text and attach source/license links supplied by the weather source. */
 private fun weatherCredits(text: String, links: Map<String, String>, linkColor: Color): AnnotatedString = buildAnnotatedString {
     append(text)
     val styles = TextLinkStyles(style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))

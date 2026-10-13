@@ -3,7 +3,7 @@
  *
  * 语义对齐原版 LauncherViewModel 的设置面（GPL-3.0），但数据通路换桥：
  *   - 读：GraceSettingsSnapshotStore（宿主快照）+ 模块本地查询（应用列表/图标包/天气/
- *     快捷方式 —— PackageManager/LauncherApps/Breezy provider 在模块进程可直接访问）；
+ *     快捷方式 —— PackageManager/LauncherApps/小米天气 provider 在模块进程可直接访问）；
  *   - 写：LauncherActions.updateSettings 等 → 乐观更新本地状态 + GraceSettingsBridge
  *     命令广播 → 宿主 GraceSettingsHostEngine 落 Room/SP → 快照回推（权威态收敛）。
  *
@@ -41,7 +41,7 @@ import com.galaxyrio.gracelauncher.data.ShortcutStatus
 import com.galaxyrio.gracelauncher.data.WallpaperTextMode
 import com.galaxyrio.gracelauncher.data.icons.IconPackRepository
 import com.galaxyrio.gracelauncher.data.media.MediaCommand
-import com.galaxyrio.gracelauncher.data.weather.BreezyWeatherRepository
+import com.galaxyrio.gracelauncher.data.weather.MiuiWeatherRepository
 import com.galaxyrio.gracelauncher.platform.PrivateSpaceController
 import com.galaxyrio.gracelauncher.platform.PrivateSpaceState
 import com.galaxyrio.gracelauncher.ui.LauncherActions
@@ -67,7 +67,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val appRepository = AppRepository(application)
     private val iconPacksRepository = IconPackRepository(application)
-    private val weatherRepository = BreezyWeatherRepository(application)
     private val shortcutRepository = ShortcutRepository(application)
     private val settingsWriteMutex = Mutex()
 
@@ -146,18 +145,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * B6.2：天气数据已上移宿主进程（小米天气 provider 白名单拒绝模块 App 进程，
+     * 装机实锤 hasAccessProvider=false），本进程不再直读 —— 刷新 = 发宿主命令，
+     * 新天气经 GraceSettingsBridge.Snapshot.weatherJson 回带（applySnapshot 解出）。
+     */
     fun refreshWeather() {
-        viewModelScope.launch {
-            val state = runCatching {
-                weatherRepository.load(_uiState.value.settings.weatherLocationId)
-            }.getOrElse { _uiState.value.weather }
-            _uiState.update { it.copy(weather = state) }
-        }
+        // 天气读取在宿主进程；新数据装载完成后宿主主动推快照回带（applySnapshot 解出）
+        send(GraceSettingsBridge.Cmd.WEATHER_REFRESH)
     }
 
     /** 快照 → uiState（模块本地查询面保留，桥面覆盖）。 */
     private fun applySnapshot(snapshot: GraceSettingsBridge.Snapshot) {
         val previousWeatherLocationId = _uiState.value.settings.weatherLocationId
+        // B6.2：天气随快照回带（宿主进程读取；null = 宿主尚无数据，保持现状）
+        val bridgedWeather = snapshot.weatherJson?.let { json ->
+            runCatching { com.homemode4miui.bridge.GraceBridge.decodeWeatherWire(json) }.getOrNull()
+        }
         _uiState.update { current ->
             current.copy(
                 isLoadingSettings = false,
@@ -183,14 +187,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     PrivateSpaceState(supported = it.supported, user = null, serial = it.serial,
                         locked = it.locked, accessible = it.accessible, revision = it.revision, lockVersion = it.lockVersion)
                 } ?: current.privateSpace,
+                weather = bridgedWeather ?: current.weather,
             )
         }
         // 图标包顺序可能变了 → 应用列表装饰链刷新
         refreshApps()
-        // C 组（C4）：weatherLocationId 变化 → 触发本进程桥引擎按首选位置重拉天气并下发宿主
+        // C 组（C4）：weatherLocationId 变化 → 宿主天气引擎按首选城市重读（新数据随快照回带）
         if (previousWeatherLocationId != snapshot.settings.weatherLocationId) {
-            com.homemode4miui.bridge.GraceBridgeEngine.start(getApplication())
-            com.homemode4miui.bridge.GraceBridgeEngine.refreshWeather()
+            send(GraceSettingsBridge.Cmd.WEATHER_REFRESH)
         }
     }
 
@@ -367,8 +371,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             viewModelScope.launch { _closeRequests.emit(Unit) }
         },
         refreshWeather = ::refreshWeather,
-        openBreezyWeather = ::openBreezy,
-        installBreezyWeather = ::openBreezy,
+        openWeatherApp = ::openWeatherApp,
     )
 
     private suspend fun applySettingsSuspend(transform: (LauncherSettings) -> LauncherSettings): Boolean =
@@ -502,14 +505,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun openBreezy() {
+    private fun openWeatherApp() {
+        // 天气读取在宿主进程，但拉起入口仍在模块进程（MAIN/LAUNCHER queries 覆盖可见性）
         val context = getApplication<Application>()
-        val pkg = weatherRepository.installedPackage() ?: run {
+        val launch = runCatching {
+            context.packageManager.getLaunchIntentForPackage(MiuiWeatherRepository.PACKAGE_NAME)
+        }.getOrNull()
+        if (launch != null) {
+            runCatching { context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        } else {
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW,
-                Uri.parse("market://details?id=org.breezyweather")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            return
+                Uri.parse("market://details?id=${MiuiWeatherRepository.PACKAGE_NAME}"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }
-        runCatching { context.startActivity(context.packageManager.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
     private fun encodeFolder(folder: LauncherFolder): String = JSONObject()

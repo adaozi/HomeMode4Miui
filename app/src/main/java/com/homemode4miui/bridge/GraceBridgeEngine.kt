@@ -7,9 +7,11 @@
  *   1. 收集进程内单例 appNotifications（B6.3 通知快照）与 MediaSessionRepository
  *      （B6.1 媒体快照，原样搬运，token/controller 全在本进程内），序列化 JSON 后
  *      显式广播给宿主 com.miui.home；封面走独立 JPEG bytes extra（见 BridgeContract）。
- *   2. Breezy Weather provider 读取（B6.2 天气）：READ_PROVIDER 是 Breezy 声明的
- *      custom permission，宿主 manifest 不可改拿不到 —— 因此天气也在本进程读
- *      （模块 manifest 已声明 uses-permission），快照经同一广播桥下发。
+ *   2. 【已废止】天气链：小米天气 WeatherProvider 有调用方白名单
+ *      （hasAccessProvider：com.miui.home=true / com.homemode4miui=false，装机
+ *      实锤），模块 App 进程读不到数据。天气读取上移宿主进程
+ *      （GraceWeatherHostEngine，白名单放行），快照进程内直推 + 设置页随
+ *      GraceSettingsBridge.Snapshot 回带，本引擎只剩通知/媒体两路。
  *   3. 宿主命令执行（GraceCommandReceiver 转发）：媒体控制/通知打开与清除 ——
  *      token 只在本进程可用（Parcel 含 binder 不可落盘），命令必须回到本进程执行。
  *
@@ -27,9 +29,6 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import com.galaxyrio.gracelauncher.data.media.MediaCommand
 import com.galaxyrio.gracelauncher.data.media.MediaSessionRepository
 import com.galaxyrio.gracelauncher.data.notifications.appNotifications
-import com.galaxyrio.gracelauncher.data.weather.BreezyWeatherRepository
-import com.galaxyrio.gracelauncher.data.weather.WeatherState
-import com.galaxyrio.gracelauncher.data.weather.WeatherStatus
 import com.homemode4miui.util.ModLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,12 +46,10 @@ object GraceBridgeEngine {
     @Volatile private var started = false
     private var scope: CoroutineScope? = null
     private var mediaRepository: MediaSessionRepository? = null
-    private var weatherRepository: BreezyWeatherRepository? = null
 
     // 去重指纹：状态未变化不重发（媒体进度心跳已被原版 callback 过滤，此处兜底）
     private var lastNotificationsFingerprint: String? = null
     private var lastMediaFingerprint: String? = null
-    private var lastWeatherFingerprint: String? = null
 
     /** 由 MediaNotificationListener.onListenerConnected / GraceCommandReceiver 懒触发。 */
     fun start(appContext: Context) {
@@ -67,9 +64,6 @@ object GraceBridgeEngine {
             mediaRepository = runCatching { MediaSessionRepository(app) }
                 .onFailure { ModLog.e("GraceBridgeEngine MediaSessionRepository init failed", it) }
                 .getOrNull()
-            weatherRepository = runCatching { BreezyWeatherRepository(app) }
-                .onFailure { ModLog.e("GraceBridgeEngine weather repo init failed", it) }
-                .getOrNull()
             started = true
             runCatching { mediaRepository?.setEnabled(true) }
                 .onFailure { ModLog.e("GraceBridgeEngine enable media failed", it) }
@@ -82,7 +76,7 @@ object GraceBridgeEngine {
             com.homemode4miui.bridge.RootKeepAlive.apply(app)
             // hotfix4 诊断：本日志只落 logcat（tag HomeMode4Miui）——模块进程内
             // XposedBridge.log 不可用，LSPosed modules 日志看不到本进程输出
-            ModLog.i("GraceBridgeEngine started (module process bridge live, media=${mediaRepository != null}, weather=${weatherRepository != null})")
+            ModLog.i("GraceBridgeEngine started (module process bridge live, media=${mediaRepository != null})")
         }
     }
 
@@ -156,37 +150,6 @@ object GraceBridgeEngine {
                 }
             }.onFailure { ModLog.e("GraceBridgeEngine media observe failed", it) }
         }
-        // B6.2：天气（装载时一次 + 宿主命令触发刷新）
-        refreshWeather()
-    }
-
-    /** Breezy provider 读取全程 IO + runCatching；结果经广播下发（含不可用状态）。 */
-    fun refreshWeather() {
-        val engineScope = scope ?: return
-        val repository = weatherRepository ?: return
-        engineScope.launch {
-            // C 组（C4）：weatherLocationId 宿主消费链 —— 设置页把该列写进宿主 Room 后，
-            // 快照回带模块进程，这里按首选 location 读取（null = Breezy 首个位置，原版语义）
-            val preferred = GraceSettingsSnapshotStore.lastKnownSettings?.weatherLocationId
-            runCatching { repository.load(preferred) }
-                .onSuccess { state -> publishWeather(state) }
-                .onFailure { ModLog.e("GraceBridgeEngine weather load failed", it) }
-        }
-    }
-
-    private fun publishWeather(state: WeatherState) {
-        // 禁用/未安装状态不下发：宿主侧快照保持过期 = 天气组件自然隐藏（降级语义）
-        if (state.status == WeatherStatus.Disabled || state.status == WeatherStatus.NotInstalled) {
-            if (lastWeatherFingerprint != null) {
-                lastWeatherFingerprint = null
-                send(GraceBridge.ACTION_WEATHER, "", null)
-            }
-            return
-        }
-        val json = GraceBridge.encodeWeather(state)
-        if (json == lastWeatherFingerprint) return
-        lastWeatherFingerprint = json
-        send(GraceBridge.ACTION_WEATHER, json, null)
     }
 
     private fun send(action: String, json: String, art: ByteArray?) {
@@ -343,7 +306,7 @@ object GraceBridgeEngine {
                 GraceBridge.encodeNotifications(appNotifications.state.value), null)
         }.onFailure { ModLog.e("GraceBridgeEngine refreshSnapshots notifications failed", it) }
         // 媒体快照含封面编码（Dispatchers.Default），走引擎协程
-        scope?.launch { publishMediaCurrent(); refreshWeather() }
+        scope?.launch { publishMediaCurrent() }
         ModLog.i("GraceBridgeEngine refreshSnapshots (pull on host mount)")
     }
 
