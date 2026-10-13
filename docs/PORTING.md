@@ -426,4 +426,4 @@ DIFF vs 桩文件:
 - [x] **Route 状态机收编 holder**：新建 grace/GraceButtonTransitionState.kt（沿 FavoritesReorderState 状态 holder 模式）—— transition/instantEntrance 状态 + searchTransition/drawerTransition 派生 + begin/clear/markInstantEntrance/clearInstantEntrance/onLifecycleEvent（前台清账：ON_PAUSE 记 leftForeground、未提交锁屏即清、回前台清残留）。锁屏末帧提交协程（withFrameNanos + GraceSystemActions + 1.5s 验证）依赖 context/lifecycle 留 Route LaunchedEffect，键改读 buttonState.transition。
 - [x] Route 消费点全部切换（performGestureAction 守卫/entrance/begin×3、widgetInputEnabled、GraceButton enabled/hidden/heldOrigin、TransitionOverlay、rememberUpdatedState 删除），代码标识符零残留。
 - [x] 构建：assembleRelease 通过，versionCode 78。
-- [ ] **遗留（refactor4，最后一批）**：GraceHomeUiState 30+ 字段按消费面拆分（动全部消费面，需专项设计）。
+- [ ] **遗留（refactor4）**：GraceHomeUiState 拆分 —— **设计定稿挂起**（docs/UISTATE_SPLIT_DESIGN.md：字段→消费面矩阵 + 三阶段方案）。结论：热路径已被 perf 批治理、settings 低频占 76% 读取量、Phase 2 侵入面与收益不成比；触发条件 = profiler 实测热点 / 新增高频状态面 / 大版本顺路重构。
