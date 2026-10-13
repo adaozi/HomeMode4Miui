@@ -501,8 +501,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
 
     // 上游同步 v1.1.8 S3：手势/按钮动作分发（原版 LauncherScreen.performGestureAction 语义，
     // 模块适配：① GraceButtonTransition 英雄动画随 S4；② 无障碍三动作（锁屏/通知栏/快捷设置）
-    // 走 GRACE 桥 Cmd.SYSTEM_ACTION 跨进程委派给模块 App 进程的 GraceAccessibilityService；
-    // Website/Assistant 宿主进程内直接 startActivity（无需无障碍）。
+    // 经 GraceSystemActions 本进程三层链执行（原生 → root → 无障碍；SYSTEM_ACTION 跨进程
+    // 委派路径已废止删除）；Website/Assistant 宿主进程内直接 startActivity（无需无障碍）。
     val homeGestureRadius = with(androidx.compose.ui.platform.LocalDensity.current) { 24.dp.toPx() }
     fun performGestureAction(target: com.galaxyrio.gracelauncher.data.GraceButtonTarget,
         origin: com.galaxyrio.gracelauncher.ui.components.GraceButtonOrigin,

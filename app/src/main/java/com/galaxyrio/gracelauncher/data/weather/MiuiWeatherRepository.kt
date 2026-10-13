@@ -87,14 +87,18 @@ class MiuiWeatherRepository(context: Context) {
         null
     }
 
-    /** 数据变化失效回调（模块进程桥引擎注册；provider 侧无更新广播，ContentObserver 是唯一可靠信号）。 */
-    fun observeChanges(onChange: () -> Unit) {
+    /**
+     * 数据变化失效回调（宿主引擎注册；provider 侧无更新广播，ContentObserver 是唯一
+     * 可靠信号）。返回注册的 observer 供调用方 dispose 时反注册。
+     */
+    fun observeChanges(onChange: () -> Unit): android.database.ContentObserver {
         val resolver = appContext.contentResolver
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val observer = object : android.database.ContentObserver(handler) {
             override fun onChange(selfChange: Boolean) = onChange()
         }
         resolver.registerContentObserver("content://$AUTHORITY".toUri(), true, observer)
+        return observer
     }
 
     suspend fun load(preferredLocationId: String? = null): WeatherState = withContext(Dispatchers.IO) {

@@ -36,12 +36,31 @@ internal object GraceRootActions {
         val cmd = commandFor[action] ?: return false
         Thread {
             val ok = try {
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                val exit = process.waitFor()
-                process.inputStream.close(); process.errorStream.close(); process.outputStream.close()
-                lastRootResult = exit == 0
-                if (exit != 0) ModLog.i("GraceRootActions root exit=$exit cmd=$cmd")
-                exit == 0
+                // hotfix：读流与等待并发（读流放独立线程排水）—— 旧实现 waitFor 在关流
+                // 之前，输出超管道缓冲区（~64KB）会令子进程写阻塞、waitFor 永不返回。
+                // waitFor 带超时强杀 + finally destroy 兜底，杜绝孤儿进程。
+                val process = ProcessBuilder("su", "-c", cmd)
+                    .redirectErrorStream(true)
+                    .start()
+                try {
+                    val reader = Thread { process.inputStream.bufferedReader().readText() }
+                    reader.isDaemon = true
+                    reader.start()
+                    val exit = if (process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
+                        // 进程已退出 → 流已 EOF，reader 收尾即完成
+                        reader.join(2_000)
+                        runCatching { process.exitValue() }.getOrDefault(-1)
+                    } else {
+                        process.destroyForcibly()
+                        ModLog.i("GraceRootActions root timeout cmd=$cmd")
+                        Int.MIN_VALUE
+                    }
+                    lastRootResult = exit == 0
+                    if (exit != 0) ModLog.i("GraceRootActions root exit=$exit cmd=$cmd")
+                    exit == 0
+                } finally {
+                    runCatching { process.destroy() }
+                }
             } catch (t: Throwable) {
                 // IOException = 无 su（未 root 或 Magisk 未装）；SecurityException = 授权策略拒绝
                 lastRootResult = false

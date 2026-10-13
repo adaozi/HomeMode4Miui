@@ -510,7 +510,10 @@ public final class HomeController {
                 notifyPackagesChanged();
             }
         };
-        ctx.registerReceiver(r, f);
+        // hotfix：用 ApplicationContext 注册/反注册 —— Launcher 重建时 detach 传入的
+        // 是新 Activity 的 ContextImpl，用它反注册旧 ContextImpl 注册的接收器必抛
+        // IllegalArgumentException（曾被吞 → 旧接收器持旧 Activity 泄漏 + 广播双份分发）
+        ctx.getApplicationContext().registerReceiver(r, f);
         sPkgReceiver = r;
     }
 
@@ -518,8 +521,9 @@ public final class HomeController {
         BroadcastReceiver r = sPkgReceiver;
         if (r != null) {
             try {
-                ctx.unregisterReceiver(r);
-            } catch (Throwable ignored) {
+                ctx.getApplicationContext().unregisterReceiver(r);
+            } catch (Throwable t) {
+                com.homemode4miui.util.ModLog.e("HomeController unregisterPkgReceiver failed", t);
             }
             sPkgReceiver = null;
         }

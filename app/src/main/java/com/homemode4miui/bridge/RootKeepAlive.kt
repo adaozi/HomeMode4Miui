@@ -39,23 +39,14 @@ object RootKeepAlive {
     /** 已成功应用过（进程内幂等）：重复 ensure 直接回调成功，不重跑三项。 */
     @Volatile private var applied = false
 
+    /** hotfix：ensure/apply 双入口收敛到同一把锁 + 同一协议 —— 旧实现两者互不感知
+     *  （apply 后台执行三项时用户点按钮触发 ensure → 并发重复 su 写 PowerKeeper/装脚本）。 */
+    private val gate = Any()
+
     /** gate1：带结果回调的探测 + 应用入口（模块首页按钮调用）。 */
     fun ensure(onResult: (Boolean) -> Unit) {
         Thread {
-            val ok = runCatching {
-                if (applied) return@runCatching true
-                if (su("echo ok") == null) {
-                    ModLog.i("RootKeepAlive: probe failed (no root or denied)")
-                    return@runCatching false
-                }
-                ModLog.i("RootKeepAlive: su granted, applying keep-alive")
-                applyDozeWhitelist()
-                applyPowerKeeperPolicy()
-                applyAutostart()
-                installBootScript()
-                applied = true
-                true
-            }.getOrDefault(false)
+            val ok = tryRun()
             android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(ok) }
         }.start()
     }
@@ -69,25 +60,34 @@ object RootKeepAlive {
 
     /** 由引擎启动触发（listener 连接 / 命令首次到达）。后台线程执行，永不阻塞主线程。 */
     fun apply(@Suppress("UNUSED_PARAMETER") context: Context) {
-        if (attempted) return
-        synchronized(this) {
-            if (attempted) return
+        Thread { tryRun() }.start()
+    }
+
+    /**
+     * 单飞：整个流程持锁执行（全 su 命令各带 10s 超时，最坏有界）。
+     * 锁语义保证正确性：ensure 获取锁时若 apply 正在执行会等它完成后复判 ——
+     * applied=true 返回成功；apply 已完整跑过且失败（attempted=true）返回 false，
+     * 不重试不重入（「进程内只尝试一轮」文档语义）。
+     */
+    private fun tryRun(): Boolean {
+        synchronized(gate) {
+            if (applied) return true
+            if (attempted) return false
             attempted = true
-            Thread {
-                runCatching {
-                    // su 可用性探测（无 root / 未授权 = IOException 或非零退出）
-                    if (su("echo ok") == null) {
-                        ModLog.i("RootKeepAlive: su unavailable (no root or denied) — notif7 self-heal chain remains")
-                        return@Thread
-                    }
-                    ModLog.i("RootKeepAlive: su granted, applying keep-alive")
-                    applyDozeWhitelist()
-                    applyPowerKeeperPolicy()
-                    applyAutostart()
-                    installBootScript()
-                    applied = true
-                }.onFailure { ModLog.e("RootKeepAlive: apply failed", it) }
-            }.start()
+            return runCatching {
+                // su 可用性探测（无 root / 未授权 = IOException 或非零退出）
+                if (su("echo ok") == null) {
+                    ModLog.i("RootKeepAlive: su unavailable (no root or denied) — notif7 self-heal chain remains")
+                    return false
+                }
+                ModLog.i("RootKeepAlive: su granted, applying keep-alive")
+                applyDozeWhitelist()
+                applyPowerKeeperPolicy()
+                applyAutostart()
+                installBootScript()
+                applied = true
+                true
+            }.onFailure { ModLog.e("RootKeepAlive: apply failed", it) }.getOrDefault(false)
         }
     }
 
@@ -110,9 +110,12 @@ object RootKeepAlive {
             "UPDATE app_info SET backgroundPolicy=0 WHERE packageName='$PKG'",
         )
         variants.forEach { sql ->
-            val out = su("sqlite3 $db \"$sql\"")
-            if (out != null) {
-                ModLog.i("RootKeepAlive: powerkeeper policy applied (${sql.take(40)}...)")
+            // hotfix：退出码 0 ≠ 生效（0 行 UPDATE 同样成功）；同连接追加 SELECT changes()
+            // 校验实改行数（sqlite3 每次 invocations 是新连接，必须与 UPDATE 同进程内执行）
+            val out = su("sqlite3 $db \"$sql; SELECT changes();\"")
+            val changed = out?.trim()?.lineSequence()?.lastOrNull()?.toIntOrNull()
+            if (out != null && changed != null && changed > 0) {
+                ModLog.i("RootKeepAlive: powerkeeper policy applied (${sql.take(40)}... rows=$changed)")
                 return
             }
         }
@@ -159,22 +162,23 @@ object RootKeepAlive {
 
     /**
      * 单条 su 命令：后台线程调用；超时强杀；失败返回 null（含授权框拒绝）。
-     * 读流必须放独立线程 —— 若当前线程 readText() 阻塞在授权框挂起的进程上，
-     * waitFor 的超时永远不会被执行。
+     * hotfix：输出经 AtomicReference 跨线程传递（局部捕获变量的可见性无保证）；
+     * waitFor 成功即进程已退出 → 流已 EOF，join 等 reader 赋值完成后读取。
      */
     private fun su(command: String): String? = runCatching {
         val process = ProcessBuilder("su", "-c", command)
             .redirectErrorStream(true)
             .start()
-        var out: String? = null
-        val reader = Thread { out = process.inputStream.bufferedReader().readText() }
+        val out = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val reader = Thread { out.set(process.inputStream.bufferedReader().readText()) }
+        reader.isDaemon = true
         reader.start()
         if (!process.waitFor(10, TimeUnit.SECONDS)) {
             process.destroyForcibly()
             ModLog.i("RootKeepAlive: su timeout (${command.take(40)})")
             return null
         }
-        reader.join(2_000)
-        if (process.exitValue() == 0) out else null
+        reader.join(5_000)
+        if (process.exitValue() == 0) out.get() else null
     }.getOrNull()
 }

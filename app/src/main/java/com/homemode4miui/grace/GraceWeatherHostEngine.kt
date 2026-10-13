@@ -33,21 +33,25 @@ class GraceWeatherHostEngine(
 ) {
     private val appContext = context.applicationContext
     private var repository: MiuiWeatherRepository? = null
-    private var observerRegistered = false
+    private var observer: android.database.ContentObserver? = null
     private var lastFingerprint: String? = null
+
+    /** shutdown 置位：桌面 detach 后不再响应 ContentObserver（VM 每次 attach 新建， dispose 即终态）。 */
+    @Volatile private var disposed = false
 
     /**
      * 重读天气。reason 仅用于日志定位（mount/observer/settings/location）。
      * observer 注册一次（引擎与宿主 VM 同生命周期）；onChange 连发由指纹去重合并。
      */
     fun refresh(reason: String) {
+        if (disposed) return
         val repo = repository ?: runCatching { MiuiWeatherRepository(appContext) }
             .onFailure { ModLog.e("GraceWeatherHostEngine repo init failed", it) }
             .getOrNull() ?: return
         repository = repo
-        if (!observerRegistered) {
-            observerRegistered = true
+        if (observer == null) {
             runCatching { repo.observeChanges { refresh("observer") } }
+                .onSuccess { observer = it }
                 .onFailure { ModLog.e("GraceWeatherHostEngine observer register failed", it) }
         }
         scope.launch {
@@ -63,5 +67,15 @@ class GraceWeatherHostEngine(
                 }
                 .onFailure { ModLog.e("GraceWeatherHostEngine load($reason) failed", it) }
         }
+    }
+
+    /** 反注册 ContentObserver 并停摆（GraceHomeViewModel.shutdown 调用；VM 不复用，无需 re-arm）。 */
+    fun dispose() {
+        disposed = true
+        observer?.let { o ->
+            runCatching { appContext.contentResolver.unregisterContentObserver(o) }
+                .onFailure { ModLog.e("GraceWeatherHostEngine observer unregister failed", it) }
+        }
+        observer = null
     }
 }

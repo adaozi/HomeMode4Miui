@@ -62,27 +62,8 @@ class GraceCommandReceiver : BroadcastReceiver() {
                 GraceBridgeEngine.start(context)
                 GraceBridgeEngine.refreshSnapshots()
             }
-            // 上游同步 v1.1.8 S3：锁屏/拉通知栏/拉快捷设置 —— 无障碍服务在【本模块进程】，
-            // 宿主手势动作跨进程委派（GraceAccessibilityService.perform 幂等，未连接安全返回 false）
-            GraceBridge.Cmd.SYSTEM_ACTION -> {
-                val action = runCatching {
-                    com.galaxyrio.gracelauncher.data.GraceButtonAction.valueOf(
-                        intent.getStringExtra(GraceBridge.EXTRA_ARG1) ?: "")
-                }.getOrNull()
-                if (action != null) {
-                    // 原生（反射/广播）优先，root 次之，无障碍最后
-                    if (!com.galaxyrio.gracelauncher.platform.HostSystemActions.run {
-                            when (action) {
-                                com.galaxyrio.gracelauncher.data.GraceButtonAction.LockScreen -> lockScreen(context)
-                                com.galaxyrio.gracelauncher.data.GraceButtonAction.Notifications -> expandNotifications(context)
-                                com.galaxyrio.gracelauncher.data.GraceButtonAction.QuickSettings -> expandQuickSettings(context)
-                                else -> false
-                            }
-                        }) {
-                        com.galaxyrio.gracelauncher.platform.GraceRootActions.perform(action)
-                    }
-                }
-            }
+            // SYSTEM_ACTION 分支废止（hotfix）：全仓零发送方 —— Route 进程内直调
+            // GraceSystemActions，跨进程委派路径删除（onReceive 裸奔分支的崩溃面随之消除）。
         }
     }
 

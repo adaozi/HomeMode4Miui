@@ -349,3 +349,15 @@ DIFF vs 桩文件:
 - [x] **清理**：BreezyWeather{Repository,Parser,Updates} 删除；manifest 去 org.breezyweather.READ_PROVIDER + BreezyWeatherUpdateReceiver，queries 补 `<provider android:authorities="weather"/>`（Android 11+ 包可见性）；UI 动作收敛 openWeatherApp（install 入口删除）；双语字符串换"小米天气"。
 - [x] 构建：assembleRelease 通过，versionCode 69；实机验证 status=Ready locs=2 cur=true、hourly parsed=25（now + 24 小时全渲染）、设置页快照回带带天气，User 目检确认 OK。
 - [ ] **遗留**：① provider 无更新推送 → 依赖 ContentObserver + 挂载首载，若小米天气长期后台不刷新需评估主动唤醒；② weatherappconfig.unit（℃/℉）未消费（恒摄氏）；③ 诊断日志（MiuiWeather rows/hourly）保留至下批清理。
+
+### auditfix（v2.9.37-auditfix / versionCode 70，2026-10-14）—— 全仓代码审计 P0 修复批
+
+- 背景：docs/CODE_AUDIT_2026-10-13.md 全仓审计（177 文件三路扫读 + 引用验证），本批修复 P0 五项 + 新增 P1 天气引擎收编。铁律整改（吞异常/硬编码色值）与 P2 死代码清理留后续批次。
+- [x] **shutdown 收编（P0-1 + P1）**：GraceHomeViewModel.shutdown 补 `iconsJob?.cancel()`（detach 后 Room 观察链 + 200+ 应用装饰管线白跑）；GraceWeatherHostEngine 加 `dispose()`（反注册 ContentObserver + disposed 守卫，MiuiWeatherRepository.observeChanges 改返回 observer），shutdown 调用 —— detach 后小米天气写库不再触发全量 provider 读 + 快照广播。
+- [x] **HomeController 跨 Context 反注册（P0-2）**：registerPkgReceiver/unregisterPkgReceiver 改走 ApplicationContext —— Launcher 重建时旧 ContextImpl 注册的接收器原先反注册必抛 IllegalArgumentException 且被吞（旧接收器持旧 Activity 泄漏 + 广播双份分发）；反注册失败记 ModLog。
+- [x] **SnapshotStore 残留快照（P0-3）**：unregister 清 `_snapshot` + `lastKnownSettings` —— 二次进设置页时 4s 超时判断（value==null）恒 false，桌面未挂载场景陈旧数据可编辑且写命令进黑洞。对齐 GraceShortcutsRelay 语义。
+- [x] **SYSTEM_ACTION 死路径删除（P0-4）**：Cmd.SYSTEM_ACTION + GraceHomeViewModel.sendSystemAction + GraceCommandReceiver 分支全链删除（全仓零发送方，Route 进程内直调 GraceSystemActions）—— 导出 receiver 内无 runCatching 裸奔分支的崩溃面随之消除。
+- [x] **GraceRootActions 子进程流（P0-5a）**：读流独立线程排水 + waitFor(15s) 超时强杀 + finally destroy —— 旧实现 waitFor 在关流之前（输出超 64KB 管道即永不返回）且 catch 无 destroy。
+- [x] **RootKeepAlive（P0-5b）**：ensure/apply 双入口收敛到 `tryRun()` 单飞（同一把 gate 锁 + 同一 attempted/applied 协议，消除并发重复 root 写）；su() 输出改 AtomicReference 跨线程传递（局部捕获变量可见性无保证）+ join 5s；PowerKeeper 校验收紧 —— `UPDATE; SELECT changes()` 同连接校验实改行数（退出码 0 ≠ 生效）。
+- [x] 构建：assembleRelease 通过，versionCode 70。
+- [ ] **遗留**：P1 铁律批（ModePrefs/PermissionGate/HostCompat 等吞异常、MainActivity 16 处 + PlaceholderHomeView 硬编码色值、GracePinItemHook 丢栈）与 P2 批（死代码 ~500 行、MiuiWeatherRepository 诊断 Log.d 摘除、引擎主线程 JSON 编码、组合期写状态、反射缓存）待后续批次。

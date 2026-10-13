@@ -66,6 +66,11 @@ object GraceSettingsSnapshotStore {
             .onFailure { ModLog.e("GraceSettingsSnapshotStore: unregister failed", it) }
         receiver = null
         registered = false
+        // hotfix：同步清残留快照 —— 否则设置页二次打开时 4s 超时判断（value==null）
+        // 恒 false，桌面未挂载场景下显示陈旧数据且可编辑（写命令进黑洞无提示）。
+        // 对齐 GraceShortcutsRelay.unregister 清 _results 的既有语义。
+        _snapshot.value = null
+        lastKnownSettings = null
     }
 
     /** 快照请求（模块 → 宿主）。桌面未挂载时无回包：VM 侧超时置 settingsLoadFailed。 */
