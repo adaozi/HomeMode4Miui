@@ -420,3 +420,10 @@ DIFF vs 桩文件:
 - [x] 类型教训：GraceSettingsRepository 操作 GraceHomeSettings（非 LauncherSettings）—— 控制器回调签名按实际类型落。
 - [x] 构建：assembleRelease 通过，versionCode 77。
 - [ ] **遗留（refactor3 候选）**：GraceButton 过渡状态机抽离（Route，~50 行，需 holder 设计）；GraceHomeUiState 30+ 字段按消费面拆分（动全部消费面，最后做）。
+
+### refactor3（v2.9.45-refactor3 / versionCode 78，2026-10-14）—— GraceButton 过渡状态机抽离
+
+- [x] **Route 状态机收编 holder**：新建 grace/GraceButtonTransitionState.kt（沿 FavoritesReorderState 状态 holder 模式）—— transition/instantEntrance 状态 + searchTransition/drawerTransition 派生 + begin/clear/markInstantEntrance/clearInstantEntrance/onLifecycleEvent（前台清账：ON_PAUSE 记 leftForeground、未提交锁屏即清、回前台清残留）。锁屏末帧提交协程（withFrameNanos + GraceSystemActions + 1.5s 验证）依赖 context/lifecycle 留 Route LaunchedEffect，键改读 buttonState.transition。
+- [x] Route 消费点全部切换（performGestureAction 守卫/entrance/begin×3、widgetInputEnabled、GraceButton enabled/hidden/heldOrigin、TransitionOverlay、rememberUpdatedState 删除），代码标识符零残留。
+- [x] 构建：assembleRelease 通过，versionCode 78。
+- [ ] **遗留（refactor4，最后一批）**：GraceHomeUiState 30+ 字段按消费面拆分（动全部消费面，需专项设计）。
