@@ -93,7 +93,7 @@ public final class CustomLauncherMode extends LauncherMode {
      *   addOrRemoveNewHome）承载的是【看点/内容中心】页（NewHomeView，com.miui.newhome）——
      *   它不是负一屏。保持 false：看点链路整体关闭。
      *   负一屏（MinusOneScreenView + 智能助理，从左往右滑）与该开关无关，
-     *   由 GestureIsolator 隔离 + HomeController.openMinusOneScreen() 实现。
+     *   由 GestureIsolator 隔离实现（v2.9.42：主动打开入口已删除，本模式无负一屏入口）。
      */
     @Override
     public boolean supportFeed() {

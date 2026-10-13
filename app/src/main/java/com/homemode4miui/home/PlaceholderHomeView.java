@@ -23,8 +23,6 @@ public class PlaceholderHomeView extends HomeView {
         tip.setTextSize(16);
         tip.setGravity(Gravity.CENTER);
         tip.setOnClickListener(v -> {
-            // 示例：自定义 UI 可通过底座打开负一屏（宿主 MinusOneScreenView 同款入口）
-            // com.homemode4miui.hook.HomeController.openMinusOneScreen();
         });
         addView(tip, new LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER));

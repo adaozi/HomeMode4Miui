@@ -12,7 +12,6 @@ import android.widget.FrameLayout;
  *     · 原生桌面表面隐藏（容器子 View 记账式 GONE）/ 还原
  *     · DragLayer 挂载/卸载本视图、Launcher 生命周期同步（setupViews / onLauncherModeChanged / onResume）
  *     · 手势隔离闸门（SuperDraglayer.findActiveController）
- *     · 负一屏打开/关闭同步（HomeController.openMinusOneScreen）
  *     · 应用增删广播聚合、Home 键回桌面回调、模块 App 广播切换
  *
  *   你的桌面 UI 负责：继承本类实现全部视觉与交互，经 {@link HomeViewFactory} 提供即可。

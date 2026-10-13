@@ -284,7 +284,6 @@ public class MainActivity extends Activity {
 
         // ---- 【已固化】负一屏手势拦截无开关：自定义模式激活时 GestureIsolator
         // 恒定隔离全部宿主手势控制器，右滑不进负一屏；负一屏由自定义 UI 经
-        // hook/HomeController.openMinusOneScreen() 主动打开。
 
         // ---- hotfix4：桥自诊断（系统授权记录 / 活动媒体会话 / 引擎状态） ----
         // hotfix6：授权状态之后（用户最关心），根布局 ScrollView 防截断

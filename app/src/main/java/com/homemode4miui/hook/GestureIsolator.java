@@ -32,8 +32,6 @@ import de.robv.android.xposed.XposedHelpers;
  * 负一屏（语义已固化，无开关）：
  *   自定义模式激活时【恒定隔离】宿主全部手势控制器（含 Feed 系列/看点/负一屏链），
  *   用户不可选择 —— 右滑不进负一屏，自定义视图滚动绝不被原生手势打断。
- *   负一屏改由挂载视图驱动宿主 MinusOneScreenView.openMinusOne()
- *   （宿主页面指示条点击的同款入口）主动打开，详见 HomeController.openMinusOneScreen()。
  *
  * 防御边界：
  *   - 宿主浮层打开（AbstractFloatingView.getTopOpenView != null）时放行原生逻辑；

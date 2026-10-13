@@ -61,7 +61,7 @@ public final class ModePrefs {
     /**
      * 【已固化，无开关】负一屏手势拦截语义：自定义模式激活时 GestureIsolator
      * 恒定隔离全部宿主手势控制器（含负一屏/看点链），用户不可选择。
-     * 负一屏改由自定义 UI 经 hook/HomeController.openMinusOneScreen() 主动打开。
+     * v2.9.42：预留的主动打开入口因零调用方删除，本模式下负一屏无任何入口。
      */
 
     /** gate1：root 保活就绪（宿主进程读；模块首页经广播写） */

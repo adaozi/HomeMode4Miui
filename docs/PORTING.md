@@ -398,3 +398,11 @@ DIFF vs 桩文件:
 - [x] **Compose 重组治理**：GraceLauncherRoute rowGestures（非 @Stable 类实例）按 shortcutsFolders 键 remember —— 旧实现每次 uiState 变化（含通知快照高频桥推送）都新建实例传给 HomeScreen/AppDrawerScreen，大子树跳过不了重组；捕获集（viewModel/launchApp/overlay delegate）均为稳定引用。
 - [x] 构建：assembleRelease 通过，versionCode 74。
 - [ ] **遗留（随 P3+ 推进的结构性项）**：GraceHomeUiState 30+ 字段单一 data class 按消费面拆分；GraceLauncherRoute（~1090 行）/ GraceHomeViewModel（~1030 行）职责拆分（Route: 壁纸效果层/GraceButton 过渡；VM: WidgetController/BridgeCommander/AgendaController）。
+
+### minusoff（v2.9.42-minusoff / versionCode 75，2026-10-14）—— 负一屏预留线整体清除
+
+- [x] **决策**：User 定案 —— 负一屏预留入口（openMinusOneScreen）删除（"负一屏改由自定义 UI 主动打开"设计的最后环节不再推进；右滑手势本就由 GestureIsolator 恒定隔离）。
+- [x] **清除范围（HomeController 551 → 321 行）**：openMinusOneScreen / syncMinusClosed / restoreFromMinusScreen / showMinusChain / hideNativesForMinus / ancestorUnderContainer / hideNativeBranch / isNativeSurfaceName / installMinusCloseSync / callMethodSafe / findMethodDeep（含 v2.9.41 缓存）/ currentLauncher / logOnceNoUse + sMinus* 四字段 —— 全链仅被负一屏路径消费，随入口死亡。MainHook #10 onMinusOneScreenViewScroll 钩子与 hook 清单同步移除（现役 hook 10 号起为 onNewIntent）。
+- [x] **边界确认**：页面指示条点击进负一屏的路径在自定义模式下不存在 —— 指示条（pageindicators）属隐藏的原生表面；手势隔离管点击，但入口视图本身不可见，故关闭同步链删除无行为影响。
+- [x] 过时注释清理：ModePrefs/GestureIsolator/CustomLauncherMode/HomeView/PlaceholderHomeView/MainActivity 共 6 处 openMinusOneScreen 引用。
+- [x] 构建：assembleRelease 通过，versionCode 75。

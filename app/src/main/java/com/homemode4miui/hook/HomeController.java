@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -13,7 +12,6 @@ import com.homemode4miui.home.HomeView;
 import com.homemode4miui.home.HomeViewFactory;
 import com.homemode4miui.util.ModLog;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -25,18 +23,18 @@ import de.robv.android.xposed.XposedHelpers;
 /**
  * 底座核心：隐藏原生桌面表面（Workspace/HotSeats/抽屉视图/DropTargetBar）、
  * 在 DragLayer 上挂载/卸载 {@link HomeView}（由 HomeViewFactory 提供，UI 与底座的唯一接缝）、
- * 聚合应用增删广播、右滑打开负一屏（MinusOneScreenView）。
+ * 聚合应用增删广播。
+ *
+ * 负一屏（v2.9.42 清除）：右滑手势经 GestureIsolator 恒定隔离（无放行开关），
+ * "自定义 UI 主动打开"预留入口 openMinusOneScreen() 因零调用方连同关闭同步链
+ * （syncMinusClosed/restoreFromMinusScreen/showMinusChain/hideNatives* 与
+ * MainHook #10 onMinusOneScreenViewScroll 钩子）一并删除 —— 页面指示条在自定义
+ * 模式下随原生表面隐藏，负一屏在本模式下无任何入口。
  *
  * 逆向依据（OS2: RELEASE-5.39.40.10843 / OS3: RELEASE-6.01.03.1927）：
  * Launcher 有 getWorkspace()/getHotSeats()/getDragLayer() 方法，
- * 字段 mAppsView(AllAppsContainerView)、mDropTargetBar(DropTargetBar)；
- * 负一屏 = mMinusOneScreenView(MinusOneScreenView，setupViews 由布局 inflate)，
- * PA 内容经 addMinusOneView → loadPaView 反射装载 AssistHolderView 到 mMinusViewGroup；
- * openMinusOne() = workspace.snapToScreen(0) + 自身 snapToScreen(0)，
- * 宿主页面指示条（MultiSeekBarIndicator）点击即走此入口。
- * OS3 变化：上述 Launcher 方法上移到 BaseLauncher（hook 经 HostCompat 解析），
- * getDragLayer()/getMinusOneScreenView()/addMinusOneView()/isMinusScreenShowing()/
- * isUseMiuiMinusScreen() 两版本均在，反射调用不受影响。
+ * 字段 mAppsView(AllAppsContainerView)、mDropTargetBar(DropTargetBar)。
+ * OS3 变化：上述 Launcher 方法上移到 BaseLauncher（hook 经 HostCompat 解析）。
  */
 public final class HomeController {
 
@@ -45,13 +43,6 @@ public final class HomeController {
     private static volatile HomeView sView;
     private static final Map<View, Integer> sOriginalVisibility = new HashMap<>();
     private static volatile BroadcastReceiver sPkgReceiver;
-    /** 负一屏打开期间的可见性还原账本（祖先链 + 被临时隐藏的原生表面） */
-    private static final Map<View, Integer> sMinusRestore = new HashMap<>();
-    /** 负一屏是否处于"我们打开"的状态 */
-    private static volatile boolean sMinusOpen;
-    private static volatile long sMinusOpenedAt;
-    /** 一次性日志开关 */
-    private static volatile boolean sMinusNoUseLogged;
 
     private HomeController() {
     }
@@ -89,170 +80,6 @@ public final class HomeController {
         if (v != null) {
             v.onHomePaused();
         }
-    }
-
-    /* ---------------- 右滑打开负一屏（自定义 UI 的可用宿主能力） ---------------- */
-
-    /**
-     * 自定义 UI 右滑手势的落点：复刻宿主"页面指示条点击打开负一屏"的完整序列。
-     * 【语义已固化】负一屏手势恒定隔离（无放行开关），自定义 UI 可直接调用本方法。
-     */
-    public static void openMinusOneScreen() {
-        Activity launcher = currentLauncher();
-        if (launcher == null) return;
-        try {
-            // 智能助理（负一屏内容源）未启用时不动作，避免打开空壳页
-            Object use = callMethodSafe(launcher, "isUseMiuiMinusScreen");
-            if (Boolean.FALSE.equals(use)) {
-                logOnceNoUse();
-                return;
-            }
-            Object minus = callMethodSafe(launcher, "getMinusOneScreenView");
-            if (!(minus instanceof View)) {
-                log("openMinusOne: MinusOneScreenView not found");
-                return;
-            }
-            // PA 内容惰性装载（宿主 mAdded 账本保证幂等）
-            callMethodSafe(launcher, "addMinusOneView");
-
-            showMinusChain(launcher, (View) minus);
-            hideNativesForMinus(launcher, (View) minus);
-
-            HomeView v = sView;
-            if (v != null) v.setVisibility(View.GONE); // 让位：负一屏在其下方 z 序
-
-            sMinusOpen = true;
-            sMinusOpenedAt = SystemClock.uptimeMillis();
-            callMethodSafe(minus, "openMinusOne");
-            log("openMinusOne fired");
-        } catch (Throwable t) {
-            ModLog.e("openMinusOneScreen failed", t);
-            restoreFromMinusScreen(launcher);
-        }
-    }
-
-    /** 负一屏滚动回调同步：确认已关闭时还原桌面视图与原生表面（onResume 为兜底还原点） */
-    public static void syncMinusClosed(Object launcherObj) {
-        if (!sMinusOpen) return;
-        try {
-            // 打开动画宽限期内不判定（isMinusScreenShowing 语义未逆向，防误判提前还原）
-            if (SystemClock.uptimeMillis() - sMinusOpenedAt < 800) return;
-            Object showing = callMethodSafe(launcherObj, "isMinusScreenShowing");
-            if (Boolean.TRUE.equals(showing)) return;
-            restoreFromMinusScreen(launcherObj instanceof Activity ? (Activity) launcherObj : null);
-        } catch (Throwable t) {
-            ModLog.e("syncMinusClosed failed", t);
-        }
-    }
-
-    private static void restoreFromMinusScreen(Activity launcher) {
-        if (!sMinusOpen) return;
-        sMinusOpen = false;
-        try {
-            for (View v : new ArrayList<>(sMinusRestore.keySet())) {
-                Integer old = sMinusRestore.get(v);
-                if (old != null) v.setVisibility(old);
-            }
-            sMinusRestore.clear();
-            HomeView v = sView;
-            if (v != null) v.setVisibility(View.VISIBLE);
-            log("minus screen closed -> desktop restored");
-        } catch (Throwable t) {
-            ModLog.e("restoreFromMinusScreen failed", t);
-        }
-    }
-
-    /**
-     * 显示负一屏祖先链：从 MinusOneScreenView 向上走到隐藏容器的直接子级，
-     * 逐级记录原可见性后置 VISIBLE（负一屏静置时本就"可见但不显示内容"，为宿主原生状态）。
-     */
-    private static void showMinusChain(Activity launcher, View minus) {
-        ViewGroup container = resolveContainer(launcher);
-        if (container == null) return;
-        View top = ancestorUnderContainer(minus, container);
-        if (top == null) {
-            log("minus screen not under hiding container (chain visible natively)");
-            return;
-        }
-        View v = minus;
-        while (true) {
-            if (v.getVisibility() != View.VISIBLE) {
-                sMinusRestore.put(v, v.getVisibility());
-                v.setVisibility(View.VISIBLE);
-            }
-            if (v == top) break;
-            Object p = v.getParent();
-            if (!(p instanceof View)) break;
-            v = (View) p;
-        }
-    }
-
-    /** 负一屏打开期间，把同容器的原生表面（Workspace/HotSeats 等）按名临时隐藏 */
-    private static void hideNativesForMinus(Activity launcher, View minus) {
-        ViewGroup container = resolveContainer(launcher);
-        if (container == null) return;
-        View top = ancestorUnderContainer(minus, container);
-        if (top == null) return; // 负一屏不在隐藏容器内 → 无需处理
-        hideNativeBranch(top, minus);
-    }
-
-    /** 从 minus 向上找"隐藏容器的直接子级"（找不到返回 null） */
-    private static View ancestorUnderContainer(View minus, ViewGroup container) {
-        View walker = minus;
-        while (walker != null) {
-            Object p = walker.getParent();
-            if (p == container) return walker;
-            if (!(p instanceof View)) return null;
-            walker = (View) p;
-        }
-        return null;
-    }
-
-    /** 分支内按类名隐藏原生表面（命中即整棵隐藏，不再下钻）；负一屏路径天然不匹配 */
-    private static void hideNativeBranch(View root, View minus) {
-        String name = root.getClass().getName();
-        if (isNativeSurfaceName(name)) {
-            if (root.getVisibility() != View.GONE && !sMinusRestore.containsKey(root)) {
-                sMinusRestore.put(root, root.getVisibility());
-                root.setVisibility(View.GONE);
-            }
-            return;
-        }
-        if (root == minus) return; // 负一屏自身及其祖先不隐藏
-        if (root instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) root;
-            for (int i = g.getChildCount() - 1; i >= 0; i--) {
-                hideNativeBranch(g.getChildAt(i), minus);
-            }
-        }
-    }
-
-    /** 原生表面类名特征（负一屏打开期间需让位的宿主视图） */
-    private static boolean isNativeSurfaceName(String qualified) {
-        return qualified.contains("Workspace")
-                || qualified.contains("HotSeat")
-                || qualified.contains("DropTargetBar")
-                || qualified.contains("pageindicators")
-                || qualified.contains("SearchEdgeLayout");
-    }
-
-    /* ---------------- 负一屏关闭同步 hook（MainHook #10 调用） ---------------- */
-
-    public static void installMinusCloseSync(final ClassLoader cl) {
-        // 版本路由：OS2 声明于 Launcher，OS3 上移至 BaseLauncher（HostCompat 解析声明类）
-        // 异常直接抛给 MainHook.tryHook 记 FAILED（此前内部吞掉会打出误导性 installed）
-        XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl,
-                "onMinusOneScreenViewScroll"), "onMinusOneScreenViewScroll", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        try {
-                            syncMinusClosed(param.thisObject);
-                        } catch (Throwable t) {
-                            log("minus close sync callback failed: " + t);
-                        }
-                    }
-                });
-        log("minus close sync installed (Launcher.onMinusOneScreenViewScroll)");
     }
 
     /* ---------------- Home 键回首页 hook ---------------- */
@@ -452,62 +279,6 @@ public final class HomeController {
         Integer old = sOriginalVisibility.get(v);
         if (old != null) {
             v.setVisibility(old);
-        }
-    }
-
-    /* ---------------- 反射工具（宿主方法可能非 public，统一 setAccessible） ---------------- */
-
-    private static Activity currentLauncher() {
-        HomeView v = sView;
-        Context ctx = v != null ? v.getContext() : null;
-        return ctx instanceof Activity ? (Activity) ctx : null;
-    }
-
-    private static Object callMethodSafe(Object target, String method) throws Throwable {
-        if (target == null) return null;
-        Method m = findMethodDeep(target.getClass(), method);
-        if (m == null) throw new NoSuchMethodException(target.getClass().getName() + "." + method);
-        m.setAccessible(true);
-        return m.invoke(target);
-    }
-
-    /**
-     * 沿父类链找无参方法（惰性）：getDeclaredMethod 单方法精确匹配，
-     * 【严禁】getDeclaredMethods() 全量扫描 —— 宿主类链有方法引用类路径缺失的
-     * com.miui.newhome.*（看点/内容中心独立包），全量扫描必炸 NoClassDefFoundError
-     * （OS2 5.39.40 实锤，与 HostCompat.declares 同一条铁律）。
-     */
-    /** perf（v2.9.41）：callMethodSafe 惰性单方法查找结果按 (类#方法) 缓存（含未命中
-     *  负缓存；宿主类层级进程内恒定，负缓存安全）。消费方：syncMinusClosed/restore
-     *  （页面指示条点击进负一屏后的关闭同步 —— GestureIsolator 只隔离手势流，点击
-     *  不走 findActiveController，此链是活的）；openMinusOneScreen()（自定义 UI 主动
-     *  打开负一屏的预留入口，当前零调用方）。惰性 getDeclaredMethod 语义不变
-     *  （严禁 getDeclaredMethods 全量扫描，见上）。 */
-    private static final java.util.concurrent.ConcurrentHashMap<String, Method> sDeepMethodCache =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    private static Method findMethodDeep(Class<?> cls, String name) {
-        String key = cls.getName() + "#" + name;
-        Method cached = sDeepMethodCache.get(key);
-        if (sDeepMethodCache.containsKey(key)) return cached; // 命中（含负缓存 null）
-        Method found = null;
-        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
-            try {
-                Method m = c.getDeclaredMethod(name);
-                m.setAccessible(true);
-                found = m;
-                break;
-            } catch (NoSuchMethodException ignored) {
-            }
-        }
-        sDeepMethodCache.put(key, found);
-        return found;
-    }
-
-    private static void logOnceNoUse() {
-        if (!sMinusNoUseLogged) {
-            sMinusNoUseLogged = true;
-            log("openMinusOne skipped: personal assistant off (isUseMiuiMinusScreen=false)");
         }
     }
 

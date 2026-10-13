@@ -46,14 +46,12 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *     自定义模式激活时宿主手势控制器（下拉搜索/上滑抽屉/横滑负一屏/下拉通知栏）
  *     永不认领手势流，消除与挂载视图的手势互相捣乱；负一屏恒定隔离（已固化，无开关），
  *     另含 isSupportShowHomeFeed 使能闸放行（hook/GestureIsolator.java）
- *  10. Launcher.onMinusOneScreenViewScroll            after  → 负一屏关闭同步还原（同上路由）
- *  11. Launcher.onNewIntent                           after  → Home 键回首页态回调（同上路由）；
+ *  10. Launcher.onNewIntent                           after  → Home 键回首页态回调（同上路由）；
  *     OS3 另挂 onNewIntentWhenAlreadyOnHome（"已在桌面回首页"独立路径，OS2 无则跳过）
  *
  * 版本适配（HostCompat）：
  *   - versionCode ≥ 600_000_000 → OS3 家族（RELEASE-6.01.03 实测），否则 OS2（5.39.40 基准）；
  *   - OS3 的 Launcher 大重构：setupViews/onResume/onNewIntent/onLauncherModeChanged/
- *     onMinusOneScreenViewScroll 全部上移到 BaseLauncher，Launcher 只剩 onCreate/injectMembers；
  *   - launcherHookClass() 沿 Launcher→父类链解析实际声明类，两版本通吃；
  *   - 原设置页第四选项注入（DesktopModeInjector）已按产品决策移除。
  *
@@ -201,9 +199,6 @@ public class MainHook implements IXposedHookLoadPackage {
         });
         tryHook("9.SuperDraglayer.findActiveController (手势隔离)", new HookTask() {
             @Override public void run() { GestureIsolator.inject(cl); }
-        });
-        tryHook("10.Launcher.onMinusOneScreenViewScroll (负一屏关闭同步)", new HookTask() {
-            @Override public void run() { HomeController.installMinusCloseSync(cl); }
         });
         tryHook("11.Launcher.onNewIntent (Home 键回首页态)", new HookTask() {
             @Override public void run() { HomeController.installHomeIntentSync(cl); }
