@@ -633,35 +633,15 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 runCatching {
                     val context = getApplication<Application>()
                     val manager = AppWidgetManager.getInstance(context)
-                    val id = host.allocateAppWidgetId()
-                    val bound = runCatching {
-                        manager.bindAppWidgetIdIfAllowed(id, info.profile, info.provider, Bundle().apply {
-                            putInt(AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY,
-                                AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN)
-                        })
-                    }.getOrDefault(false)
-                    if (!bound) {
-                        runCatching { host.deleteAppWidgetId(id) }
-                            .onFailure { ModLog.e("GraceHomeViewModel cleanup unbound widget id failed", it) }
-                        return@runCatching false
-                    }
-                    val label = runCatching { info.loadLabel(context.packageManager) }
-                        .getOrDefault(info.provider.className)
+                    val (id, label) = bindWidgetOrCleanup(host, context, info)
+                        ?: return@runCatching false
                     settingsRepository.mutateSettings { current -> current.copy(
                         homeLayout = current.homeLayout.copy(
                             widgetId = id, widgetProvider = info.provider.flattenToString(),
                             widgetLabel = label, widgetHeightDp = 0,
                         )) }.let { saved -> _uiState.update { state -> state.copy(settings = saved) } }
-                    // 配置页（fresh 信息校验防 provider 在 bind 后被移除）
-                    val fresh = runCatching { manager.getAppWidgetInfo(id) }.getOrNull()
-                    if (fresh?.configure != null) {
-                        runCatching {
-                            context.startActivity(Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
-                                .setClassName(fresh.configure.packageName, fresh.configure.className)
-                                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }.onFailure { ModLog.e("GraceHomeViewModel configure activity launch failed", it) }
-                    }
+                    launchConfigureIfAny(context, manager, id,
+                        "GraceHomeViewModel configure activity launch failed")
                     true
                 }.getOrElse { error ->
                     ModLog.e("GraceHomeViewModel addHomeWidget failed", error); false
@@ -687,6 +667,43 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ---- folders 阶段（hotfix folders2）：弹层 widget（原版 WidgetSetupActivity popupOwner 分支）----
 
+    /** refactor1（v2.9.43）：bind 公共段（addHomeWidget/addPopupWidgetTo 共用）——
+     *  allocate → bind（home category）→ 失败回收 → label。返回 (id, label)，
+     *  bind 失败返回 null（id 已回收）。 */
+    private fun bindWidgetOrCleanup(
+        host: HomeWidgetHost, context: android.content.Context, info: AppWidgetProviderInfo,
+    ): Pair<Int, String>? {
+        val manager = AppWidgetManager.getInstance(context)
+        val id = host.allocateAppWidgetId()
+        val bound = runCatching {
+            manager.bindAppWidgetIdIfAllowed(id, info.profile, info.provider, Bundle().apply {
+                putInt(AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY,
+                    AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN)
+            })
+        }.getOrDefault(false)
+        if (!bound) {
+            runCatching { host.deleteAppWidgetId(id) }
+                .onFailure { ModLog.e("GraceHomeViewModel cleanup unbound widget id failed", it) }
+            return null
+        }
+        val label = runCatching { info.loadLabel(context.packageManager) }
+            .getOrDefault(info.provider.className)
+        return id to label
+    }
+
+    /** 配置页 fire-and-forget（fresh 信息校验防 provider 在 bind 后被移除）。 */
+    private fun launchConfigureIfAny(context: android.content.Context, manager: AppWidgetManager, id: Int, logTag: String) {
+        val fresh = runCatching { manager.getAppWidgetInfo(id) }.getOrNull()
+        if (fresh?.configure != null) {
+            runCatching {
+                context.startActivity(Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
+                    .setClassName(fresh.configure.packageName, fresh.configure.className)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { ModLog.e(logTag, it) }
+        }
+    }
+
     /**
      * 原版 WidgetSetupActivity.finishAdding popupOwner 分支同构：allocate → bind →
      * PopupItem("widget:<id>", layout) 落 app_popups（ownerKey）。与 addHomeWidget 的差异
@@ -699,20 +716,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 runCatching {
                     val context = getApplication<Application>()
                     val manager = AppWidgetManager.getInstance(context)
-                    val id = host.allocateAppWidgetId()
-                    val bound = runCatching {
-                        manager.bindAppWidgetIdIfAllowed(id, info.profile, info.provider, Bundle().apply {
-                            putInt(AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY,
-                                AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN)
-                        })
-                    }.getOrDefault(false)
-                    if (!bound) {
-                        runCatching { host.deleteAppWidgetId(id) }
-                            .onFailure { ModLog.e("GraceHomeViewModel cleanup unbound popup widget id failed", it) }
-                        return@runCatching false
-                    }
-                    val label = runCatching { info.loadLabel(context.packageManager) }
-                        .getOrDefault(info.provider.className)
+                    val (id, label) = bindWidgetOrCleanup(host, context, info)
+                        ?: return@runCatching false
                     val layout = com.galaxyrio.gracelauncher.data.HomeLayout(
                         widgetId = id, widgetProvider = info.provider.flattenToString(),
                         widgetLabel = label, widgetHeightDp = 0,
@@ -722,16 +727,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     items.updatePopup(ownerKey, emptyList()) { entries ->
                         if (entries.any { it.widget?.widgetId == id }) entries else entries + PopupItem("widget:$id", layout)
                     }
-                    // 配置页（fire-and-forget，与 addHomeWidget 同语义）
-                    val fresh = runCatching { manager.getAppWidgetInfo(id) }.getOrNull()
-                    if (fresh?.configure != null) {
-                        runCatching {
-                            context.startActivity(Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
-                                .setClassName(fresh.configure.packageName, fresh.configure.className)
-                                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }.onFailure { ModLog.e("GraceHomeViewModel popup widget configure launch failed", it) }
-                    }
+                    launchConfigureIfAny(context, manager, id,
+                        "GraceHomeViewModel popup widget configure launch failed")
                     true
                 }.getOrElse { error ->
                     ModLog.e("GraceHomeViewModel addPopupWidgetTo failed", error); false

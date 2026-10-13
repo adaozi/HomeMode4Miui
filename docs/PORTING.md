@@ -406,3 +406,10 @@ DIFF vs 桩文件:
 - [x] **边界确认**：页面指示条点击进负一屏的路径在自定义模式下不存在 —— 指示条（pageindicators）属隐藏的原生表面；手势隔离管点击，但入口视图本身不可见，故关闭同步链删除无行为影响。
 - [x] 过时注释清理：ModePrefs/GestureIsolator/CustomLauncherMode/HomeView/PlaceholderHomeView/MainActivity 共 6 处 openMinusOneScreen 引用。
 - [x] 构建：assembleRelease 通过，versionCode 75。
+
+### refactor1（v2.9.43-refactor1 / versionCode 76，2026-10-14）—— 结构性拆分第一批
+
+- [x] **Route 壁纸效果层抽离**：新建 grace/WallpaperEffects.kt —— WindowWallpaperBlurEffect（S+ 跨窗口模糊半径）/ rememberWallpaperBlurBitmap（perf1 异步 fallback 位图）/ rememberResolvedWallpaperTint（hotfix6 遮罩色 + S7 自定义色）/ WallpaperEffectLayers（渲染层）。dimfix/hotfix6/perf1 五轮装机调试的注释与 z 序语义（效果层必须在 BoxWithConstraints 之外的兄弟层位置）原样随迁；GraceLauncherRoute 减少 ~60 行，调用点按 dimfix 定案的层级原位替换。
+- [x] **VM widget bind 去重**：addHomeWidget/addPopupWidgetTo 逐字重复的 allocate→bind→回收→label→configure 段收敛为 bindWidgetOrCleanup + launchConfigureIfAny 两个私有 helper，两方法各自只保留差异段（写库目标）。
+- [x] 构建：assembleRelease 通过，versionCode 76。
+- [ ] **遗留（refactor2+ 候选）**：GraceButton 过渡状态机抽离（Route，与 overlay 状态耦合需设计）；widget 管理抽 WidgetController（VM）；GraceHomeUiState 30+ 字段按消费面拆分（动全部消费面，最后做）。

@@ -22,10 +22,7 @@ package com.homemode4miui.grace
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
@@ -39,7 +36,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -53,10 +49,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -64,15 +58,18 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import android.app.Activity
-import android.app.WallpaperManager
 import androidx.compose.ui.geometry.Rect
 import android.widget.Toast
 import androidx.core.graphics.drawable.toBitmap
 import com.homemode4miui.R
 import com.homemode4miui.bridge.GraceBridge
+import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
+import com.homemode4miui.grace.WallpaperEffectLayers
+import com.homemode4miui.grace.rememberResolvedWallpaperTint
+import com.homemode4miui.grace.rememberWallpaperBlurBitmap
+import com.homemode4miui.grace.WindowWallpaperBlurEffect
 import com.homemode4miui.util.ModLog
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherShortcut
@@ -104,7 +101,6 @@ import com.galaxyrio.gracelauncher.ui.overlays.PopupEntry
 import com.galaxyrio.gracelauncher.ui.overlays.ShortcutRevealState
 import com.galaxyrio.gracelauncher.ui.overlays.WidgetToggle
 import com.galaxyrio.gracelauncher.ui.search.AppSearchScreen
-import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
 import com.galaxyrio.gracelauncher.ui.theme.wallpaperTint
 import com.galaxyrio.gracelauncher.ui.theme.rememberWallpaperBlurAvailable
 import com.galaxyrio.gracelauncher.ui.widgets.LocalWidgetHost
@@ -315,17 +311,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     LaunchedEffect(blurAvailable) {
         ModLog.i("WallpaperBlur crossWindowBlurEnabled=$blurAvailable blur=$wallpaperBlurOn")
     }
-    if (hostActivity != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-        val wallpaperBlurRadiusPx = with(LocalDensity.current) {
-            (if (wallpaperBlurOn) wallpaperBlurRadius.dp * wallpaperEffectAlpha else 0.dp).roundToPx()
-        }.coerceIn(0, 150)
-        androidx.compose.runtime.SideEffect {
-            hostActivity.window.setBackgroundBlurRadius(wallpaperBlurRadiusPx)
-        }
-        androidx.compose.runtime.DisposableEffect(hostActivity) {
-            onDispose { hostActivity.window.setBackgroundBlurRadius(0) }
-        }
-    }
+    WindowWallpaperBlurEffect(hostActivity, wallpaperBlurOn, wallpaperBlurRadius, wallpaperEffectAlpha)
 
     // ---- hotfix6：壁纸模糊 fallback（Compose 层壁纸快照模糊）----
     // 装机两轮实测：MIUI home 窗口上 setBackgroundBlurRadius 无效（系统侧静默 no-op，
@@ -343,43 +329,17 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 按目标尺寸重绘，模糊层视觉细节本被 blur 抹平，1x 屏幕分辨率足够）。
     // 视觉零回退：模糊层初始 wallpaperEffectAlpha=0（抽屉打开才渐入），异步加载
     // 完成前的窗口期内该层本就不可见。
-    val wallpaperBlurBitmap = remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    if (wallpaperBlurOn) {
-        LaunchedEffect(hostContext) {
-            wallpaperBlurBitmap.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {
-                    val drawable = WallpaperManager.getInstance(hostContext).drawable
-                        ?: return@withContext null
-                    val dm = hostContext.resources.displayMetrics
-                    drawable.toBitmap(dm.widthPixels.coerceAtLeast(1), dm.heightPixels.coerceAtLeast(1))
-                }.onFailure {
-                    ModLog.i("WallpaperBlur fallback bitmap load failed: ${it.message}")
-                }.getOrNull()
-            }
-        }
-    } else {
-        // hotfix：composition 期间直接写 MutableState 是 Compose 明令禁止的
-        //（会触发额外失效回溯），包进 SideEffect
-        androidx.compose.runtime.SideEffect { wallpaperBlurBitmap.value = null }
-    }
+    val wallpaperBlurBitmap = rememberWallpaperBlurBitmap(hostContext, wallpaperBlurOn)
 
-    // ---- hotfix6：壁纸遮罩色（原版 LauncherScreen.kt:623-629 wallpaperTint）----
-    // 用户指正 + 原版实锤：dim 不是黑 scrim，是 primary 的色调调整 —— darkText（亮字）
-    // 用 tone 10 暗罩、暗字用 tone 95 亮罩，两种文字模式都对壁纸有对比度。
-    val appearance = LocalLauncherAppearance.current
-    val primary = MaterialTheme.colorScheme.primary
-    // 上游同步 v1.1.8 S7（v1.1.7 特性）：遮罩色可自定义 —— settings.listAppearance.wallpaperDimColor
-    // 非空时走 IconColor.resolve（automatic 仍兜底），语义与 hotfix6 手写版一致，改走上游扩展。
-    val wallpaperDimColor = state.settings.listAppearance.wallpaperDimColor
-    val resolvedWallpaperTint = remember(primary, appearance.darkText, wallpaperDimColor) {
-        appearance.wallpaperTint(primary, wallpaperDimColor)
-    }
+    // ---- hotfix6：壁纸遮罩色（解析收编 WallpaperEffects.rememberResolvedWallpaperTint）----
+    val resolvedWallpaperTint = rememberResolvedWallpaperTint(state.settings.listAppearance.wallpaperDimColor)
 
     // ---- hotfix6：隐藏状态栏（原版 LauncherScreen.kt:581-585 rememberLauncherSystemBars）----
     // 原版语义 = autoHide：平时隐藏、列表下拉到顶/边缘滑唤出、3s 自动回收（BEHAVIOR_DEFAULT
     // 透明栏，非沉浸 scrim）。fullScreen/searching 取本仓的全屏浮层集合（search/picker）。
     // hostWindow 显式传入（主树 LocalContext 是包装 context，原版 as? Activity 必 null）。
     // （dimfix：searching/fullScreen 定义已上移至壁纸效果可见度之前）
+    val appearance = LocalLauncherAppearance.current
     val statusBarPull = rememberLauncherSystemBars(
         autoHide = state.settings.hideStatusBar && (!fullScreen || searching),
         darkIcons = appearance.darkText,
@@ -673,19 +633,15 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 手势区背后的壁纸区域。hotfix6 把两层放进了容器内部，insets 区域露出未遮罩壁纸
     // （状态栏条带观感"遮罩没盖住"）。层级与绘制顺序照搬原版：壁纸效果在最底，
     // 列表容器在其上，LauncherOverlays 再其上。
-    wallpaperBlurBitmap.value?.let { wallpaperBlur ->
-        Image(
-            bitmap = wallpaperBlur.asImageBitmap(),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-                .graphicsLayer { alpha = wallpaperEffectAlpha }
-                .blur(wallpaperBlurRadius.coerceIn(0, 48).dp),
-        )
-    }
-    val dimAlpha = if (state.settings.dimWallpaper)
-        state.settings.wallpaperDimAmount.coerceIn(0, 100) / 100f * wallpaperEffectAlpha else 0f
-    Box(Modifier.fillMaxSize().background(resolvedWallpaperTint.copy(alpha = dimAlpha)))
+    // dimfix 定案的 z 序（效果层最底 → 列表容器 → overlays）由调用点位置保持
+    WallpaperEffectLayers(
+        blurBitmap = wallpaperBlurBitmap.value,
+        blurRadiusDp = wallpaperBlurRadius,
+        effectAlpha = wallpaperEffectAlpha,
+        tint = resolvedWallpaperTint,
+        dimEnabled = state.settings.dimWallpaper,
+        dimAmount = state.settings.wallpaperDimAmount,
+    )
     BoxWithConstraints(
         // The lists extend behind both system bars. Insets belong to their
         // scrollable content, not a parent that clips the whole viewport.
