@@ -413,3 +413,10 @@ DIFF vs 桩文件:
 - [x] **VM widget bind 去重**：addHomeWidget/addPopupWidgetTo 逐字重复的 allocate→bind→回收→label→configure 段收敛为 bindWidgetOrCleanup + launchConfigureIfAny 两个私有 helper，两方法各自只保留差异段（写库目标）。
 - [x] 构建：assembleRelease 通过，versionCode 76。
 - [ ] **遗留（refactor2+ 候选）**：GraceButton 过渡状态机抽离（Route，与 overlay 状态耦合需设计）；widget 管理抽 WidgetController（VM）；GraceHomeUiState 30+ 字段按消费面拆分（动全部消费面，最后做）。
+
+### refactor2（v2.9.44-refactor2 / versionCode 77，2026-10-14）—— WidgetController 抽离
+
+- [x] **VM widget 管理抽离**：新建 grace/WidgetController.kt —— AppWidgetHost 生命周期 + addHome/addPopupTo/removeHome 全链路（bind 公共段 + 配置页 fire-and-forget 随迁），写库结果经 onHomeLayoutSaved 回调（GraceHomeSettings），setup 结果经 onSetupResult 回调转发 widgetSetupResults SharedFlow。VM 保留三行委托门面（Route/settingsHostEngine 调用面零变化），GraceHomeViewModel 再减 ~120 行。
+- [x] 类型教训：GraceSettingsRepository 操作 GraceHomeSettings（非 LauncherSettings）—— 控制器回调签名按实际类型落。
+- [x] 构建：assembleRelease 通过，versionCode 77。
+- [ ] **遗留（refactor3 候选）**：GraceButton 过渡状态机抽离（Route，~50 行，需 holder 设计）；GraceHomeUiState 30+ 字段按消费面拆分（动全部消费面，最后做）。

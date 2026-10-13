@@ -72,7 +72,6 @@ import com.galaxyrio.gracelauncher.data.media.NowPlaying
 import com.galaxyrio.gracelauncher.data.notifications.AppNotification
 import com.galaxyrio.gracelauncher.data.weather.WeatherState
 import com.galaxyrio.gracelauncher.data.weather.WeatherStatus
-import com.galaxyrio.gracelauncher.platform.HomeWidgetHost
 import com.homemode4miui.bridge.GraceBridge
 import com.homemode4miui.bridge.GraceSettingsBridge
 import com.homemode4miui.util.ModLog
@@ -192,7 +191,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** P4：弹层快捷方式查询/缓存/启动（AutoCloseable，shutdown 显式关闭）。 */
     private val shortcutRepository = ShortcutRepository(application)
     /** P4：widget id 管理（allocate/delete）。startListening 由 UI 侧 rememberWidgetHost 负责。 */
-    private val widgetHost = runCatching { HomeWidgetHost(application) }.getOrNull()
     /** P6（B6.2）：日历仓储（宿主进程直读 CalendarProvider；无权限降级 PermissionRequired）。 */
     private val calendarRepository = CalendarRepository(application)
     /** P6（B6.1/B6.2/B6.3）：桥快照接收（模块 App 进程 → 宿主进程显式广播）。 */
@@ -268,6 +266,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** P4：widget 添加链路结果（false = bind/写库失败，UI 侧 Toast）。 */
     private val _widgetSetupResults = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
     val widgetSetupResults: kotlinx.coroutines.flow.SharedFlow<Boolean> = _widgetSetupResults
+    /** refactor2（v2.9.44）：widget 管理抽 WidgetController（host/落库/配置页全链路）。 */
+    private val widgetController = WidgetController(
+        application, viewModelScope, settingsRepository,
+        onSetupResult = { _widgetSetupResults.tryEmit(it) },
+        onHomeLayoutSaved = { saved -> _uiState.update { it.copy(settings = saved) } },
+    )
 
     private var appLoadJob: Job? = null
     /** P3：设置流常驻收集（Room 行变化驱动 settings）；shutdown 显式取消 */
@@ -626,117 +630,13 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      * （fire-and-forget：配置返回前 widget 已落库生效）。全链路 runCatching，
      * 失败回收 allocated id 并发 false（UI Toast），对齐原版 cancelSetup。
      */
-    fun addHomeWidget(info: AppWidgetProviderInfo) {
-        val host = widgetHost ?: run { _widgetSetupResults.tryEmit(false); return }
-        viewModelScope.launch(Dispatchers.Main) {
-            val success = withContext(Dispatchers.IO) {
-                runCatching {
-                    val context = getApplication<Application>()
-                    val manager = AppWidgetManager.getInstance(context)
-                    val (id, label) = bindWidgetOrCleanup(host, context, info)
-                        ?: return@runCatching false
-                    settingsRepository.mutateSettings { current -> current.copy(
-                        homeLayout = current.homeLayout.copy(
-                            widgetId = id, widgetProvider = info.provider.flattenToString(),
-                            widgetLabel = label, widgetHeightDp = 0,
-                        )) }.let { saved -> _uiState.update { state -> state.copy(settings = saved) } }
-                    launchConfigureIfAny(context, manager, id,
-                        "GraceHomeViewModel configure activity launch failed")
-                    true
-                }.getOrElse { error ->
-                    ModLog.e("GraceHomeViewModel addHomeWidget failed", error); false
-                }
-            }
-            _widgetSetupResults.tryEmit(success)
-        }
-    }
+    /** widget 增删委托 WidgetController（v2.9.44-refactor2 抽离，语义见该类头注）。 */
+    fun addHomeWidget(info: AppWidgetProviderInfo) = widgetController.addHome(info)
 
-    /** 移除 widget：先删 host id（provider 收到删除通知）再清 homeLayout。 */
-    fun removeHomeWidget() {
-        val host = widgetHost ?: return
-        val current = _uiState.value.settings.homeLayout
-        if (!current.hasWidget) return
-        val id = current.widgetId
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { host.deleteAppWidgetId(id) }
-                .onFailure { ModLog.e("GraceHomeViewModel deleteAppWidgetId($id) failed", it) }
-            val saved = settingsRepository.mutateSettings { it.copy(homeLayout = it.homeLayout.withoutWidget()) }
-            _uiState.update { it.copy(settings = saved) }
-        }
-    }
+    fun removeHomeWidget() = widgetController.removeHome(_uiState.value.settings.homeLayout)
 
-    // ---- folders 阶段（hotfix folders2）：弹层 widget（原版 WidgetSetupActivity popupOwner 分支）----
-
-    /** refactor1（v2.9.43）：bind 公共段（addHomeWidget/addPopupWidgetTo 共用）——
-     *  allocate → bind（home category）→ 失败回收 → label。返回 (id, label)，
-     *  bind 失败返回 null（id 已回收）。 */
-    private fun bindWidgetOrCleanup(
-        host: HomeWidgetHost, context: android.content.Context, info: AppWidgetProviderInfo,
-    ): Pair<Int, String>? {
-        val manager = AppWidgetManager.getInstance(context)
-        val id = host.allocateAppWidgetId()
-        val bound = runCatching {
-            manager.bindAppWidgetIdIfAllowed(id, info.profile, info.provider, Bundle().apply {
-                putInt(AppWidgetManager.OPTION_APPWIDGET_HOST_CATEGORY,
-                    AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN)
-            })
-        }.getOrDefault(false)
-        if (!bound) {
-            runCatching { host.deleteAppWidgetId(id) }
-                .onFailure { ModLog.e("GraceHomeViewModel cleanup unbound widget id failed", it) }
-            return null
-        }
-        val label = runCatching { info.loadLabel(context.packageManager) }
-            .getOrDefault(info.provider.className)
-        return id to label
-    }
-
-    /** 配置页 fire-and-forget（fresh 信息校验防 provider 在 bind 后被移除）。 */
-    private fun launchConfigureIfAny(context: android.content.Context, manager: AppWidgetManager, id: Int, logTag: String) {
-        val fresh = runCatching { manager.getAppWidgetInfo(id) }.getOrNull()
-        if (fresh?.configure != null) {
-            runCatching {
-                context.startActivity(Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
-                    .setClassName(fresh.configure.packageName, fresh.configure.className)
-                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }.onFailure { ModLog.e(logTag, it) }
-        }
-    }
-
-    /**
-     * 原版 WidgetSetupActivity.finishAdding popupOwner 分支同构：allocate → bind →
-     * PopupItem("widget:<id>", layout) 落 app_popups（ownerKey）。与 addHomeWidget 的差异
-     * 仅在写库目标（弹层 vs homeLayout）。失败回收 id 并发 false（Route Toast）。
-     */
-    fun addPopupWidgetTo(ownerKey: String, info: AppWidgetProviderInfo) {
-        val host = widgetHost ?: run { _widgetSetupResults.tryEmit(false); return }
-        viewModelScope.launch(Dispatchers.Main) {
-            val success = withContext(Dispatchers.IO) {
-                runCatching {
-                    val context = getApplication<Application>()
-                    val manager = AppWidgetManager.getInstance(context)
-                    val (id, label) = bindWidgetOrCleanup(host, context, info)
-                        ?: return@runCatching false
-                    val layout = com.galaxyrio.gracelauncher.data.HomeLayout(
-                        widgetId = id, widgetProvider = info.provider.flattenToString(),
-                        widgetLabel = label, widgetHeightDp = 0,
-                    )
-                    val items = com.galaxyrio.gracelauncher.data.LauncherItemsRepository(
-                        LauncherDatabase.getInstance(context))
-                    items.updatePopup(ownerKey, emptyList()) { entries ->
-                        if (entries.any { it.widget?.widgetId == id }) entries else entries + PopupItem("widget:$id", layout)
-                    }
-                    launchConfigureIfAny(context, manager, id,
-                        "GraceHomeViewModel popup widget configure launch failed")
-                    true
-                }.getOrElse { error ->
-                    ModLog.e("GraceHomeViewModel addPopupWidgetTo failed", error); false
-                }
-            }
-            _widgetSetupResults.tryEmit(success)
-        }
-    }
+    fun addPopupWidgetTo(ownerKey: String, info: AppWidgetProviderInfo) =
+        widgetController.addPopupTo(ownerKey, info)
 
     /**
      * folders 阶段（hotfix folders2）：模块设置页快捷方式代查（SHORTCUTS_QUERY）。
