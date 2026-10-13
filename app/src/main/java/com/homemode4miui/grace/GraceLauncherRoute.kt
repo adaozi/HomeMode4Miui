@@ -23,8 +23,6 @@ package com.homemode4miui.grace
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.background
@@ -39,27 +37,22 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -69,12 +62,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import android.app.Activity
 import android.app.WallpaperManager
@@ -86,8 +76,6 @@ import com.homemode4miui.bridge.GraceBridge
 import com.homemode4miui.util.ModLog
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherShortcut
-import com.galaxyrio.gracelauncher.data.media.IdleMediaSessionId
-import com.galaxyrio.gracelauncher.data.media.MediaCommand
 import com.galaxyrio.gracelauncher.data.weather.WeatherStatus
 import com.galaxyrio.gracelauncher.platform.AppLaunchTransition
 import com.galaxyrio.gracelauncher.platform.LauncherAppTransitions
@@ -122,9 +110,6 @@ import com.galaxyrio.gracelauncher.ui.theme.rememberWallpaperBlurAvailable
 import com.galaxyrio.gracelauncher.ui.widgets.LocalWidgetHost
 import com.galaxyrio.gracelauncher.ui.widgets.WidgetPicker
 import com.galaxyrio.gracelauncher.ui.widgets.rememberWidgetHost
-import com.materialkolor.PaletteStyle
-import com.materialkolor.ktx.toDynamicScheme
-import com.materialkolor.ktx.toneColor
 import kotlinx.coroutines.launch
 
 @Composable
@@ -164,7 +149,6 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var overlay by remember { mutableStateOf<LauncherOverlay?>(null) }
     // 上游同步 v1.1.8 S4：Grace Button 过渡状态机（原版 LauncherScreen.kt:519-606）
-    var systemActionAccess by rememberSaveable { mutableStateOf(false) }
     var buttonTransition by remember { mutableStateOf<com.galaxyrio.gracelauncher.ui.components.GraceButtonTransition?>(null) }
     var instantButtonEntrance by remember { mutableStateOf(false) }
     val currentButtonTransition by androidx.compose.runtime.rememberUpdatedState(buttonTransition)
@@ -374,7 +358,9 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             }
         }
     } else {
-        wallpaperBlurBitmap.value = null
+        // hotfix：composition 期间直接写 MutableState 是 Compose 明令禁止的
+        //（会触发额外失效回溯），包进 SideEffect
+        androidx.compose.runtime.SideEffect { wallpaperBlurBitmap.value = null }
     }
 
     // ---- hotfix6：壁纸遮罩色（原版 LauncherScreen.kt:623-629 wallpaperTint）----
@@ -923,9 +909,6 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         // 过渡遮罩（最顶层：hero 圆形展开/锁屏黑场）+ 无障碍引导（按钮 LockScreen 未授权时）
         buttonTransition?.let {
             com.galaxyrio.gracelauncher.ui.components.GraceButtonTransitionOverlay(it)
-        }
-        if (systemActionAccess) {
-            com.galaxyrio.gracelauncher.ui.components.GraceSystemAccessDialog { systemActionAccess = false }
         }
 
         // ---- FAB 已移除（上游同步 S8b 修复）：P4 时代的搜索 FAB 与 GraceButton 完全重叠

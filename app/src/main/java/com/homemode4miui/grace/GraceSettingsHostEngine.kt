@@ -107,8 +107,8 @@ class GraceSettingsHostEngine(
                 true
             }
             GraceSettingsBridge.Cmd.SET_HIDDEN_APPS -> {
-                val keys = json?.let { j -> (0 until JSONArray(j).length()).map { k -> JSONArray(j).optString(k) } }?.filter(String::isNotBlank)?.toSet()
-                repo.setHiddenApps(keys ?: emptySet()); true
+                val keys = decodeKeys(json).filter(String::isNotBlank).toSet()
+                repo.setHiddenApps(keys); true
             }
             GraceSettingsBridge.Cmd.SAVE_FOLDER -> {
                 val f = decodeFolder(json) ?: return false
@@ -213,6 +213,7 @@ class GraceSettingsHostEngine(
                 }?.toMap() ?: emptyMap()
                 val popupsJson = dao?.popups()?.first()
                     ?.associate { it.ownerKey to it.itemsJson } ?: emptyMap()
+                val favoriteOrder = favoritesStore.currentOrder().orEmpty()
                 GraceSettingsBridge.Snapshot(
                     ok = true,
                     settings = snapshot.settings,
@@ -221,8 +222,8 @@ class GraceSettingsHostEngine(
                     folders = snapshot.folders,
                     popupsJson = popupsJson,
                     itemIcons = icons,
-                    favoriteOrder = favoritesStore.currentOrder().orEmpty(),
-                    favoriteKeys = favoritesStore.currentOrder().orEmpty().toSet(),
+                    favoriteOrder = favoriteOrder,
+                    favoriteKeys = favoriteOrder.toSet(),
                     textMode = preferences.textMode,
                     themedIcons = preferences.themedIcons,
                     renames = preferences.renames(),

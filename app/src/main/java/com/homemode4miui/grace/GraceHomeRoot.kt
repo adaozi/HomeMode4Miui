@@ -22,7 +22,6 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
@@ -78,7 +77,6 @@ fun GraceHomeRoot(
                 withFrameNanos { }
                 onComposeAlive?.invoke()
             }
-            val state by viewModel.uiState.collectAsState()
             // P2：路由升级为两态（首页/抽屉/搜索），见 GraceLauncherRoute；
             // P5：透传宿主 Activity（启动动画中枢构造用）
             GraceLauncherRoute(viewModel, hostActivity = hostActivity)

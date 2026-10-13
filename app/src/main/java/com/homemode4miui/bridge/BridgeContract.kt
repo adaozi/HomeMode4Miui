@@ -139,9 +139,11 @@ object GraceBridge {
     fun encodeNotifications(map: Map<String, List<AppNotification>>): String {
         val root = JSONArray()
         var totalBytes = 0
-        map.forEach { (pkg, list) ->
+        // hotfix：超限后直接终止外层 —— 旧实现 return@forEach 只跳过当前条目，
+        // 同 app 剩余条目与后续 app 仍逐条构造/序列化/计字节，白做 CPU
+        outer@ for ((pkg, list) in map) {
             val items = JSONArray()
-            list.take(NOTIFICATIONS_PER_APP_LIMIT).forEach { n ->
+            for (n in list.take(NOTIFICATIONS_PER_APP_LIMIT)) {
                 val item = JSONObject()
                     .put("key", n.key)
                     .put("title", n.title)
@@ -151,7 +153,7 @@ object GraceBridge {
                     .put("canDismiss", n.canDismiss)
                     .put("canOpen", n.canOpen)
                 totalBytes += item.toString().toByteArray(Charsets.UTF_8).size + pkg.length + 8
-                if (totalBytes > NOTIFICATIONS_TOTAL_BYTES_LIMIT) return@forEach
+                if (totalBytes > NOTIFICATIONS_TOTAL_BYTES_LIMIT) break@outer
                 items.put(item)
             }
             if (items.length() > 0) root.put(JSONObject().put("pkg", pkg).put("items", items))

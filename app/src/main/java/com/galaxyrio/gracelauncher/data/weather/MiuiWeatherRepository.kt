@@ -149,10 +149,6 @@ class MiuiWeatherRepository(context: Context) {
             val sorted = rows.sortedBy { it.day }
             val live = sorted.firstOrNull()
             val forecast = sorted.drop(1).take(5)
-            android.util.Log.d("HomeMode4Miui", "MiuiWeather rows: " + sorted.joinToString("; ") {
-                "day=${it.day} t=${it.temperature} range=${it.temperatureRange} type=${it.weatherType} " +
-                    "ft=${it.forecastType} desc=${it.description} pub=${it.publishTime}"
-            })
             val currentWeather = live?.let { current(it, now) }
             val hourly = loadHourly(selected.id, live?.publishTime ?: rows.firstOrNull()?.publishTime, now)
             WeatherState(
@@ -234,8 +230,6 @@ class MiuiWeatherRepository(context: Context) {
                 ?.atZone(now.zone)?.toLocalDate()?.atStartOfDay(now.zone)?.toInstant()
                 ?: return emptyList()
             query(uri("hourlyData").buildUpon().appendPath(cityId).build()) { cursor ->
-                android.util.Log.d("HomeMode4Miui", "MiuiWeather hourly cols=" +
-                    cursor.columnNames.joinToString(",") + " count=${cursor.count}")
                 val out = ArrayList<WeatherHour>()
                 while (cursor.moveToNext()) {
                     val offsetMs = cursor.optStringMw("date_time")?.toLongOrNull() ?: continue
@@ -259,13 +253,9 @@ class MiuiWeatherRepository(context: Context) {
                         )
                     )
                 }
-                android.util.Log.d("HomeMode4Miui", "MiuiWeather hourly parsed=${out.size}")
                 out
-            } ?: emptyList<WeatherHour>().also {
-                android.util.Log.d("HomeMode4Miui", "MiuiWeather hourly query returned null cursor")
-            }
-        } catch (error: Exception) {
-            android.util.Log.d("HomeMode4Miui", "MiuiWeather hourly load failed: $error")
+            } ?: emptyList()
+        } catch (_: Exception) {
             emptyList()
         }
 

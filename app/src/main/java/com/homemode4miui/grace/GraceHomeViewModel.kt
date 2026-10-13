@@ -845,12 +845,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update { it.copy(favoriteOrder = refreshed) }
     }
 
-    /** P1 空态恢复入口：清空已存收藏并重新按默认规则初始化（dialer/相机等前 6 个）。 */
-    fun resetFavorites() {
-        favoritesStore.reset()
-        val refreshed = favoritesStore.favoritesFor(_uiState.value.apps)
-        _uiState.update { it.copy(favoriteOrder = refreshed) }
-    }
 
     /**
      * P1 演示入口（时钟长按）：循环切换 ClockLayout。P3 起落 Room
@@ -896,13 +890,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update { it.copy(hasMediaAccess = granted) }
     }
 
-    /**
-     * B6.1 权限引导意图（原版 MediaAccess.settingsIntent 逐字）。hotfix2：启动改由
-     * Route 层用【宿主 Activity】执行 —— hotfix1 前这里用 Application context +
-     * NEW_TASK 把系统设置开到独立 task，MIUI 上该路径设置页秒退回桌面（装机实锤）。
-     */
-    fun mediaAccessSettingsIntent(): Intent = MediaAccess.settingsIntent(getApplication<Application>())
-
     /** B6.2：日程刷新（原版 refreshAgenda 语义：无权限 → PermissionRequired，查询降级 Error）。 */
     fun refreshAgenda() {
         val context = getApplication<Application>()
@@ -927,12 +914,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** B6.2 权限引导：宿主 manifest 是否声明 READ_CALENDAR（声明了才有授权入口）。 */
-    fun hasCalendarPermissionEntry(): Boolean = runCatching {
-        val context = getApplication<Application>()
-        context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
-            .requestedPermissions?.contains(Manifest.permission.READ_CALENDAR) == true
-    }.getOrDefault(false)
 
     /**
      * B6.2 权限降级：宿主 manifest 不可改、无法在宿主进程内弹 READ_CALENDAR 授权

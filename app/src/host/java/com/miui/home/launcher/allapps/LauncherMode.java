@@ -6,11 +6,7 @@ import android.view.View;
 import com.miui.home.launcher.DragObject;
 import com.miui.home.launcher.ShortcutInfo;
 
-import java.io.File;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.function.Predicate;
 
 /**
  * [HOST STUB] 宿主类编译期桩 —— 永不在运行期执行。
@@ -21,11 +17,11 @@ import java.util.function.Predicate;
  *
  * 签名来源：apk_analysis/decompiled/LauncherMode.java（androguard DAD 反编译，逐条核对 smali）。
  * 只声明"被模块继承/覆写/引用"的成员；未声明的方法运行期自然继承宿主实现。
+ * cleanup（v2.9.39）：删除全部零引用的"编译期完整性"成员与 modeDatabasePath 字段 ——
+ * 每多一个声明就多一份"宿主签名漂移后 stub 与真实类不一致却无人发现"的维护面。
  * 方法体一律 throw —— 用于误执行时的显式失败。
  */
 public abstract class LauncherMode {
-
-    protected static final LauncherModeDatabasePath modeDatabasePath = null;
 
     // ==== 抽象方法（宿主要求子类必须实现）====
 
@@ -75,50 +71,6 @@ public abstract class LauncherMode {
     public String getPullDownGesture(Context p2) { throw stub(); }
 
     public String getSlideUpGesture(Context p2) { throw stub(); }
-
-    // ==== 模块不覆写、但签名被引用的方法（供编译期完整性）====
-
-    public String getBackupFileSuffix() { throw stub(); }
-
-    public String getCloudBackUpOrReplacementPreKey() { throw stub(); }
-
-    public String getDefaultWorkspaceNamePrefix() { throw stub(); }
-
-    public String getRestoreFileSuffix() { throw stub(); }
-
-    public String getTransformationType(Context p2) { throw stub(); }
-
-    public long getCurrentDefaultScreenId() { throw stub(); }
-
-    public float getShortcutTitleScale() { throw stub(); }
-
-    public File getLauncherDatabaseDir(Context p1) { throw stub(); }
-
-    public File getLauncherDatabasePath(Context p2, String p3) { throw stub(); }
-
-    public boolean canLoadShortcutInfo(HashMap p1, ShortcutInfo p2, boolean p3) { throw stub(); }
-
-    public boolean isDoubleTapToLock(Context p1) { throw stub(); }
-
-    public boolean isNoWordModel() { throw stub(); }
-
-    public boolean isOnlyWidgetNoWordModel() { throw stub(); }
-
-    public boolean supportPhoneResizeWidgetScale() { throw stub(); }
-
-    public void refreshAutoFillEmpty(Context p1) { throw stub(); }
-
-    public void refreshDoubleTapLock(Context p1) { throw stub(); }
-
-    public void refreshScreenCellsLocked(Context p1) { throw stub(); }
-
-    public void refreshScreenNoWordModel(Context p1) { throw stub(); }
-
-    public void refreshScreenOnlyWidgetNoWordModel(Context p1) { throw stub(); }
-
-    public void restoreDatabaseFile(Context p8, List p9) { throw stub(); }
-
-    public Predicate getRestoreFileFilter() { throw stub(); }
 
     private static RuntimeException stub() {
         return new RuntimeException("HOST STUB — never executed at runtime");

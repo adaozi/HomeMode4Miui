@@ -66,8 +66,16 @@ public final class LogExporter {
     private LogExporter() {
     }
 
+    /** 单飞闸：连点导出会产生重名文件竞态，进行中忽略后续点击 */
+    private static final java.util.concurrent.atomic.AtomicBoolean sExporting =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     /** 异步导出：minutes ∈ {60,30,10,5,1}；结果经主线程回调 */
     public static void export(Context ctx, final int minutes, final Callback cb) {
+        if (!sExporting.compareAndSet(false, true)) {
+            cb.onDone("已有导出在进行中，请稍候");
+            return;
+        }
         final Context app = ctx.getApplicationContext();
         new Thread(new Runnable() {
             @Override
@@ -83,6 +91,7 @@ public final class LogExporter {
                 h.post(new Runnable() {
                     @Override
                     public void run() {
+                        sExporting.set(false);
                         cb.onDone(msg);
                     }
                 });
@@ -133,7 +142,7 @@ public final class LogExporter {
                 .append(Build.MODEL).append(" / Android ")
                 .append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT)
                 .append(")\n");
-        out.append("# root     : ").append(rootUsed ? "已使用（可读宿主侧日志）" : "未使用\n");
+        out.append("# root     : ").append(rootUsed ? "已使用（可读宿主侧日志）\n" : "未使用\n");
         out.append("# 提示     : 提交 bug 反馈前请浏览一遍，确认不含个人隐私内容\n");
         out.append("# ==============================\n\n");
         out.append(body);
@@ -194,10 +203,13 @@ public final class LogExporter {
      * @return 过滤后的日志文本；命令启动失败（如无 su）返回 null；执行失败返回空串
      */
     private static String runCommandCapture(String[] cmd, long startMs, long timeoutMs) {
+        // hotfix：destroy 兜底 —— 旧实现读流抛异常时进程既不 destroy 也不关流（泄漏）
+        final Process[] proc = new Process[1];
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(false);
-            Process p = pb.start();
+            proc[0] = pb.start();
+            final Process p = proc[0];
 
             // stderr 单线程排空（防管道阻塞；内容仅用于失败诊断）
             final StringBuilder err = new StringBuilder();
@@ -253,6 +265,11 @@ public final class LogExporter {
         } catch (Throwable t) {
             // IOException（无 su 二进制等）→ null 让上层走下一来源
             return null;
+        } finally {
+            // hotfix：异常路径 destroy 兜底（正常路径 waitFor 超时分支已 destroy，此处幂等无害）
+            if (proc[0] != null) {
+                proc[0].destroy();
+            }
         }
     }
 

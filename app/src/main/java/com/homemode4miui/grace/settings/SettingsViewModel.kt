@@ -527,8 +527,4 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         .put("keys", JSONArray(folder.appKeys))
         .toString()
 
-    private fun List<LauncherApp>.orderedBy(keys: List<String>): List<LauncherApp> {
-        val byKey = associateBy(LauncherApp::key)
-        return (keys.mapNotNull(byKey::get) + filterNot { it.key in keys.toSet() })
-    }
 }

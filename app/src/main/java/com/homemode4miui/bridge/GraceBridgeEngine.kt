@@ -105,8 +105,10 @@ object GraceBridgeEngine {
 
     private fun observe() {
         val engineScope = scope ?: return
-        // B6.3：通知快照下发
-        engineScope.launch {
+        // B6.3：通知快照下发。hotfix：collect 跑 Default —— 全量 JSON 编码 +
+        // 逐条字节计数（192KB 级）不占主线程（通知风暴/正文超长时 Main 会卡顿）；
+        // sendBroadcast 本身线程安全，无需回主线程
+        engineScope.launch(Dispatchers.Default) {
             runCatching {
                 appNotifications.state.collect { map ->
                     val fingerprint = GraceBridge.encodeNotifications(map)
@@ -169,13 +171,10 @@ object GraceBridgeEngine {
     fun mediaCommand(sessionId: String, command: MediaCommand): Boolean {
         start(context ?: return false)
         return runCatching {
-            when (command) {
-                MediaCommand.OpenPlayer -> mediaRepository?.command(sessionId, MediaCommand.OpenPlayer) ?: false
-                else -> mediaRepository?.command(sessionId, command) ?: false
-            }.also { result ->
-                // hotfix8 诊断：控制命令闭环打点（logcat tag HomeMode4Miui）
-                ModLog.i("GraceBridgeEngine mediaCommand($sessionId, $command) -> $result")
-            }
+            val result = mediaRepository?.command(sessionId, command) ?: false
+            // hotfix8 诊断：控制命令闭环打点（logcat tag HomeMode4Miui）
+            ModLog.i("GraceBridgeEngine mediaCommand($sessionId, $command) -> $result")
+            result
         }.getOrDefault(false)
     }
 
@@ -300,11 +299,14 @@ object GraceBridgeEngine {
         ensureListenerBound()
         lastNotificationsFingerprint = null
         lastMediaFingerprint = null
-        // 通知快照纯 JSON，主线程直发（StateFlow 当前值，即使空也发 —— 宿主据此清行）
-        runCatching {
-            send(GraceBridge.ACTION_NOTIFICATIONS,
-                GraceBridge.encodeNotifications(appNotifications.state.value), null)
-        }.onFailure { ModLog.e("GraceBridgeEngine refreshSnapshots notifications failed", it) }
+        // 通知快照纯 JSON（StateFlow 当前值，即使空也发 —— 宿主据此清行）。
+        // hotfix：编码移 Default（onReceive 主线程不再做 192KB 级 JSON 构建）
+        scope?.launch(Dispatchers.Default) {
+            runCatching {
+                send(GraceBridge.ACTION_NOTIFICATIONS,
+                    GraceBridge.encodeNotifications(appNotifications.state.value), null)
+            }.onFailure { ModLog.e("GraceBridgeEngine refreshSnapshots notifications failed", it) }
+        }
         // 媒体快照含封面编码（Dispatchers.Default），走引擎协程
         scope?.launch { publishMediaCurrent() }
         ModLog.i("GraceBridgeEngine refreshSnapshots (pull on host mount)")

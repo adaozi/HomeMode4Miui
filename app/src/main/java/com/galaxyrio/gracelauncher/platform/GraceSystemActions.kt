@@ -42,7 +42,10 @@ internal object GraceSystemActions {
                     GraceButtonAction.QuickSettings -> expandQuickSettings(context)
                     else -> false
                 }
-            } || GraceRootActions.perform(target.action) || GraceAccessibilityService.perform(target.action)
+            } || GraceRootActions.perform(target.action)
+            // hotfix：a11y 直调项删除 —— GraceRootActions.perform 对这三个动作
+            // 恒返回 true（fire-and-forget），短路右侧永不可达；root 内部失败
+            // 已异步回退 a11y，此处同步兜底属误导性死代码。
         else -> false
     }
 

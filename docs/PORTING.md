@@ -370,3 +370,16 @@ DIFF vs 桩文件:
 - [x] **顺手加固**：MainHook 子进程守卫（processName ≠ 主进程只打日志不装 hook，防多份 pong 与静态状态分裂）；MainHook hostVersion/hostVersionSafe 合并为单实现（withCode 参数）；failedHooksSnapshot 死方法删除；HostCompat.family() 死方法删除；ModePrefs graceSp 与 sp() 重复实现去重；PermissionGate 通知授权匹配改正则精确段匹配（子串撞包防护）；AutoStartProbe checkOpNoThrow 反射缓存；GracePinItemHook launcherApps 死方法删除。
 - [x] 构建：assembleRelease 通过，versionCode 71。
 - [ ] **遗留**：P2 批（死代码 ~450 行、MiuiWeatherRepository 诊断 Log.d 摘除、GraceBridgeEngine 通知快照主线程 JSON 编码、GraceLauncherRoute 组合期写状态、热路径反射缓存、60s 时钟循环抽公共组件）待后续批次。
+
+### cleanup（v2.9.39-cleanup / versionCode 72，2026-10-14）—— P2 死代码清理 + 主线程编码治理批
+
+- [x] **死代码删除（~370 行）**：util/UiText.java 整类（View 体系遗留，Compose 化后零消费）、data/PrivateAppCache.kt 整文件（上游消费端未移植）、GraceHomeViewModel 3 死方法（resetFavorites/mediaAccessSettingsIntent/hasCalendarPermissionEntry）、SettingsViewModel.orderedBy、GraceLauncherRoute systemActionAccess 死状态机 + 17 个零引用 import（getValue/setValue 为 by 委托必需，保留）、GraceHomeRoot 多余 uiState 订阅、GraceSystemActions 不可达 a11y 短路项（GraceRootActions 恒返回 true）。
+- [x] **host stub 冗余收敛**：LauncherMode 21 个零引用"编译期完整性"方法 + modeDatabasePath 字段删除，LauncherModeDatabasePath.java 整文件删除（stub 头注自述规则恢复为真：只声明被模块继承/覆写/引用的成员）；LauncherModeController DESKTOP/DRAWER + 11 个零引用方法删除；DragObject 零引用自方法删除。宿主签名漂移时的不一致维护面收窄。
+- [x] **MiuiWeatherRepository 诊断 Log.d 摘除**（5 处，v2.9.36 登记遗留）—— 装机诊断已完成使命（结论已固化进逆向注释），logcat/LogExporter 不再被全量行 dump 刷屏。
+- [x] **主线程编码治理**：GraceBridgeEngine 通知快照 collect 与 refreshSnapshots 的 192KB 级 JSON 编码移 Dispatchers.Default（sendBroadcast 线程安全，无需回主线程）；encodeNotifications 超限后 break@outer（旧实现 return@forEach 后续条目仍白做构造/序列化）。
+- [x] **组合期写状态修复**：GraceLauncherRoute 壁纸模糊 else 分支包 SideEffect（Compose 明令禁止 composition 期间写 MutableState）。
+- [x] **LogExporter**：导出头 root 行缺 \n 格式 bug；runCommandCapture finally destroy 兜底（读流异常不再泄漏子进程）；export 单飞闸（连点防重名文件竞态）。
+- [x] **GraceSettingsHostEngine**：快照构建内 currentOrder() 连读两次 SP → 单读复用；SET_HIDDEN_APPS 逐字 JSONArray 双解析改用既有 decodeKeys()。
+- [x] **GraceBridgeEngine mediaCommand**：OpenPlayer 冗余 when（两分支同调用）收敛为直调。
+- [x] 构建：assembleRelease 通过，versionCode 72（中途三次编译错误即时修正：when 替换括号残留、孤儿 KDoc、内部类引用非 final 局部变量 → final holder）。
+- [ ] **遗留（v2.9.40-perf 候选）**：热路径反射缓存（GestureIsolator/HomeController/MainHook）、rowGestures remember 化（Compose 稳定性）、60s 时钟循环抽 rememberMinuteTick 公共组件、GraceHomeUiState 拆分与超长文件职责拆分（结构性，随 P3+ 推进）。
