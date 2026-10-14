@@ -449,3 +449,11 @@ DIFF vs 桩文件:
 - [x] **装机实锤**：设置页仍有英文（非字体名）—— 扫描 zh-rCN 中不含中文的 string 值，锁定 4 个漏网：icon_designer_title（Icon designer → 图标设计器，设置入口标题）、icon_designer_shape_gem（Gem → 宝石形）、icon_designer_shape_cookie（n-side cookie → 甜饼形（N 边））、accessibility_service_name（→ HomeMode4Miui 系统动作）。
 - [x] **终验**：zh-rCN 剩余无中文值全部为合理专名（app_name / 字体名×2 / GNU GPLv3 / 搜索引擎品牌×4 / URL 示例），无 UI 文案残留。
 - [x] 构建：assembleRelease 通过，versionCode 81；产物已导出 .build/out/。
+
+### settings-home（v2.9.49-settings-home / versionCode 82，2026-10-14）—— 设置页退出直达桌面
+
+- [x] **需求**：设置页返回不回模块主界面，直接回桌面。
+- [x] **场景根因**：模块任务栈可能残留旧的 MainActivity（gate 页）—— 用户先手动开过模块主界面，之后从桌面进设置页时栈为 [MainActivity(旧), SettingsActivity]，设置页普通 finish 落回旧主界面。
+- [x] **修复**：SettingsActivity 新增 exitToHome()（CATEGORY_HOME 拉起被接管的 com.miui.home + finishAffinity 清整个模块任务栈），三处退出路径统一接入：① Compose 根页返回箭头 onBack；② 系统返回手势（onBackPressedDispatcher callback，仅根页生效——NavHost 子页返回自持弹栈，handleRootBack=false 保证 PredictiveBackHandler 不拦截）；③ closeRequests（跨进程 moveWidget 关页回桌面看编辑态）。
+- [x] **防回归**：finishAffinity 同时清掉残留 gate 页，任务栈归零，后续入口不再堆叠。
+- [x] 构建：assembleRelease 通过，versionCode 82；产物已导出 .build/out/。

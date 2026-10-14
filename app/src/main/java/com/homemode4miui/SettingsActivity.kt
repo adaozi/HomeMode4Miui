@@ -8,8 +8,10 @@
  */
 package com.homemode4miui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -58,6 +60,15 @@ class SettingsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 返回语义（2026-10-14）：设置页退出（返回箭头 / 系统返回 / closeRequests）
+        // 一律不回模块主界面，直接回桌面（CATEGORY_HOME → 被接管的 com.miui.home）。
+        // 场景根因：模块任务栈可能残留旧的 MainActivity（gate 页），普通 finish
+        // 会落回主界面；exitToHome + finishAffinity 同时清栈。
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                exitToHome()
+            }
+        })
         initialPage = intent?.getStringExtra("page")
         enableEdgeToEdge()
         setContent {
@@ -77,7 +88,7 @@ class SettingsActivity : ComponentActivity() {
                     LauncherSettingsScreen(
                         uiState = settingsViewModel.uiState.collectAsStateWithLifecycle().value,
                         actions = settingsViewModel.actions,
-                        onBack = ::finish,
+                        onBack = ::exitToHome,
                         // 独立 task 的 LAUNCHER 入口：保留系统跨任务转场，root back 直接 finish
                         handleRootBack = false,
                         // C 组（C4）：时钟长按面板直达 ClockStyle 面板（原为 cycleClockLayout 演示）
@@ -112,10 +123,28 @@ class SettingsActivity : ComponentActivity() {
             closeRequestsJobActive = true
             lifecycleScope.launch {
                 repeatOnLifecycle(Lifecycle.State.STARTED) {
-                    settingsViewModel.closeRequests.collect { finish() }
+                    settingsViewModel.closeRequests.collect { exitToHome() }
                 }
             }
         }    }
 
     private var closeRequestsJobActive = false
+
+    /**
+     * 退出设置页并回桌面：先拉起 CATEGORY_HOME（默认桌面 = 被接管的 com.miui.home），
+     * 再 finishAffinity 清掉整个模块任务栈（含可能残留的旧 MainActivity gate 页）。
+     * 解析失败（极端场景无默认桌面）退化为普通 finish。
+     */
+    private fun exitToHome() {
+        try {
+            startActivity(
+                Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_HOME)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (t: Throwable) {
+            ModLog.i("SettingsActivity exitToHome: 无默认桌面可回，退化 finish —— $t")
+        }
+        finishAffinity()
+    }
 }
