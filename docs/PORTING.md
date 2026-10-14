@@ -657,3 +657,14 @@ DIFF vs 桩文件:
 - 实机判读：`phase3: observation hook installed on ...` + 桌面操作后
   `observation hook call #1/#256/...` + launcher 不崩 = phase 3 过，进 phase 4
   （on_swipe_process 真门控，按符号定位）。
+
+### logd 轮转治本 + namespace 穿透读镜像（2026-10-14）—— v2.9.75-os4b-p3b / vc106
+
+- vc105 实机：容器 verbose 证实两次 launcher 重启（20:04:23 / 20:08:33）native
+  模块均加载成功（zn-daemon64 "loading module into ... hyos_spawner" 注入链确认），
+  但 logcat 5 分钟窗口内 H4MNative 全被轮转——58s 冷启动日志量打穿 main 缓冲。
+- 治本：① 导出时 `su logcat -G 4M` 扩 logd 缓冲（幂等保底）；② 镜像读取加
+  /proc/<pidof com.miui.home>/root/ 前缀（穿透可能的 mnt namespace 隔离），
+  直连路径兜底。
+- phase 3 观测 hook 无需改动（vc105 已装载，只是看不见日志）。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.75-os4b-p3b-106.apk。

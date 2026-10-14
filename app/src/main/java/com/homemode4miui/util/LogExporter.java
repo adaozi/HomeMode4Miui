@@ -249,7 +249,11 @@ public final class LogExporter {
             sec.append("# 宿主上下文 : 不可用（无 su 或 pm 查询失败）\n");
         }
 
-        // 探针日志：su 优先，无 su 降级
+        // logd main 缓冲扩容（launcher 冷启动日志量大，默认缓冲会被轮转吃掉
+        // 探针行；幂等，每次导出时顺手保底）
+        runCommandCapture(new String[]{"su", "-c", "logcat -G 4M"}, 0L, 10_000);
+
+        // logcat 采集：su 优先，无 su 降级本进程
         String lc = runCommandCapture(new String[]{"su", "-c",
                 "logcat -d -v time -s H4MNative:V"}, startMs, 15_000);
         String src;
@@ -270,11 +274,20 @@ public final class LogExporter {
             if (!lc.endsWith("\n")) sec.append('\n');
         }
 
-        // 持久化文件镜像（native 双写，免疫 logd 环形缓冲轮转；尾部 64KB 封顶）
+        // 持久化文件镜像：优先经 /proc/<pid>/root 读取（穿透 launcher 可能的
+        // mount namespace 隔离），直连路径兜底；尾部 64KB 封顶
+        String pid = runCommandCapture(new String[]{"su", "-c",
+                "pidof com.miui.home"}, 0L, 10_000);
+        String nsPrefix = "";
+        if (pid != null && pid.trim().matches("\\d+")) {
+            nsPrefix = "/proc/" + pid.trim() + "/root";
+        }
         for (String p : new String[]{
+                nsPrefix + "/data/user_de/0/com.miui.home/cache/h4m_native.log",
                 "/data/user_de/0/com.miui.home/cache/h4m_native.log",
                 "/data/user/0/com.miui.home/cache/h4m_native.log",
                 "/data/data/com.miui.home/cache/h4m_native.log"}) {
+            if (p.startsWith("/data") == false && p.length() < 20) continue;
             String file = runCommandCapture(new String[]{"su", "-c",
                     "tail -c 65536 " + p + " 2>/dev/null"}, 0L, 10_000);
             if (file != null && file.trim().length() > 0) {
