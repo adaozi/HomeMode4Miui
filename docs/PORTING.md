@@ -516,3 +516,36 @@ DIFF vs 桩文件:
 - **下次重启该方向的排查线索**：addGadget 返回的 Gadget 直接放进 Compose AndroidView 不可用，
   疑似依赖宿主 Launcher 环境（mWorkspace.addInScreen / LauncherFrameLayout 的属性动画体系 /
   TrackView 统计），需对照 CellLayout.createNewGadget 完整宿主上下文，而非裸 View 挂载。
+
+### OS4 段回退 + Route B PoC（2026-10-14）—— v2.9.66-os4b-poc / vc97
+
+- **OS4 Java 层适配段整体回退**：revert commit 4206741（revert 8b6d869..HEAD，即
+  v2.9.58~v2.9.65 / vc89~96 全部 8 个 commit），工作树与 v2.9.55-sync-reveal（vc88）
+  逐字节一致；OS4 优雅退场（os4Skip/FAMILY_OS4）与诊断探针全部移除。回退版产物
+  .build/out/HomeMode4Miui-v2.9.55-sync-reveal-88.apk。
+- **Route B（native hook）可行性评估**：docs/RE_HyperOS4_NATIVE_HOOK.md。基于
+  WOMMO（GPL-3.0）+ HyperOS4SwipeGate（MIT）代码级精读（源码在
+  .workbuddy/re/os4-ref/），结论：OS4 桌面（Flutter UI + Rust 核心，APK 零 Java
+  字节码）native hook 工程可行，需 LSPosed Modern API 102（≥7846 fork）+
+  Zygisk Next 1.5.0+。
+- **符号情报突破**：libapp.so / libapp_launcher.so 均带 .gnu_debugdata（XZ 压缩
+  符号表），解出 Dart 符号 78,505 个、Rust 符号 23,071 个（CSV 在
+  .workbuddy/re/os4/）。此前"魔数扫描 0 命中"结论作废。SwipeGate 全部目标函数
+  在 7748 版按符号名精确命中：on_swipe_process @0x702690、convert_offset
+  @0x6b3cc4、handle_back_gesture @0x6fe948、is_merge_back_break_open_anim_support
+  @0x6cf9a0（RVA 与参考版本全部不同 → 实锤按符号定位是唯一可持续方案）。
+- **PoC phase 1（本批）**：native_init 观察入口，零业务 hook。新增
+  app/src/main/cpp/{native_api.h, homemode4miui_native.cpp, CMakeLists.txt} +
+  META-INF/xposed/native_init.list（libhomemode4miui_native.so）；legacy 入口
+  assets/xposed_init 不动，两链路独立加载。实现：hyos_spawner/cmdline 双身份
+  判定、观察库 libapp.so/libapp_launcher.so/libhyper_os_flutter.so/
+  librust_maml_sdk.so 的 load 回调日志 + backfill 探针 + Dart snapshot 符号
+  dlsym 验证，全 WARN 级日志（tag H4MNative）。NDK 29.0.14206865 + cmake 3.22.1，
+  16KB page 对齐（max-page-size=16384，PT_LOAD align 0x4000 实测通过）。
+- 构建：assembleRelease 通过，vc97；产物 .build/out/HomeMode4Miui-v2.9.66-os4b-poc-97.apk。
+- **装机验证点（下一步）**：① 混装 APK 在 LSPosed 中 legacy 入口是否照常加载
+  （OS2/OS3 回归）；② OS4 宿主内 logcat 过滤 H4MNative 看 spawner/launcher
+  身份判定与库加载回调是否触发；③ 若 native_init 不触发，检查 LSPosed fork
+  是否要求 META-INF/xposed/module.prop 与 java_init.list 同批声明。
+- 里程碑批次规划：phase 2 = madvise guard；phase 3 = 只读 trampoline 验证；
+  phase 4 = 选点真 hook（建议 Rust 层起步）。
