@@ -614,3 +614,15 @@ DIFF vs 桩文件:
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.71-os4b-p2-102.apk。
 - 实机判读：H4MNative 期待 `guard: madvise guard installed` +
   `guard self-test: ... => PASSED`；FAILED 时先看 head hex 与 trampoline=0。
+
+### native 日志双写文件镜像（2026-10-14）—— v2.9.72-os4b-p2b / vc103
+
+- 排障发现：launcher 冷启动 40s 的日志量把 logd main 缓冲打穿，19:01:38 启动的
+  native_init/backfill/libapp/phase2 十几行全部被轮转掉（仅剩最后 2 行），phase 2
+  在 vc102 上到底跑没跑无从判断。
+- 修复（照搬 SwipeGate fileLog 模式）：新增 h4m_log.h —— logcat（WARN/ERROR）
+  + 文件镜像双写 `/data/user_de/0/com.miui.home/cache/h4m_native.log`（行前缀
+  HH:MM:SS.mmm）；LogExporter H4MNative 段追加读该文件尾部 64KB（不过滤时间）。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.72-os4b-p2b-103.apk。
+- 实机判读（重启桌面后导出）：文件镜像段必有完整序列 native_init → guard
+  installed → self-test PASSED/FAILED；logd 只当旁证。

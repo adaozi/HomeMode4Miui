@@ -3,7 +3,8 @@
 
 #include "hook_guard.h"
 
-#include <android/log.h>
+#include "h4m_log.h"
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -13,8 +14,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#define H4M_LOGW(...) __android_log_print(ANDROID_LOG_WARN, "H4MNative", __VA_ARGS__)
-#define H4M_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "H4MNative", __VA_ARGS__)
+#define H4M_LOGW(...) h4m_log::log(ANDROID_LOG_WARN, __VA_ARGS__)
+#define H4M_LOGE(...) h4m_log::log(ANDROID_LOG_ERROR, __VA_ARGS__)
 
 namespace h4m {
 namespace {

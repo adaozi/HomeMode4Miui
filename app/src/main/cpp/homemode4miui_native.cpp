@@ -17,16 +17,15 @@
 // the spawner; business hooks (later phases) must only act inside the launcher
 // child once the target libraries are mapped.
 
+#include "h4m_log.h"
 #include "hook_guard.h"
 #include "native_api.h"
 
-#include <android/log.h>
 #include <dlfcn.h>
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <link.h>
-#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -76,7 +75,7 @@ void logLine(int priority, const char *format, ...) __attribute__((format(printf
 void logLine(int priority, const char *format, ...) {
     va_list ap;
     va_start(ap, format);
-    __android_log_vprint(priority, kTag, format, ap);
+    h4m_log::logv(priority, format, ap);  // logcat + durable file mirror
     va_end(ap);
 }
 
