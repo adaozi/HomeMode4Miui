@@ -58,6 +58,22 @@ public final class LogExporter {
             "/data/adb/lsposed/log/modules.log",    // 旧版备选布局
     };
 
+    /** LSPosed 容器日志目录候选（verbose/all 日志所在，fork 布局漂移依次探测） */
+    private static final String[] LSP_LOG_DIRS = {
+            "/data/adb/lspd/log",
+            "/data/adb/lsposed/log",
+            "/data/adb/lsposed/logs",
+    };
+
+    /**
+     * 容器日志关键词过滤（OS4 native 链路诊断用）：
+     * 模块包名 / 宿主包名 / hyos spawner / native 入口相关行。
+     */
+    private static final java.util.regex.Pattern CONTAINER_KEYWORD =
+            java.util.regex.Pattern.compile(
+                    "homemode4miui|com\\.miui\\.home|hyos|spawner|native_init|NativeModule",
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
+
     /** 模块日志 tag（MainHook/HomeController/HostCompat/ModLog 四处出口统一前缀） */
     private static final String TAG = "HomeMode4Miui";
 
@@ -173,6 +189,13 @@ public final class LogExporter {
             out.append("\n# ---- H4MNative 观察探针 ----\n# 采集失败: ").append(t).append('\n');
         }
 
+        // LSPosed 容器诊断段：模块清单 + 日志目录结构 + 容器日志关键词行
+        try {
+            out.append(buildContainerSection(startMs));
+        } catch (Throwable t) {
+            out.append("\n# ---- LSPosed 容器诊断 ----\n# 采集失败: ").append(t).append('\n');
+        }
+
         return writeToDownloads(ctx, out.toString(), minutes);
     }
 
@@ -250,6 +273,98 @@ public final class LogExporter {
         }
         sec.append("# ========================================\n");
         return sec.toString();
+    }
+
+    /* ==================== LSPosed 容器诊断段 ==================== */
+
+    /**
+     * 容器诊断段（定位 native_init 不触发用）：
+     *   ① /data/adb/modules/ 下的 Magisk 模块清单（LSPosed fork / 注入器类型与版本）；
+     *   ② 容器日志目录 listing（确认 fork 的日志布局）；
+     *   ③ 容器日志关键词行（homemode4miui / com.miui.home / hyos / spawner / native），
+     *      按时间范围过滤 + 续行跟随，限 400 行防灌爆。
+     */
+    private static String buildContainerSection(long startMs) {
+        StringBuilder sec = new StringBuilder();
+        sec.append("\n# ==== LSPosed 容器诊断 ====\n");
+
+        // ① Magisk 模块清单（name/version 行，识别 LSPosed fork 与注入器）
+        String mods = runCommandCapture(new String[]{"su", "-c",
+                "for d in /data/adb/modules/*/; do "
+                        + "echo \"-- $(basename $d)\"; "
+                        + "grep -E '^(name|version|versionCode)=' $d/module.prop 2>/dev/null; done"},
+                startMs, 10_000);
+        if (mods != null && mods.trim().length() > 0) {
+            sec.append("# -- Magisk 模块清单 --\n").append(mods.trim()).append('\n');
+        } else {
+            sec.append("# -- Magisk 模块清单 : 不可用（无 su）--\n");
+        }
+
+        // ② 容器日志目录 listing
+        for (String dir : LSP_LOG_DIRS) {
+            String ls = runCommandCapture(new String[]{"su", "-c",
+                    "ls -la " + dir + " 2>/dev/null"}, startMs, 10_000);
+            if (ls != null && ls.trim().length() > 0) {
+                sec.append("# -- 日志目录 ").append(dir).append(" --\n")
+                        .append(ls.trim()).append('\n');
+            }
+        }
+
+        // ③ 容器日志关键词行（逐文件探测，取第一个命中目录的全量文件）
+        boolean captured = false;
+        for (String dir : LSP_LOG_DIRS) {
+            String ls = runCommandCapture(new String[]{"su", "-c",
+                    "ls " + dir + " 2>/dev/null"}, startMs, 10_000);
+            if (ls == null || ls.trim().length() == 0) continue;
+            for (String f : ls.trim().split("\n")) {
+                if (!f.endsWith(".log") && !f.endsWith(".txt")) continue;
+                String content = runCommandCapture(new String[]{"su", "-c",
+                        "cat " + dir + "/" + f}, startMs, 20_000);
+                if (content == null || content.trim().length() == 0) continue;
+                String filtered = filterByKeywords(content, 400);
+                if (filtered.trim().length() == 0) continue;
+                sec.append("# -- 容器日志 ").append(dir).append('/').append(f)
+                        .append("（关键词过滤，最多 400 行）--\n")
+                        .append(filtered);
+                captured = true;
+            }
+            if (captured) break; // 第一个有货的目录即可
+        }
+        if (!captured) {
+            sec.append("# -- 容器日志 : 各候选目录均未读到关键词行"
+                    + "（目录不存在 / 文件为空 / 无相关记录）--\n");
+        }
+        sec.append("# ========================================\n");
+        return sec.toString();
+    }
+
+    /**
+     * 关键词级过滤（容器日志专用，替代 tag 过滤）：
+     * 有时间戳的行按 CONTAINER_KEYWORD 判定；无时间戳续行跟随上一行；
+     * maxLines 截断保最新（从尾部回数）。
+     */
+    private static String filterByKeywords(String content, int maxLines) {
+        if (content == null || content.length() == 0) return "";
+        ArrayDeque<String> kept = new ArrayDeque<>();
+        boolean keep = false;
+        for (String line : content.split("\n", -1)) {
+            boolean hasTs = LSP_TIME.matcher(line).find()
+                    || LOGCAT_TIME.matcher(line).find();
+            if (hasTs) {
+                keep = CONTAINER_KEYWORD.matcher(line).find();
+            }
+            if (keep) {
+                kept.addLast(line);
+                if (kept.size() > maxLines) {
+                    kept.pollFirst();
+                }
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        for (String l : kept) {
+            out.append(l).append('\n');
+        }
+        return out.toString();
     }
 
     /* ==================== tag 过滤 ==================== */

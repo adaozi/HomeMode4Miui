@@ -577,3 +577,13 @@ DIFF vs 桩文件:
   hyos_spawner 注入 native 模块（SwipeGate 要求 Zygisk Next 1.5.0+ 的 HyOS
   Runtime），届时查 LSPosed 管理器日志页的 native 模块加载行。
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.68-os4b-diag2-99.apk。
+
+### 导出日志附容器诊断段（2026-10-14）—— v2.9.69-os4b-diag3 / vc100
+
+- LogExporter 新增 buildContainerSection：① /data/adb/modules/* 的 name/version
+  清单（识别 LSPosed fork 与注入器）；② lspd/lsposed 日志目录 listing；
+  ③ 容器日志按关键词（homemode4miui/com.miui.home/hyos/spawner/native_init/
+  NativeModule）过滤，续行跟随，限 400 行保最新。
+- 目的：导出按钮一站式拿齐"管理器日志页"才有的容器侧信息（native 模块注册、
+  hyos_spawner 注入记录），不用再让用户手动截图。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.69-os4b-diag3-100.apk。
