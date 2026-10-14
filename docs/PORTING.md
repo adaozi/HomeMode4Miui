@@ -437,3 +437,9 @@ DIFF vs 桩文件:
 - [x] **PlaceholderHomeView**（宿主进程）：提示文本经 createPackageContext 解析模块 placeholder_tip 资源（随设备语言），模块资源不可达回落中文原样 —— 沿用同文件 resolveSemanticColor 的包上下文模式。
 - [x] **双语落地**：values/strings.xml（EN 默认翻译）+ values-zh-rCN/strings.xml（中文原文）各追加 60+ key，与既有 C 组字符串同文件维护。
 - [x] 构建：assembleRelease 通过，versionCode 79。
+
+### l10n（v2.9.47-l10n / versionCode 80，2026-10-14）—— B6.x 桌面文案中文翻译补齐
+
+- [x] **装机实锤**：桌面日程/天气/媒体行大面积英文（Your agenda / today / New event / No upcoming events / now / updated…）—— B6.x 批次搬运时标注"沿用英文，本地化随 C 组"，但 zh-rCN 一直没补，中文设备回落 values 默认（英文）。
+- [x] **差集清零**：脚本比对 values/strings.xml vs values-zh-rCN/strings.xml，补齐 74 个缺失 string key（媒体控制 11 / 通知预览 6 / 日程 13 / 天气 22 / 小组件弹层 15 / 私密空间 3 / 通用 4）+ widget_count plurals；仅剩 8 个 translatable=false 字体名（无需翻译）。反向差集为 0。
+- [x] 构建：assembleRelease 通过，versionCode 80；产物已导出 .build/out/。

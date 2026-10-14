@@ -585,4 +585,95 @@
 
     <!-- 占位视图（宿主进程，经包上下文解析） -->
     <string name="placeholder_tip">自定义模式底座已挂载\n\nHomeViewFactory.create() → 换成你的桌面 UI</string>
+
+    <!-- ===================== B6.x 缺失翻译补齐（v2.9.47-l10n） ===================== -->
+    <!-- 通用 -->
+    <string name="action_unavailable">此操作在当前设备上不可用</string>
+    <string name="search_clear_query">清除搜索词</string>
+    <string name="shortcut_error">无法加载或打开此快捷方式</string>
+    <string name="settings_icon_pack_summary">用图标包替换应用图标</string>
+    <string name="icon_pack_loading">正在检查图标包…</string>
+
+    <!-- B6.1 媒体控制 -->
+    <string name="media_idle_title">没有正在播放的内容</string>
+    <string name="media_idle_summary">点按播放即可继续</string>
+    <string name="media_play">播放</string>
+    <string name="media_pause">暂停</string>
+    <string name="media_previous">上一曲</string>
+    <string name="media_next">下一曲</string>
+    <string name="media_open_player">打开 %1$s</string>
+    <string name="media_unknown_title">正在播放</string>
+    <string name="media_access_module_hint">正在打开 HomeMode4Miui 应用 —— 请在其中开启「通知与媒体」，然后返回桌面</string>
+    <string name="media_service_name">HomeMode4Miui 通知与媒体</string>
+
+    <!-- B6.3 通知预览 -->
+    <string name="notification_dismiss">清除</string>
+    <string name="notification_open">打开通知</string>
+    <string name="notification_now">刚刚</string>
+    <string name="notification_minutes">%1$d 分钟</string>
+    <string name="notification_hours">%1$d 小时</string>
+    <string name="notification_days">%1$d 天</string>
+
+    <!-- B6.2 日程 -->
+    <string name="calendar_error">无法加载日程</string>
+    <string name="your_agenda">你的日程</string>
+    <string name="today">今天</string>
+    <string name="new_event">新建日程</string>
+    <string name="no_upcoming_events">没有即将到来的日程</string>
+    <string name="event_soon">不到 1 分钟</string>
+    <string name="event_in_minutes">%1$d 分钟后</string>
+    <string name="event_in_hours">%1$d 小时后</string>
+    <string name="event_in_hours_minutes">%1$d 小时 %2$d 分后</string>
+    <string name="event_in_days">%1$d 天后</string>
+    <string name="event_ongoing">进行中</string>
+    <string name="all_day">全天</string>
+    <string name="weather_agenda_action">%1$s。打开天气和日程</string>
+
+    <!-- B6.2 天气 -->
+    <string name="weather_current_description">%1$s，%2$s</string>
+    <string name="weather_daily_description">%1$s，最高 %2$s，最低 %3$s</string>
+    <string name="weather_hour_description">%1$s: %2$s，%3$s</string>
+    <string name="weather_clear">晴</string>
+    <string name="weather_partly_cloudy">晴间多云</string>
+    <string name="weather_cloudy">多云</string>
+    <string name="weather_rain">雨</string>
+    <string name="weather_snow">雪</string>
+    <string name="weather_thunderstorm">雷阵雨</string>
+    <string name="weather_fog">雾</string>
+    <string name="weather_wind">大风</string>
+    <string name="weather_hail">冰雹</string>
+    <string name="weather_sleet">雨夹雪</string>
+    <string name="weather_unknown">天气不可用</string>
+    <string name="weather_temperature_unknown">温度不可用</string>
+    <string name="weather_now">现在</string>
+    <string name="weather_updated">更新于 %1$s</string>
+    <string name="weather_outdated">数据过期 · 更新于 %1$s</string>
+    <string name="weather_update_unknown">更新时间不可用</string>
+    <string name="weather_via_source">天气数据来自小米天气</string>
+    <string name="weather_settings_enable_summary">在日期旁和日程中显示天气。</string>
+
+    <!-- B6.5 私密空间探测降级面 -->
+    <string name="private_space_locked">已锁定</string>
+    <string name="private_space_unlocked">已解锁</string>
+    <string name="private_space_unavailable">私密空间不可用，请重试。</string>
+
+    <!-- P4 小组件弹层 -->
+    <string name="widget_home_menu">主页小组件</string>
+    <string name="widget_choose">选择小组件</string>
+    <string name="widget_search">搜索小组件</string>
+    <string name="widget_none">未找到小组件</string>
+    <string name="widget_single_limit">暂时只支持一个自定义小组件，堆叠小组件后续推出。</string>
+    <string name="widget_setup_error">无法添加此小组件，请重试。</string>
+    <string name="widget_unavailable">此小组件不可用。长按进行管理。</string>
+    <string name="widget_no_configuration">此小组件没有可用的设置页。</string>
+    <string name="widget_move_resize">移动和调整大小</string>
+    <string name="widget_configuration">修改小组件设置</string>
+    <string name="widget_remove">移除</string>
+    <string name="widget_move_home">移动时钟和应用列表</string>
+    <string name="widget_resize">调整小组件大小</string>
+    <string name="widget_adjust_up">上移 / 减小高度</string>
+    <string name="widget_adjust_down">下移 / 增加高度</string>
+    <plurals name="widget_count">
+        <item quantity="other">%1$d 个小组件</item>
+    </plurals>
 </resources>
