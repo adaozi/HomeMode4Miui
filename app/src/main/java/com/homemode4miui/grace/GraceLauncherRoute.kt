@@ -654,8 +654,11 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         // ---- 首页（时钟 + widget + favorites）----
         // P5：LocalHomeAnimationTarget provides true（原版语义）——首页图标 target 标记
         // home = true，为后续 Quickstep 合约返回动画恢复预留（当前裁剪版仅注册）。
+        // homeReady 同步揭示（装机反馈：时钟/文件夹先出、应用后跳的分层加载观感）——
+        // 收藏子集就绪（两段式 phase 1，v2.9.54）即整块出现，壁纸背景不受影响；
+        // AlphabetRail 无需门控：apps 未就绪时 model.letters 为空，rail 自行不渲染。
         CompositionLocalProvider(LocalHomeAnimationTarget provides true) {
-            HomeScreen(
+            if (state.homeReady) HomeScreen(
                 favorites = state.favoriteItems,
                 homeLayout = state.settings.homeLayout,
                 clockEnabled = state.settings.clockEnabled,
@@ -822,7 +825,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         }
 
         // ---- 上游同步 v1.1.8 S4：Grace Button（对齐原版 LauncherScreen.kt:1052-1060）----
-        if (!drawerOpen && (editingHome || state.settings.graceButton.enabled)) {
+        // homeReady 同步揭示：按钮属于首页内容面，跟随时钟/收藏区一起出现
+        if (!drawerOpen && state.homeReady && (editingHome || state.settings.graceButton.enabled)) {
             com.galaxyrio.gracelauncher.ui.components.GraceButton(
                 settings = state.settings.graceButton,
                 editing = editingHome,

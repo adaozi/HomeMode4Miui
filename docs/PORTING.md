@@ -496,3 +496,9 @@ DIFF vs 桩文件:
 - [x] **修复②decorateApps 骨架跳过**：icon==null 的骨架应用（phase 1 未解码）在无 per-item 选择 + 无全局面设计时跳过装饰 —— 否则 systemDrawable 兜底会对 200+ 骨架触发全量重渲染（v2.9.53 修复的风暴复现）；phase 2 解码全量后统一装饰兜底。装饰分支重写为 when 三路（骨架跳过 / 快速路径 / 全量渲染）。
 - [x] **已知权衡**：phase 1→2 间隙（约 0.5-1s）若立即打开抽屉，未解码完成的应用行短暂显示字母占位圆标，全量换入后恢复 —— 上游为同款瞬时行为（其独立进程装载更快），实测窗口很短。
 - [x] 构建：assembleRelease 通过，versionCode 87；产物已导出 .build/out/。
+
+### sync-reveal（v2.9.55-sync-reveal / versionCode 88，2026-10-14）—— 首页内容同步揭示
+
+- [x] **需求（装机反馈）**：等收藏区应用解码完成后再显示时钟/widget/文件夹等一切首页内容，整体一起出现（消除"时钟先出、应用后跳"的分层加载观感）。
+- [x] **实现**：GraceHomeUiState 新增 homeReady 门控位——三条路径置 true：两段式 phase 1 收藏子集换入（v2.9.54）/ 无已存收藏序的全量换入 / 装载失败（空态兜底，不让桌面永久空白）；后续包变化刷新不重置（桌面已显示，防闪断）。Route 侧 HomeScreen 与 GraceButton 按 homeReady 条件组合（条件组合而非 alpha=0，避免不可见但可点击的幽灵热区）；AlphabetRail 无需门控（apps 未就绪时 letters 为空，rail 自行不渲染）；壁纸背景层不受影响。
+- [x] 构建：assembleRelease 通过，versionCode 88；产物已导出 .build/out/。

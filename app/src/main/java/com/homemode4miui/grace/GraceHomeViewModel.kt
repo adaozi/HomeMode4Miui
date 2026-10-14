@@ -96,6 +96,11 @@ data class GraceHomeUiState(
     val settings: GraceHomeSettings = GraceHomeSettings(),
     val isLoadingApps: Boolean = true,
     val appLoadFailed: Boolean = false,
+    /** 同步揭示门控（装机反馈：时钟/文件夹先出、应用后跳的分层加载观感）——
+     *  收藏子集就绪（两段式 phase 1）/ 全量就绪（无已存收藏序）/ 装载失败（空态兜底）
+     *  三条路径置 true；后续包变化刷新不重置（桌面已显示，不闪断）。首页内容
+     *  （时钟/widget/收藏区/Grace 按钮）在 Route 侧按此门控统一出现。 */
+    val homeReady: Boolean = false,
     /** P4：LauncherApps.hasShortcutHostPermission（弹层快捷方式可用性，HOME 角色决定）。 */
     val hasShortcutAccess: Boolean = false,
     // ---- P6（B6.x）附属特性状态（全部独立降级：桥断/无权限 = 空缺隐藏）----
@@ -522,7 +527,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     val folderApps = decorateFolders(_uiState.value.folders, snapshotAtDecorate)
                     _uiState.update {
                         it.copy(apps = apps, folderApps = folderApps, favoriteOrder = savedOrder,
-                            isLoadingApps = false)
+                            isLoadingApps = false, homeReady = true)
                     }
                     itemsDecoratedWith = snapshotAtDecorate
                 }
@@ -540,7 +545,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 } else emptyList()
                 _uiState.update {
                     it.copy(apps = apps, folderApps = folderApps, favoriteOrder = order,
-                        isLoadingApps = false,
+                        isLoadingApps = false, homeReady = true,
                         workProfiles = workProfiles, workProfileApps = workProfileApps)
                 }
                 itemsDecoratedWith = snapshotAtDecorate
@@ -551,7 +556,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 throw error
             } catch (error: Exception) {
                 ModLog.e("GraceHomeViewModel loadApps failed", error)
-                _uiState.update { it.copy(isLoadingApps = false, appLoadFailed = true) }
+                // 装载失败也揭示首页（收藏空态兜底），不能让桌面永久空白
+                _uiState.update { it.copy(isLoadingApps = false, appLoadFailed = true, homeReady = true) }
             }
         }
     }
