@@ -250,6 +250,14 @@ public final class LogExporter {
                 .append(privCopy.contains("COPY_OK")
                         ? "OK → /sdcard/Download/MiuiHome_privapp.apk\n" + privCopy.replace("COPY_OK", "").trim()
                         : orNa(privCopy)).append('\n');
+        //    ⑨ v2.9.65 运行时探针：force-stop 桌面触发宿主重启 —— 模块 MainHook
+        //    的 host-surface probe（0a）会在新进程内解析关键类并打日志，此处
+        //    把宿主/框架侧 rustruntime 相关启动日志一并收进导出（自包含取证）。
+        String runtimeProbe = runSu("am force-stop com.miui.home; sleep 5;"
+                + " logcat -d -v time | grep -aiE 'HomeMode4Miui|rustruntime|hyperos_app_lib'"
+                + " | grep -av 'log-export' | tail -80", 45_000);
+        sb.append("宿主重启运行时探针（force-stop + 启动日志）:\n")
+                .append(orNa(runtimeProbe)).append('\n');
         sb.append("# =======================================\n");
         return sb.toString();
     }

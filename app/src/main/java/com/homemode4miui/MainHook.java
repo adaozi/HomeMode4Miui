@@ -117,6 +117,15 @@ public class MainHook implements IXposedHookLoadPackage {
             @Override public void run() { HostCompat.detect(lpp, cl); }
         });
 
+        // OS4 壳层载体探针（v2.9.65）：OS4 两份 APK（更新+priv-app）均 hasCode=false
+        // 零 dex、uses-library 只挂 Empty 桩 jar，但桌面在跑 —— 壳层 Java 类必由
+        // HyperOS 框架在进程启动时从运行时注入（VINTF app_launcher_service 佐证）。
+        // 这里在宿主进程内直接试解析关键类：解析得到 = hookable（打印真实 classloader
+        // 与父类链/关键方法），解析不到 = OS4 上无 Java hook 面的最终实锤。
+        tryHook("0a.host-surface probe", new HookTask() {
+            @Override public void run() { probeHostSurface(cl); }
+        });
+
         // gate1 根修：Application.onCreate —— ping 接收器注册 + 存活广播的最早锚点。
         // 与 Launcher 生命周期完全解耦：即使 setupViews/onLauncherModeChanged 等全部
         // 未命中（OS3 DI 重构下已实证存在此风险），首页 ping/pong 探测依然可用。
@@ -222,8 +231,48 @@ public class MainHook implements IXposedHookLoadPackage {
         }
     }
 
-    /** 单 hook 隔离执行：成功/失败均记日志，失败只降级该功能；失败记入 sFailedHooks */
-    private static void tryHook(String name, HookTask task) {
+    /**
+     * OS4 壳层载体探针（v2.9.65）—— 在宿主进程内解析关键类，一次性回答：
+     * ① Launcher/Application/LauncherModeController 等在运行时是否可解析；
+     * ② 可解析时从哪个 classloader 装载（PathClassLoader 的 dex 路径直接暴露壳层载体）；
+     * ③ 父类链与关键生命周期方法（onCreate/setupViews）是否仍在 —— hook 面判定依据。
+     * 全程只读不 hook，独立 tryHook 降级；结果走 ModLog（logcat 双写）。
+     */
+    private static void probeHostSurface(ClassLoader cl) {
+        log("probe: cl=" + cl);
+        String[] classes = {
+                "com.miui.home.launcher.Launcher",
+                "com.miui.home.launcher.BaseLauncher",
+                "com.miui.home.launcher.Application",
+                "com.miui.home.launcher.allapps.LauncherModeController",
+                "com.miui.home.launcher.SuperDraglayer",
+        };
+        for (String name : classes) {
+            Class<?> c = XposedHelpers.findClassIfExists(name, cl);
+            if (c == null) {
+                log("probe: " + name + " = NOT RESOLVABLE");
+                continue;
+            }
+            StringBuilder chain = new StringBuilder();
+            Class<?> s = c;
+            while (s != null && s != Object.class) {
+                chain.append(s.getName()).append(" <- ");
+                s = s.getSuperclass();
+            }
+            log("probe: " + name + " = " + c.getName()
+                    + " @CL[" + c.getClassLoader() + "] chain=" + chain + "Object");
+            for (String m : new String[]{"onCreate", "setupViews", "onResume", "onPause"}) {
+                try {
+                    c.getDeclaredMethod(m);
+                    log("probe:   method " + m + " = declared");
+                } catch (NoSuchMethodException e) {
+                    log("probe:   method " + m + " = absent");
+                }
+            }
+        }
+    }
+
+    /** 单 hook 隔离执行：成功/失败均记日志，失败只降级该功能；失败记入 sFailedHooks */    private static void tryHook(String name, HookTask task) {
         try {
             task.run();
             log("hook installed: " + name);
