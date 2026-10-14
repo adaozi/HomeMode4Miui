@@ -235,26 +235,32 @@ public final class LogExporter {
     }
 
     /**
-     * 定位 rustruntime 共享库 APK 并 cp 到 /sdcard/Download/。
-     * 候选序：① find 命中的物理路径（文件名含 v5 优先，pm path 落空时的主路径
-     * —— 实机实锤提供方包名与库名不一致）；② pm list libraries 库名 → pm path。
-     * split APK 时 pm path 返回多行，只取 base 行。
+     * 定位 rustruntime 共享库本体并 cp 到 /sdcard/Download/。
+     * v2.9.62 实机实锤（log 20261014_162759）：rustruntime 不是 APK 包，是
+     * 传统 uses-library 型共享库 JAR —— /system_ext/framework/hyperos.rustruntime.jar
+     * （带 oat 编译缓存，内含壳层 dex）+ /product/etc/permissions/rustruntime_cfg_v3_v5.xml
+     * （库声明映射）。故候选 = find 命中的 .jar/.xml（排除 oat/fsv_meta），
+     * 兜底固定路径；pm path 库名兜底保留（未来若改回 static-shared-lib 形态）。
      */
     private static String tryCopyRustruntimeApk(String libsOutput, String foundPaths) {
-        // ① find 命中的物理路径直接拷（v5 命名优先）
+        // ① find 命中的物理路径直接拷（jar=壳层 dex 本体；xml=库映射配置）
         if (foundPaths != null && foundPaths.length() > 0) {
             java.util.ArrayList<String> paths = new java.util.ArrayList<>();
             for (String line : foundPaths.split("\n")) {
                 String p = line.trim();
-                if (p.startsWith("/")) paths.add(p);
+                if (!p.startsWith("/")) continue;
+                // 只拷本体：oat 编译缓存与 fsv_meta 校验文件无逆向价值且体积大
+                if (p.contains("/oat/") || p.contains(".fsv_meta")) continue;
+                if (!(p.endsWith(".jar") || p.endsWith(".apk") || p.endsWith(".xml"))) continue;
+                paths.add(p);
             }
+            // jar（dex 本体）优先于 xml（配置）
             paths.sort((a, b) -> {
-                boolean v5a = a.contains("v5"), v5b = b.contains("v5");
-                if (v5a != v5b) return v5a ? -1 : 1;
+                boolean ja = a.endsWith(".jar"), jb = b.endsWith(".jar");
+                if (ja != jb) return ja ? -1 : 1;
                 return a.compareTo(b);
             });
             for (String src : paths) {
-                if (!src.endsWith(".apk")) continue;
                 String dest = "/sdcard/Download/"
                         + new java.io.File(src).getName();
                 String cp = runSu("cp -f \"" + src + "\" \"" + dest
@@ -264,15 +270,28 @@ public final class LogExporter {
                 }
             }
         }
-        // ② pm path 库名兜底（静态共享库包名 ≈ 库名；候选 v5 天然在前）
+        // ② 固定路径兜底（find 因 maxdepth/权限漏扫时）
+        String[] fallbacks = {
+                "/system_ext/framework/hyperos.rustruntime.jar",
+                "/product/etc/permissions/rustruntime_cfg_v3_v5.xml",
+        };
+        for (String src : fallbacks) {
+            String test = runSu("test -f \"" + src + "\" && echo EXISTS");
+            if (!test.contains("EXISTS")) continue;
+            String dest = "/sdcard/Download/" + new java.io.File(src).getName();
+            String cp = runSu("cp -f \"" + src + "\" \"" + dest
+                    + "\" && chmod 644 \"" + dest + "\" && echo COPY_OK");
+            if (cp.contains("COPY_OK")) {
+                return "OK → " + dest + "（源: " + src + "）";
+            }
+        }
+        // ③ pm path 库名兜底（未来若改回 static-shared-lib APK 形态）
         java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
         if (libsOutput != null) {
             java.util.regex.Matcher m = java.util.regex.Pattern
                     .compile("library:([^\\s\\r\\n]+)").matcher(libsOutput);
             while (m.find()) candidates.add(m.group(1));
         }
-        candidates.add("hyperos.rustruntime.v5");
-        candidates.add("hyperos.rustruntime.v3");
         for (String lib : candidates) {
             String apkPath = runSu("pm path " + lib);
             if (apkPath == null || !apkPath.startsWith("package:")) continue;
@@ -285,7 +304,7 @@ public final class LogExporter {
             }
             return "FAILED [" + lib + "]（cp 失败: " + cp + "）";
         }
-        return "N/A（find 与 pm path 均未命中 —— 请把 ②③④⑤ 段原样反馈）";
+        return "N/A（三路均未命中 —— 请把 ②③④⑤ 段原样反馈）";
     }
 
     /** 诊断段占位：空串 → N/A 标注 */
