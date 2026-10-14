@@ -721,3 +721,23 @@ DIFF vs 桩文件:
 - 判读：OS4 导出应首次出现 Java 侧日志 —— "ModernEntry: Instrumentation hook
   installed" + "Os4Probe: activity created: <壳类名>" + view tree + classloader
   HAS/MISSING。OS2/OS3 机回归确认 legacy 不受影响（modern 路径 vc<800M 零行为）。
+
+### Route B phase 5：native → Java 自举（2026-10-14）—— v2.9.79-os4b-jb / vc110
+
+- v2.9.78 判读：modern Java 派发同样不进 OS4 launcher 主进程（ModernEntry 零日志，
+  verbose 仅 native 加载记录）；结合时间线（13:46 Eta 成功 = NeoZygisk 时代，
+  18:49 换 Zygisk Next 后 Java 派发整体消失）实锤 **Zygisk Next HyOS 模式下
+  OS4 主桌面进程 native-only**。
+- 架构定案：Java 触达 = **native 自举**——native 模块已在进程内，JNI
+  AttachCurrentThread → ActivityThread.currentApplication()（重试兜底）→
+  PathClassLoader 加载模块 APK 自身 dex → Os4Bootstrap.init(Context, apkPath)。
+  零容器 Java 派发依赖。
+- 本批 java_bridge.{h,cpp} + os4/Os4Bootstrap.java（R8 keep）：
+  ① 生命周期回调捕获桌面壳 Activity → Os4Probe 结构探针（View 树终于可见）；
+  ② 首里程碑标记：content 层顶部 24dp 非触摸标记（不拦截手势/焦点），
+  证明「模块 UI 可画在 OS4 桌面上」。
+- Os4Probe 保持模块 APK 内共享（modern 路径与 bootstrap 路径同代码）。
+- 构建通过（APK mtime 21:20）；产物 .build/out/HomeMode4Miui-v2.9.79-os4b-jb-110.apk。
+- 实机判读：`java bridge: bootstrap invoked — Java side is live` +
+  `Os4Bootstrap: alive` + `marker mounted into <壳类>` + **桌面上可见黑色半透明
+  标记条** + 桌面功能不受影响 = OS4 Java 触达闭环，UI 挂载架构正式可行。

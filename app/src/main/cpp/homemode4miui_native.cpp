@@ -20,6 +20,7 @@
 #include "gesture_hook.h"
 #include "h4m_log.h"
 #include "hook_guard.h"
+#include "java_bridge.h"
 #include "native_api.h"
 #include "obs_hook.h"
 
@@ -147,6 +148,9 @@ void onLibraryLoaded(const char *name, void *handle) {
                 // Phase 2: install the madvise guard and run its self test
                 // once, on the first Dart image load.
                 RunPhase2Probe();
+                // Phase 5: bootstrap the module's Java side via JNI
+                // (Zygisk Next HyOS mode is native-only for java dispatch).
+                h4m::StartJavaBridge(g_entries);
             }
             if (endsWith(name, "libapp_launcher.so")) {
                 // Phase 3: read-only observation hook on a Rust export
@@ -200,6 +204,7 @@ NativeOnModuleLoaded native_init(const NativeAPIEntries *entries) {
             logLine(ANDROID_LOG_WARN,
                     "poc native_init: libapp.so already mapped, phase2 now");
             RunPhase2Probe();
+            h4m::StartJavaBridge(g_entries);
         }
     }
 

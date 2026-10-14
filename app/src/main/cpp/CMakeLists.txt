@@ -8,7 +8,8 @@ add_library(homemode4miui_native SHARED
         hook_guard.cpp
         obs_hook.cpp
         gesture_hook.cpp
-        gesture_hook.S)
+        gesture_hook.S
+        java_bridge.cpp)
 
 target_compile_options(homemode4miui_native PRIVATE
         -O2
