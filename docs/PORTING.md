@@ -502,3 +502,17 @@ DIFF vs 桩文件:
 - [x] **需求（装机反馈）**：等收藏区应用解码完成后再显示时钟/widget/文件夹等一切首页内容，整体一起出现（消除"时钟先出、应用后跳"的分层加载观感）。
 - [x] **实现**：GraceHomeUiState 新增 homeReady 门控位——三条路径置 true：两段式 phase 1 收藏子集换入（v2.9.54）/ 无已存收藏序的全量换入 / 装载失败（空态兜底，不让桌面永久空白）；后续包变化刷新不重置（桌面已显示，防闪断）。Route 侧 HomeScreen 与 GraceButton 按 homeReady 条件组合（条件组合而非 alpha=0，避免不可见但可点击的幽灵热区）；AlphabetRail 无需门控（apps 未就绪时 letters 为空，rail 自行不渲染）；壁纸背景层不受影响。
 - [x] 构建：assembleRelease 通过，versionCode 88；产物已导出 .build/out/。
+
+### gadget 归档说明（2026-10-14）—— MIUI 内置部件尝试已回退，挂起待后续
+
+- v2.9.56/57（vc89/90，commit 96b15da/d052b80，tag v2.9.56-gadget / v2.9.57-gadget-cl）尝试接入
+  MIUI 内置 gadget 部件（时钟 4 规格/一键清理/全局搜索，反射门面 MiuiGadgets + GadgetHostView
+  + "gadget:<id>" 落库约定）：装机反馈选择器分区已出现，但**部件添加后不可使用**（渲染/交互不工作）。
+- 用户决定回退到适配前（v2.9.55-sync-reveal / vc88）：revert 提交 591af59/（前一 revert），
+  代码树与 v2.9.55 逐字节一致。两枚 tag 保留在历史中可随时翻阅。
+- 逆向资产保留（.workbuddy/memory/2026-10-14.md）：GadgetFactory.getNoMtzInfo/createGadget、
+  id 映射 4/6/7/8=ClockGadgetDelegate、12=NormalClearButton、21=CommonGlobalSearch、
+  生命周期 onAdded→onCreate→onResume/onPause/onDestroy、跨 classloader 反射铁律。
+- **下次重启该方向的排查线索**：addGadget 返回的 Gadget 直接放进 Compose AndroidView 不可用，
+  疑似依赖宿主 Launcher 环境（mWorkspace.addInScreen / LauncherFrameLayout 的属性动画体系 /
+  TrackView 统计），需对照 CellLayout.createNewGadget 完整宿主上下文，而非裸 View 挂载。
