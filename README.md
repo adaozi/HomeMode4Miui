@@ -18,6 +18,14 @@
 当前版本：`2.9.55-sync-reveal`（versionCode 88），见 `app/build.gradle`。
 最新 Release：[v2.9.55-sync-reveal](https://github.com/adaozi/HomeMode4Miui/releases/latest)。
 
+## 效果预览
+
+| 主屏（时钟 + 收藏列表） | 日程与天气（小米天气直读） |
+| --- | --- |
+| <img src="docs/img/screenshot-home.jpg" width="260"> | <img src="docs/img/screenshot-agenda.jpg" width="260"> |
+| **应用列表（拼音字母索引）** | **全局搜索** |
+| <img src="docs/img/screenshot-drawer.jpg" width="260"> | <img src="docs/img/screenshot-search.jpg" width="260"> |
+
 ## 交流与反馈
 
 - QQ 群：**桌面第四模式**（群号 `578966891`）—— bug 反馈、功能建议、机型适配交流
@@ -30,6 +38,7 @@
 ## 目录
 
 - [进程模型：先理解这个，后面全部成立](#进程模型先理解这个后面全部成立)
+- [效果预览](#效果预览)
 - [交流与反馈](#交流与反馈)
 - [三类代码 + 一个桥](#三类代码--一个桥)
 - [核心设计：为什么能"原生式"新增模式](#核心设计为什么能原生式新增模式)
