@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
     // gate1 三项状态（本会话实时值；root 回显持久化在模块自有 SP）
     private volatile boolean mHookLive;
     private volatile String mHookHostVersion;
-    /** 宿主大版本家族标签（OS2(5.x)/OS3(6.x)/OS4(8.x)/UNKNOWN，pong/live 附带） */
+    /** 宿主大版本家族标签（OS2(5.x)/OS3(6.x)/UNKNOWN，pong/live 附带） */
     private volatile String mHookFamily;
     /** 未生效 hook 清单（pong/live 附带；空 = 全部生效） */
     private volatile java.util.List<String> mHookFailed;

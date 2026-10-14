@@ -14,8 +14,8 @@ android {
         applicationId "com.homemode4miui"
         minSdk 33          // 与宿主一致（com.miui.home minSdk 33）
         targetSdk 34
-        versionCode 96
-        versionName "2.9.65-os4-diag7"
+        versionCode 88
+        versionName "2.9.55-sync-reveal"
     }
 
     sourceSets {

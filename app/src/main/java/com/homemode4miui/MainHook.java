@@ -50,8 +50,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *     OS3 另挂 onNewIntentWhenAlreadyOnHome（"已在桌面回首页"独立路径，OS2 无则跳过）
  *
  * 版本适配（HostCompat）：
- *   - versionCode ≥ 800_000_000 → OS4 家族（RELEASE-8.01.02，Flutter+Rust 重写，
- *     零 Java 字节码）：全部桌面 hook 优雅退场（os4Skip），仅保留 gate1 通信链；
  *   - versionCode ≥ 600_000_000 → OS3 家族（RELEASE-6.01.03 实测），否则 OS2（5.39.40 基准）；
  *   - OS3 的 Launcher 大重构：setupViews/onResume/onNewIntent/onLauncherModeChanged/
  *   - launcherHookClass() 沿 Launcher→父类链解析实际声明类，两版本通吃；
@@ -79,7 +77,7 @@ public class MainHook implements IXposedHookLoadPackage {
     public static final String ACTION_HOOK_LIVE = "com.homemode4miui.ACTION_HOOK_LIVE";
     /** gate2：pong 附带宿主版本（首页回显，顺带定位"宿主还是旧代码"类问题） */
     public static final String EXTRA_HOST_VERSION = "host_version";
-    /** gate1：pong/live 附带宿主大版本家族标签（OS2(5.x)/OS3(6.x)/OS4(8.x)/UNKNOWN） */
+    /** gate1：pong/live 附带宿主大版本家族标签（OS2(5.x)/OS3(6.x)/UNKNOWN） */
     public static final String EXTRA_HOST_FAMILY = "host_family";
     /** gate1：pong/live 附带未生效 hook 清单（首页分级提示"无法 hook/部分生效"） */
     public static final String EXTRA_HOOK_FAILED = "hook_failed_list";
@@ -117,15 +115,6 @@ public class MainHook implements IXposedHookLoadPackage {
             @Override public void run() { HostCompat.detect(lpp, cl); }
         });
 
-        // OS4 壳层载体探针（v2.9.65）：OS4 两份 APK（更新+priv-app）均 hasCode=false
-        // 零 dex、uses-library 只挂 Empty 桩 jar，但桌面在跑 —— 壳层 Java 类必由
-        // HyperOS 框架在进程启动时从运行时注入（VINTF app_launcher_service 佐证）。
-        // 这里在宿主进程内直接试解析关键类：解析得到 = hookable（打印真实 classloader
-        // 与父类链/关键方法），解析不到 = OS4 上无 Java hook 面的最终实锤。
-        tryHook("0a.host-surface probe", new HookTask() {
-            @Override public void run() { probeHostSurface(cl); }
-        });
-
         // gate1 根修：Application.onCreate —— ping 接收器注册 + 存活广播的最早锚点。
         // 与 Launcher 生命周期完全解耦：即使 setupViews/onLauncherModeChanged 等全部
         // 未命中（OS3 DI 重构下已实证存在此风险），首页 ping/pong 探测依然可用。
@@ -133,10 +122,7 @@ public class MainHook implements IXposedHookLoadPackage {
         // 桌面但判定检测不到"（OS2/OS3 通病，装机实锤）。
         // 上游同步 v1.1.8 S8b：pin item 接收链 —— MIUI AddItemActivity 确认 accept 后
         // 旁路旁听转存模块 saved_shortcuts（showInAppList=true → 抽屉显示 PWA/快捷方式）。
-        // OS4 优雅退场：宿主零 Java 字节码（Flutter+Rust 重写，架构结论见 HostCompat
-        // 类注释），以下全部桌面 hook 在 OS4 上必然失配 —— 统一跳过安装，只保留本
-        // gate1 锚点（Application.onCreate 恒存在）+ ping/pong + 家族回显。
-        if (!os4Skip()) tryHook("0b.PinItemCompat.accept", new HookTask() {
+        tryHook("0b.PinItemCompat.accept", new HookTask() {
             @Override public void run() {
                 com.homemode4miui.hook.GracePinItemHook.INSTANCE.hook(lpp, cl);
             }
@@ -164,26 +150,26 @@ public class MainHook implements IXposedHookLoadPackage {
         });
 
         // 每个 hook 独立降级：一处失败不影响其余（真机版本漂移防护）
-        if (!os4Skip()) tryHook("1.getAllModes", new HookTask() {
+        tryHook("1.getAllModes", new HookTask() {
             @Override public void run() { hookGetAllModes(); }
         });
-        if (!os4Skip()) tryHook("2.modeAdjudication", new HookTask() {
+        tryHook("2.modeAdjudication", new HookTask() {
             @Override public void run() { hookModeAdjudication(cl); }
         });
-        if (!os4Skip()) tryHook("3.Launcher.setupViews", new HookTask() {
+        tryHook("3.Launcher.setupViews", new HookTask() {
             @Override public void run() { hookLauncherMethod(cl, "setupViews", mLauncherUiSync); }
         });
         // 3b. Launcher.onCreate —— 挂载兜底锚点：两版本都必经的生命周期方法，
         // 不依赖"OS3 的 setupViews 是否仍被调用"这一待真机验证假设。
-        if (!os4Skip()) tryHook("3b.Launcher.onCreate (挂载兜底锚点)", new HookTask() {
+        tryHook("3b.Launcher.onCreate (挂载兜底锚点)", new HookTask() {
             @Override public void run() {
                 hookLauncherMethod(cl, "onCreate", mLauncherUiSync, android.os.Bundle.class);
             }
         });
-        if (!os4Skip()) tryHook("4.Launcher.onLauncherModeChanged", new HookTask() {
+        tryHook("4.Launcher.onLauncherModeChanged", new HookTask() {
             @Override public void run() { hookLauncherMethod(cl, "onLauncherModeChanged", mLauncherUiSync); }
         });
-        if (!os4Skip()) tryHook("5.Launcher.onResume", new HookTask() {
+        tryHook("5.Launcher.onResume", new HookTask() {
             @Override public void run() {
                 XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl, "onResume"),
                         "onResume", new XC_MethodHook() {
@@ -206,15 +192,15 @@ public class MainHook implements IXposedHookLoadPackage {
         // hook 后经 HomeView.onHomePaused 推 STOP；回前台由 5.onResume →
         // onHomeAttached 复用分支自动推回 RESUMED。hook 未命中只降级省电能力，
         // 不影响功能（与全部 hook 同一隔离原则）。
-        if (!os4Skip()) tryHook("5b.Launcher.onPause (退后台省电同步)", new HookTask() {
+        tryHook("5b.Launcher.onPause (退后台省电同步)", new HookTask() {
             @Override public void run() {
                 hookLauncherMethod(cl, "onPause", mLauncherPauseSync);
             }
         });
-        if (!os4Skip()) tryHook("9.SuperDraglayer.findActiveController (手势隔离)", new HookTask() {
+        tryHook("9.SuperDraglayer.findActiveController (手势隔离)", new HookTask() {
             @Override public void run() { GestureIsolator.inject(cl); }
         });
-        if (!os4Skip()) tryHook("11.Launcher.onNewIntent (Home 键回首页态)", new HookTask() {
+        tryHook("11.Launcher.onNewIntent (Home 键回首页态)", new HookTask() {
             @Override public void run() { HomeController.installHomeIntentSync(cl); }
         });
 
@@ -231,48 +217,8 @@ public class MainHook implements IXposedHookLoadPackage {
         }
     }
 
-    /**
-     * OS4 壳层载体探针（v2.9.65）—— 在宿主进程内解析关键类，一次性回答：
-     * ① Launcher/Application/LauncherModeController 等在运行时是否可解析；
-     * ② 可解析时从哪个 classloader 装载（PathClassLoader 的 dex 路径直接暴露壳层载体）；
-     * ③ 父类链与关键生命周期方法（onCreate/setupViews）是否仍在 —— hook 面判定依据。
-     * 全程只读不 hook，独立 tryHook 降级；结果走 ModLog（logcat 双写）。
-     */
-    private static void probeHostSurface(ClassLoader cl) {
-        log("probe: cl=" + cl);
-        String[] classes = {
-                "com.miui.home.launcher.Launcher",
-                "com.miui.home.launcher.BaseLauncher",
-                "com.miui.home.launcher.Application",
-                "com.miui.home.launcher.allapps.LauncherModeController",
-                "com.miui.home.launcher.SuperDraglayer",
-        };
-        for (String name : classes) {
-            Class<?> c = XposedHelpers.findClassIfExists(name, cl);
-            if (c == null) {
-                log("probe: " + name + " = NOT RESOLVABLE");
-                continue;
-            }
-            StringBuilder chain = new StringBuilder();
-            Class<?> s = c;
-            while (s != null && s != Object.class) {
-                chain.append(s.getName()).append(" <- ");
-                s = s.getSuperclass();
-            }
-            log("probe: " + name + " = " + c.getName()
-                    + " @CL[" + c.getClassLoader() + "] chain=" + chain + "Object");
-            for (String m : new String[]{"onCreate", "setupViews", "onResume", "onPause"}) {
-                try {
-                    c.getDeclaredMethod(m);
-                    log("probe:   method " + m + " = declared");
-                } catch (NoSuchMethodException e) {
-                    log("probe:   method " + m + " = absent");
-                }
-            }
-        }
-    }
-
-    /** 单 hook 隔离执行：成功/失败均记日志，失败只降级该功能；失败记入 sFailedHooks */    private static void tryHook(String name, HookTask task) {
+    /** 单 hook 隔离执行：成功/失败均记日志，失败只降级该功能；失败记入 sFailedHooks */
+    private static void tryHook(String name, HookTask task) {
         try {
             task.run();
             log("hook installed: " + name);
@@ -283,22 +229,6 @@ public class MainHook implements IXposedHookLoadPackage {
             sFailedHooks.add(summary);
             log("hook FAILED (degraded): " + name + " -> " + t);
         }
-    }
-
-    /**
-     * OS4 家族守卫：桌面 hook 统一跳过（返回 true = 跳过安装）。
-     * OS4 宿主零 Java 字节码（Flutter UI + Rust 核心重写，HostCompat 类注释有完整
-     * 逆向证据），OS2/OS3 的全部 hook 锚点类不存在 —— 逐个 tryHook 只会制造 9 条
-     * 失败噪声，不如显式优雅退场：gate1 通信链（Application.onCreate / ping/pong /
-     * 家族回显）保留，模块首页可正常探测到宿主与家族标签。
-     */
-    private static boolean os4Skip() {
-        if (HostCompat.isOS4()) {
-            log("hook skipped (OS4 graceful exit: host has zero Java bytecode,"
-                    + " Flutter+Rust rewrite)");
-            return true;
-        }
-        return false;
     }
 
     /** gate1 存活广播：宿主版本 + 大版本家族 + 未生效 hook 清单（首页分级提示数据源） */
@@ -653,10 +583,7 @@ public class MainHook implements IXposedHookLoadPackage {
 
     /** 宿主桌面版本号（gate2：pong 回显）。两入口合一：withCode 控制是否附 versionCode。 */
     private static String hostVersionSafe() {
-        // 注意：取 ActivityThread 用模块自身 classloader 即可（boot class 恒可解析）。
-        // 此前用 LauncherModeController.class.getClassLoader() —— 在 OS4 宿主上该类
-        // 不存在，每次 pong 都会 NoClassDefFoundError 降级成 "unknown"（v2.9.58 修复）。
-        return hostVersion(MainHook.class.getClassLoader(), false);
+        return hostVersion(LauncherModeController.class.getClassLoader(), false);
     }
 
     private static String hostVersion(ClassLoader cl, boolean withCode) {
