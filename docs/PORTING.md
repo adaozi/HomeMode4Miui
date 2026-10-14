@@ -524,3 +524,13 @@ DIFF vs 桩文件:
   （GadgetHostView + ON_RESUME/ON_PAUSE 生命周期 + 弃用时 onDestroy 注销 receiver）。
   首页与文件夹弹层两个挂点同时生效（同走 HomeWidget）。默认高度 spanY×96dp（编辑把手可调）。
 - [x] 构建：assembleRelease 通过，versionCode 89；产物已导出 .build/out/。
+
+### gadget-cl（v2.9.57-gadget-cl / versionCode 90，2026-10-14）—— MIUI 小组件分区不显示（hotfix）
+
+- [x] **症状（装机反馈）**：v2.9.56 选择小组件里看不到"MIUI 小组件"分区。
+- [x] **根因**：MiuiGadgets 用裸 `Class.forName` 解析 com.miui.home 类 —— 走的是 LSPosed
+  模块自身 classloader，解析不到宿主类 → loadEntry 全 null → gadgetEntries 空集 → 分区隐藏。
+  ModePrefs 早有同款先例注释："跨类加载器必须走 Xposed 反射"（Class.forName 带 ctx.classLoader）。
+- [x] **修复**：MiuiGadgets 改为 `hostClass(context, name)` = `Class.forName(name, true, context.classLoader)`
+  （loadEntry/createView 两处）。
+- [x] 构建：assembleRelease 通过，versionCode 90；产物已导出 .build/out/。
