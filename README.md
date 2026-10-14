@@ -5,8 +5,8 @@
 > 经典 / 抽屉 / 极简 三种模式平级注册进宿主 `LauncherModeController`。
 >
 > 底座之上已全量移植 **GraceLauncher**（Kotlin + Jetpack Compose，GPL-3.0）桌面 UI，
-> 运行在宿主 `com.miui.home` 进程内；设置全家桶与通知/媒体/天气数据源运行在模块 App 进程，
-> 两进程经显式广播桥通信。
+> 运行在宿主 `com.miui.home` 进程内；设置全家桶与通知/媒体监听运行在模块 App 进程，
+> 两进程经显式广播桥通信（天气由宿主进程直读小米天气 Provider，不依赖外部应用）。
 
 支持宿主版本（**大版本自动判别**，`hook/HostCompat` 按 versionCode 分家族路由）：
 
@@ -15,7 +15,8 @@
 | OS2（5.x） | `RELEASE-5.39.40.10843` | `com.miui.home.launcher.Launcher` |
 | OS3（6.x） | `RELEASE-6.01.03.1927` | `com.miui.home.launcher.BaseLauncher`（OS3 的 Launcher 大重构，方法整体上移） |
 
-当前版本：`2.9.35-graceicon1`（versionCode 68），见 `app/build.gradle`。
+当前版本：`2.9.55-sync-reveal`（versionCode 88），见 `app/build.gradle`。
+最新 Release：[v2.9.55-sync-reveal](https://github.com/adaozi/HomeMode4Miui/releases/latest)。
 
 ## 交流与反馈
 
@@ -55,7 +56,9 @@
 
 1. **宿主 SP**（`launcher_sharedpreference`）——模式开关、手势选项、保活就绪标志、熔断状态（`ModePrefs`）；
 2. **显式包名广播**——设置/开关/命令（模块→宿主）、快照与命令（双向，`bridge/BridgeContract.kt`）；
-3. **Breezy Weather Provider**——天气数据只在模块进程读，快照后广播下发。
+3. **小米天气 Provider**——宿主进程内直读（`grace/GraceWeatherHostEngine`），进程内直推桌面，
+   设置页随设置快照回带（v2.9.36 起取代原「外部 Breezy Weather 跨进程读」方案，MIUI 天气
+   provider 有调用方白名单，宿主进程读取与系统天气部件同路径）。
 
 ## 三类代码 + 一个桥
 
@@ -76,12 +79,12 @@ app/src/main/java/com/homemode4miui/
 └── app/src/host/java/         ① 宿主类编译期桩（方法体 throw，运行期被真实类遮蔽）
 
 app/src/main/java/com/galaxyrio/gracelauncher/   ② GraceLauncher 源码搬运层（GPL-3.0）
-├── data/                      应用仓库 / Room（LauncherDatabase v18）/ 时钟 / 收藏 / 图标包 / 天气 / 媒体 / 通知
-├── platform/                  AppWidgetHost（HOST_ID "GRAC"）/ 私密空间 / Breezy 更新接收器
+├── data/                      应用仓库 / Room（LauncherDatabase v21）/ 时钟 / 收藏 / 图标包 / 小米天气 / 媒体 / 通知
+├── platform/                  AppWidgetHost（HOST_ID "GRAC"）/ 私密空间 / 系统动作封装
 └── ui/                        home / drawer / search / overlays / widgets / settings / theme 全套 Compose
 ```
 
-> 源码来源：GraceLauncher v1.1.4（github.com/Galaxy-rio/GraceLauncher，GPL-3.0）。
+> 源码来源：GraceLauncher v1.1.8（github.com/Galaxy-rio/GraceLauncher，GPL-3.0），上游 10 个 tag 已全量同步。
 > 移植决策与逐文件清单见 [`docs/PORTING_GraceLauncher.md`](docs/PORTING_GraceLauncher.md)。
 
 ## 核心设计：为什么能"原生式"新增模式
@@ -246,7 +249,10 @@ bash tools/build_apk.sh
 | --- | --- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 三类代码完整逐文件说明 + 调用链 + 数据获取知识存档 |
 | [`docs/PORTING.md`](docs/PORTING.md) | 旧版/新版小米桌面适配清单、漂移防护机制、排错手册 |
-| [`docs/PORTING_GraceLauncher.md`](docs/PORTING_GraceLauncher.md) | GraceLauncher 移植路线图（P0–P6）、风险登记、构建环境 |
+| [`docs/PORTING_GraceLauncher.md`](docs/PORTING_GraceLauncher.md) | GraceLauncher 移植路线图（P0–P6）、上游 v1.1.4→v1.1.8 同步记录、风险登记、构建环境 |
+| [`docs/SETUP_NEW_MACHINE.md`](docs/SETUP_NEW_MACHINE.md) | 换机开发指南（签名密钥 / Gradle 镜像 / 环境清单） |
+| [`docs/CODE_AUDIT_2026-10-13.md`](docs/CODE_AUDIT_2026-10-13.md) | 全仓代码审计快照（v2.9.36 天气上移宿主架构，P0 修复见 v2.9.37） |
+| [`docs/UISTATE_SPLIT_DESIGN.md`](docs/UISTATE_SPLIT_DESIGN.md) | GraceHomeUiState 拆分设计稿（未实施，随 P3+ 推进） |
 | [`tools/ENV.md`](tools/ENV.md) | 本机开发环境清单（JDK 21 / SDK / Gradle 镜像） |
 
 ---
