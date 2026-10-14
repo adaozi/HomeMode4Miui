@@ -271,12 +271,18 @@ public final class LogExporter {
         }
 
         // 持久化文件镜像（native 双写，免疫 logd 环形缓冲轮转；尾部 64KB 封顶）
-        String file = runCommandCapture(new String[]{"su", "-c",
-                "tail -c 65536 /data/user_de/0/com.miui.home/cache/h4m_native.log 2>/dev/null"},
-                0L, 10_000);
-        if (file != null && file.trim().length() > 0) {
-            sec.append("# -- native 文件镜像（h4m_native.log 尾部，不做时间过滤）--\n");
-            sec.append(file.trim()).append('\n');
+        for (String p : new String[]{
+                "/data/user_de/0/com.miui.home/cache/h4m_native.log",
+                "/data/user/0/com.miui.home/cache/h4m_native.log",
+                "/data/data/com.miui.home/cache/h4m_native.log"}) {
+            String file = runCommandCapture(new String[]{"su", "-c",
+                    "tail -c 65536 " + p + " 2>/dev/null"}, 0L, 10_000);
+            if (file != null && file.trim().length() > 0) {
+                sec.append("# -- native 文件镜像（").append(p)
+                        .append(" 尾部，不做时间过滤）--\n");
+                sec.append(file.trim()).append('\n');
+                break;
+            }
         }
         sec.append("# ========================================\n");
         return sec.toString();

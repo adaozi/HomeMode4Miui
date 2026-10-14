@@ -626,3 +626,15 @@ DIFF vs 桩文件:
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.72-os4b-p2b-103.apk。
 - 实机判读（重启桌面后导出）：文件镜像段必有完整序列 native_init → guard
   installed → self-test PASSED/FAILED；logd 只当旁证。
+
+### phase 2 自测试修复（2026-10-14）—— v2.9.73-os4b-p2c / vc104
+
+- vc103 实机：guard 安装成功（hookFunc 打通 libc madvise，幂等守卫生效——4 次
+  libapp.so 回调仅装 1 次），但 self-test 卡在 /proc/self/mem read failed
+  （SELinux 拒绝 proc_mem 读），双页测试未执行；文件镜像也未出现（写 cache 疑似
+  同类拒绝，errno 待确诊）。
+- 修复：① 双页 splitting 测试提前为判定项（未 hook 时登记页会被真 madvise 清零
+  → 测试本身即 hook 存活证明，不依赖 mem 读）；② mem 读取降级为诊断项，open/
+  lseek/read 全记 errno；③ 文件镜像三路径（user_de/user/data）+ 失败 errno 诊断
+  （50 次封顶）；④ 导出器同步支持三路径。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.73-os4b-p2c-104.apk。

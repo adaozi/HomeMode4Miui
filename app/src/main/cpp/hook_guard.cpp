@@ -194,10 +194,16 @@ bool ProtectHookRange(uintptr_t address, size_t size) {
 
 bool ReadMem(uintptr_t address, void *out, size_t size) {
     const int fd = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return false;
+    if (fd < 0) {
+        H4M_LOGW("ReadMem: open /proc/self/mem failed errno=%d", errno);
+        return false;
+    }
     const bool ok = lseek(fd, static_cast<off_t>(address), SEEK_SET) ==
                             static_cast<off_t>(address) &&
                     read(fd, out, size) == static_cast<ssize_t>(size);
+    if (!ok) {
+        H4M_LOGW("ReadMem: lseek/read failed errno=%d", errno);
+    }
     close(fd);
     return ok;
 }
@@ -207,29 +213,11 @@ uintptr_t MadviseTarget() {
 }
 
 bool RunGuardSelfTest() {
-    // Trampoline check: read the hooked madvise entry. Bionic arm64 prologue
-    // is `bti c` (0xd50324bf) first word; a hook replaces the head with a
-    // branch into the trampoline, so unchanged prologue == hook not applied.
-    const uintptr_t target = MadviseTarget();
-    uint8_t head[16]{};
-    if (!ReadMem(target, head, sizeof(head))) {
-        H4M_LOGE("guard self-test: /proc/self/mem read failed");
-        return false;
-    }
-    uint32_t first_word = 0u;
-    memcpy(&first_word, head, sizeof(first_word));
-    const bool trampoline_ok = first_word != 0xd50324bful;
-    H4M_LOGW("guard self-test: madvise head=%02x%02x%02x%02x %02x%02x%02x%02x "
-             "trampoline=%d",
-             head[0], head[1], head[2], head[3], head[4], head[5], head[6],
-             head[7], trampoline_ok ? 1 : 0);
-    if (!trampoline_ok) {
-        H4M_LOGE("guard self-test: entry unchanged — hook not applied");
-        return false;
-    }
-
-    // Splitting test: two anonymous pages, register page 0 only; DONTNEED
-    // over both must preserve page 0 (guard skip) and zero page 1 (kernel).
+    // Splitting test FIRST — it is the real functional proof: with the hook
+    // live, the registered page survives DONTNEED and the control page is
+    // zeroed by the kernel; without the hook both are zeroed. The
+    // /proc/self/mem trampoline check below is diagnostic only (SELinux may
+    // deny proc_mem read in this domain).
     const size_t ps = PageSize();
     uint8_t *pages = reinterpret_cast<uint8_t *>(
             mmap(nullptr, 2u * ps, PROT_READ | PROT_WRITE,
@@ -269,6 +257,21 @@ bool RunGuardSelfTest() {
     H4M_LOGW("guard self-test: preserved=%d control_zeroed=%d => %s",
              preserved ? 1 : 0, control_zeroed ? 1 : 0,
              passed ? "PASSED" : "FAILED");
+
+    // Diagnostic only: trampoline visibility through /proc/self/mem.
+    const uintptr_t target = MadviseTarget();
+    uint8_t head[16]{};
+    if (!ReadMem(target, head, sizeof(head))) {
+        H4M_LOGW("guard self-test: trampoline check skipped (mem read denied)");
+    } else {
+        uint32_t first_word = 0u;
+        memcpy(&first_word, head, sizeof(first_word));
+        const bool trampoline_ok = first_word != 0xd50324bful;
+        H4M_LOGW("guard self-test: madvise "
+                 "head=%02x%02x%02x%02x %02x%02x%02x%02x trampoline=%d",
+                 head[0], head[1], head[2], head[3], head[4], head[5], head[6],
+                 head[7], trampoline_ok ? 1 : 0);
+    }
     return passed;
 }
 

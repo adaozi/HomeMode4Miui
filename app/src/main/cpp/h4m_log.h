@@ -19,15 +19,25 @@ namespace h4m_log {
 inline void write_file(const char *message) {
     static const char *const kPaths[] = {
             "/data/user_de/0/com.miui.home/cache/h4m_native.log",
+            "/data/user/0/com.miui.home/cache/h4m_native.log",
             "/data/data/com.miui.home/cache/h4m_native.log",
     };
     for (const char *path : kPaths) {
         const int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC,
                             0644);
-        if (fd < 0) continue;
-        dprintf(fd, "%s\n", message == nullptr ? "" : message);
-        close(fd);
-        return;
+        if (fd >= 0) {
+            dprintf(fd, "%s\n", message == nullptr ? "" : message);
+            close(fd);
+            return;
+        }
+        // 诊断：每个候选路径失败原因各报一次（首行起 50 次封顶防刷屏）
+        static uint32_t fail_logs = 0u;
+        if (__atomic_load_n(&fail_logs, __ATOMIC_RELAXED) < 50u) {
+            __atomic_fetch_add(&fail_logs, 1u, __ATOMIC_RELAXED);
+            __android_log_print(ANDROID_LOG_WARN, "H4MNative",
+                                "file mirror open failed path=%s errno=%d",
+                                path, errno);
+        }
     }
 }
 
