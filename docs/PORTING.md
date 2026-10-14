@@ -741,3 +741,8 @@ DIFF vs 桩文件:
 - 实机判读：`java bridge: bootstrap invoked — Java side is live` +
   `Os4Bootstrap: alive` + `marker mounted into <壳类>` + **桌面上可见黑色半透明
   标记条** + 桌面功能不受影响 = OS4 Java 触达闭环，UI 挂载架构正式可行。
+- 修复批（vc110 重导）：JNI_GetCreatedJavaVMs 在 Android 17 linker namespace 下
+  dlsym(RTLD_DEFAULT) 不可见（实测 errno 无符号）→ 三级降级解析：①RTLD_DEFAULT
+  ②dlopen("libart.so") ③/proc/self/maps 找 libart 基址 + 手解文件 ELF dynsym
+  （symtab 紧邻 strtab 启发式计数，文件读取不受 proc_mem SELinux 限制）。
+- 产物 .build/out/HomeMode4Miui-v2.9.79-os4b-jb2-110.apk（版本号未变，同 vc110）。

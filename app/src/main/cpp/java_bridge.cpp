@@ -5,10 +5,17 @@
 #include "h4m_log.h"
 
 #include <dlfcn.h>
+#include <elf.h>
+#include <fcntl.h>
 #include <jni.h>
+#include <link.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <string>
 #include <thread>
+#include <unistd.h>
+#include <vector>
 
 namespace h4m {
 namespace {
@@ -29,13 +36,190 @@ std::string ModuleApkPath() {
     return soPath.substr(0, libPos) + "/base.apk";
 }
 
+// ---------------------------------------------------------------------------
+// JavaVM 解析三级降级：
+//   ① dlsym(RTLD_DEFAULT) —— Android 17 linker namespace 下不可见（实测）；
+//   ② dlopen("libart.so") + dlsym —— 部分环境可用；
+//   ③ /proc/self/maps 定位 libart.so 基址 + 手解 ELF dynsym（确定性兜底，
+//      文件读取不受 SELinux proc_mem 限制）。
+// ---------------------------------------------------------------------------
+
+std::string FindLibartPath() {
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (f == nullptr) return {};
+    char line[512];
+    uintptr_t best = UINTPTR_MAX;
+    char path[400] = {0};
+    while (fgets(line, sizeof(line), f) != nullptr) {
+        if (strstr(line, "libart.so") == nullptr) continue;
+        const char *perms = strchr(line, ' ');
+        if (perms == nullptr || strlen(perms) < 4 ||
+                perms[1] != 'x') {  // 需要可执行段
+            continue;
+        }
+        uintptr_t start = 0;
+        if (sscanf(line, "%lx-", &start) != 1) continue;
+        if (start < best) {
+            best = start;
+            const char *p = strrchr(line, '/');
+            if (p != nullptr) {
+                char candidate[400];
+                if (sscanf(p, "%399s", candidate) == 1) {
+                    strncpy(path, candidate, sizeof(path) - 1u);
+                }
+            }
+        }
+    }
+    fclose(f);
+    return best != UINTPTR_MAX ? std::string(path) : std::string();
+}
+
+// 在文件 ELF 的 dynsym 里查找符号，返回 runtime 地址（base + st_value）。
+void *FindSymbolInElfFile(const char *filePath, uintptr_t base,
+                          const char *symbol) {
+    const int fd = open(filePath, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return nullptr;
+    ElfW(Ehdr) ehdr;
+    if (pread(fd, &ehdr, sizeof(ehdr), 0) != (ssize_t) sizeof(ehdr) ||
+            memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0) {
+        close(fd);
+        return nullptr;
+    }
+    // Program headers → PT_DYNAMIC 与 PT_LOAD（vaddr→offset 换算）
+    std::vector<ElfW(Phdr)> phdrs(ehdr.e_phnum);
+    if (pread(fd, phdrs.data(), sizeof(ElfW(Phdr)) * ehdr.e_phnum,
+              (off_t) ehdr.e_phoff) !=
+            (ssize_t)(sizeof(ElfW(Phdr)) * ehdr.e_phnum)) {
+        close(fd);
+        return nullptr;
+    }
+    ElfW(Addr) dynVaddr = 0;
+    ElfW(Xword) dynSize = 0;
+    for (const ElfW(Phdr) &ph : phdrs) {
+        if (ph.p_type == PT_DYNAMIC) {
+            dynVaddr = ph.p_vaddr;
+            dynSize = ph.p_memsz;
+            break;
+        }
+    }
+    if (dynVaddr == 0) {
+        close(fd);
+        return nullptr;
+    }
+    auto vaddrToFile = [&phdrs](ElfW(Addr) vaddr) -> off_t {
+        for (const ElfW(Phdr) &ph : phdrs) {
+            if (ph.p_type == PT_LOAD && vaddr >= ph.p_vaddr &&
+                    vaddr < ph.p_vaddr + ph.p_filesz) {
+                return (off_t)(ph.p_offset + (vaddr - ph.p_vaddr));
+            }
+        }
+        return -1;
+    };
+    const off_t dynOff = vaddrToFile(dynVaddr);
+    if (dynOff < 0) {
+        close(fd);
+        return nullptr;
+    }
+    std::vector<ElfW(Dyn)> dyns(dynSize / sizeof(ElfW(Dyn)));
+    if (pread(fd, dyns.data(), dynSize, dynOff) != (ssize_t) dynSize) {
+        close(fd);
+        return nullptr;
+    }
+    ElfW(Addr) symtab = 0, strtab = 0;
+    ElfW(Xword) syment = sizeof(ElfW(Sym));
+    for (const ElfW(Dyn) &d : dyns) {
+        if (d.d_tag == DT_SYMTAB) symtab = d.d_un.d_ptr;
+        if (d.d_tag == DT_STRTAB) strtab = d.d_un.d_ptr;
+        if (d.d_tag == DT_SYMENT) syment = d.d_un.d_val;
+    }
+    if (symtab == 0 || strtab == 0 || strtab <= symtab) {
+        close(fd);
+        return nullptr;
+    }
+    // 符号数启发式：symtab 紧邻 strtab 之前（linker 布局惯例，libart 适用）
+    const size_t symbolCount =
+            static_cast<size_t>((strtab - symtab) / syment);
+    const off_t symtabOff = vaddrToFile(symtab);
+    const off_t strtabOff = vaddrToFile(strtab);
+    if (symtabOff < 0 || strtabOff < 0) {
+        close(fd);
+        return nullptr;
+    }
+    void *result = nullptr;
+    for (size_t i = 0; i < symbolCount; ++i) {
+        ElfW(Sym) sym;
+        if (pread(fd, &sym, sizeof(sym), symtabOff + (off_t)(i * syment)) !=
+                (ssize_t) sizeof(sym)) {
+            break;
+        }
+        if (sym.st_name == 0 || sym.st_value == 0) continue;
+        char name[128];
+        if (pread(fd, name, sizeof(name) - 1u,
+                  strtabOff + (off_t) sym.st_name) <= 0) {
+            continue;
+        }
+        name[sizeof(name) - 1u] = '\0';
+        if (strcmp(name, symbol) == 0) {
+            result = reinterpret_cast<void *>(base + sym.st_value);
+            break;
+        }
+    }
+    close(fd);
+    return result;
+}
+
+using GetCreatedJavaVMsFn = jint (*)(JavaVM **, jsize, jsize *);
+
+GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
+    // ① 全局符号表
+    void *sym = dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs");
+    if (sym != nullptr) {
+        h4m_log::log(ANDROID_LOG_WARN, "java bridge: vm resolver tier1 ok");
+        return reinterpret_cast<GetCreatedJavaVMsFn>(sym);
+    }
+    // ② dlopen libart
+    void *handle = dlopen("libart.so", RTLD_NOW);
+    if (handle != nullptr) {
+        sym = dlsym(handle, "JNI_GetCreatedJavaVMs");
+        if (sym != nullptr) {
+            h4m_log::log(ANDROID_LOG_WARN, "java bridge: vm resolver tier2 ok");
+            return reinterpret_cast<GetCreatedJavaVMsFn>(sym);
+        }
+    }
+    // ③ maps + 手解 ELF dynsym
+    const std::string libart = FindLibartPath();
+    if (!libart.empty()) {
+        FILE *f = fopen(libart.c_str(), "r");
+        if (f != nullptr) {
+            char line[512];
+            uintptr_t base = UINTPTR_MAX;
+            while (fgets(line, sizeof(line), f) != nullptr) {
+                if (strstr(line, libart.c_str()) == nullptr) continue;
+                uintptr_t start = 0;
+                if (sscanf(line, "%lx-", &start) == 1 && start < base) {
+                    base = start;
+                }
+            }
+            fclose(f);
+            if (base != UINTPTR_MAX) {
+                sym = FindSymbolInElfFile(libart.c_str(), base,
+                                          "JNI_GetCreatedJavaVMs");
+                if (sym != nullptr) {
+                    h4m_log::log(ANDROID_LOG_WARN,
+                                 "java bridge: vm resolver tier3 ok base=%lx",
+                                 static_cast<unsigned long>(base));
+                    return reinterpret_cast<GetCreatedJavaVMsFn>(sym);
+                }
+            }
+        }
+    }
+    h4m_log::log(ANDROID_LOG_ERROR, "java bridge: vm resolver exhausted");
+    return nullptr;
+}
+
 void JavaBridgeThread() {
-    using GetCreatedJavaVMsFn = jint (*)(JavaVM **, jsize, jsize *);
-    auto getVMs = reinterpret_cast<GetCreatedJavaVMsFn>(
-            dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs"));
+    auto getVMs = ResolveGetCreatedJavaVMs();
     if (getVMs == nullptr) {
-        h4m_log::log(ANDROID_LOG_ERROR,
-                     "java bridge: JNI_GetCreatedJavaVMs not found");
         return;
     }
     JavaVM *vm = nullptr;
@@ -45,6 +229,7 @@ void JavaBridgeThread() {
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: no java vm");
         return;
     }
+    h4m_log::log(ANDROID_LOG_WARN, "java bridge: vm acquired");
     JNIEnv *env = nullptr;
     if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK || env == nullptr) {
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: attach failed");
