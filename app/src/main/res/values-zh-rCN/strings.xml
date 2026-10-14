@@ -101,8 +101,8 @@
     <string name="icon_designer_select_data">选择图标设计</string>
     <string name="icon_designer_shape">形状</string>
     <string name="icon_designer_shape_circle">圆形</string>
-    <string name="icon_designer_shape_cookie">n-side cookie</string>
-    <string name="icon_designer_shape_gem">Gem</string>
+    <string name="icon_designer_shape_cookie">甜饼形（N 边）</string>
+    <string name="icon_designer_shape_gem">宝石形</string>
     <string name="icon_designer_shape_none">不裁切</string>
     <string name="icon_designer_shape_pebble">鹅卵石</string>
     <string name="icon_designer_shape_square">正方形</string>
@@ -116,7 +116,7 @@
     <string name="icon_designer_theme_icon">主题化图标</string>
     <string name="icon_designer_theme_unsupported">主题化不支持的图标</string>
     <string name="icon_designer_theme_unsupported_summary">没有单色图层时，将图标表面灰度归一化后作为单色符号使用</string>
-    <string name="icon_designer_title">Icon designer</string>
+    <string name="icon_designer_title">图标设计器</string>
     <string name="icon_designer_tray_color">托盘颜色</string>
     <string name="icon_designer_unsaved_message">当前图标的修改尚未保存。</string>
     <string name="icon_designer_unsaved_title">是否保存修改？</string>
@@ -498,7 +498,7 @@
 
     <!-- Manifest 引用 -->
     <string name="xposed_description">为 com.miui.home 增加自定义桌面模式底座（原生式模式注册 + 视图挂载 + 手势隔离），UI 由 HomeView 接入</string>
-    <string name="accessibility_service_name">HomeMode4Miui system actions</string>
+    <string name="accessibility_service_name">HomeMode4Miui 系统动作</string>
 
     <!-- 首页头部说明 -->
     <string name="module_desc">\n为小米桌面（com.miui.home，OS2/OS3 双版本自适应）新增第四种桌面模式。\n切换走原生链路，与三种原生模式互不干扰。\n提示：请先关闭系统「极简模式」</string>

@@ -443,3 +443,9 @@ DIFF vs 桩文件:
 - [x] **装机实锤**：桌面日程/天气/媒体行大面积英文（Your agenda / today / New event / No upcoming events / now / updated…）—— B6.x 批次搬运时标注"沿用英文，本地化随 C 组"，但 zh-rCN 一直没补，中文设备回落 values 默认（英文）。
 - [x] **差集清零**：脚本比对 values/strings.xml vs values-zh-rCN/strings.xml，补齐 74 个缺失 string key（媒体控制 11 / 通知预览 6 / 日程 13 / 天气 22 / 小组件弹层 15 / 私密空间 3 / 通用 4）+ widget_count plurals；仅剩 8 个 translatable=false 字体名（无需翻译）。反向差集为 0。
 - [x] 构建：assembleRelease 通过，versionCode 80；产物已导出 .build/out/。
+
+### l10n2（v2.9.48-l10n2 / versionCode 81，2026-10-14）—— 设置页残留英文收尾
+
+- [x] **装机实锤**：设置页仍有英文（非字体名）—— 扫描 zh-rCN 中不含中文的 string 值，锁定 4 个漏网：icon_designer_title（Icon designer → 图标设计器，设置入口标题）、icon_designer_shape_gem（Gem → 宝石形）、icon_designer_shape_cookie（n-side cookie → 甜饼形（N 边））、accessibility_service_name（→ HomeMode4Miui 系统动作）。
+- [x] **终验**：zh-rCN 剩余无中文值全部为合理专名（app_name / 字体名×2 / GNU GPLv3 / 搜索引擎品牌×4 / URL 示例），无 UI 文案残留。
+- [x] 构建：assembleRelease 通过，versionCode 81；产物已导出 .build/out/。
