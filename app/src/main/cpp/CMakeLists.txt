@@ -1,12 +1,14 @@
 # Route B PoC（phase 1）：观察型 native 入口。
 # 仅编译观察探针；业务 hook（madvise guard / 指纹 resolver / trampoline）在后续批次接入。
 cmake_minimum_required(VERSION 3.22.1)
-project(homemode4miui_native CXX)
+project(homemode4miui_native CXX ASM)
 
 add_library(homemode4miui_native SHARED
         homemode4miui_native.cpp
         hook_guard.cpp
-        obs_hook.cpp)
+        obs_hook.cpp
+        gesture_hook.cpp
+        gesture_hook.S)
 
 target_compile_options(homemode4miui_native PRIVATE
         -O2

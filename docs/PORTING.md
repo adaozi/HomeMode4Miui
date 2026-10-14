@@ -668,3 +668,19 @@ DIFF vs 桩文件:
   直连路径兜底。
 - phase 3 观测 hook 无需改动（vc105 已装载，只是看不见日志）。
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.75-os4b-p3b-106.apk。
+
+### Route B phase 4a：on_swipe_process 只读观测（2026-10-14）—— v2.9.76-os4b-p4a / vc107
+
+- phase 3 实机 PASSED：观测 hook 三次启动均装载 + call #1 转发成功 + launcher 稳定；
+  文件镜像经 /proc/<pid>/root 全量可读（namespace 穿透成功），跨启动历史齐备。
+- 指纹交叉验证：按符号定位的 on_swipe_process（7748 vaddr 0x702690）入口 24 字节
+  与 SwipeGate gesture-frame-v2 逐字节一致——符号定位与社区实测指纹互证。
+- 本批 gesture_hook.{h,cpp,S}：dl_iterate_phdr 定位 base → base+0x702690 处 24
+  字节指纹精确比对（fail closed）→ hook_func + ABI 透明 AArch64 trampoline
+  （改自 SwipeGate swipe_hook_entry.S，MIT 署名）：保存 x0..x8/q0..q7/x30，
+  只读记录 w1(ready)/w2(side)/s0(dist)，Ready 边沿单独落日志，原样转发。
+- 构建修复两笔：CMake 开 ASM 语言；gesture_obs_enter 移出 namespace 保证 unmangled。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.76-os4b-p4a-107.apk。
+- 实机判读：`phase4a: gesture observation hook installed` + 侧滑返回手势时
+  `call #1` / `Ready edge #n`（dist 递增）+ 桌面手势功能正常 = 观测闭环，
+  phase 4b（阈值门控改写 s0）具备全部前置。

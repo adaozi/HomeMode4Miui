@@ -17,6 +17,7 @@
 // the spawner; business hooks (later phases) must only act inside the launcher
 // child once the target libraries are mapped.
 
+#include "gesture_hook.h"
 #include "h4m_log.h"
 #include "hook_guard.h"
 #include "native_api.h"
@@ -152,6 +153,11 @@ void onLibraryLoaded(const char *name, void *handle) {
                 // (idempotent; the libapp_launcher callback also repeats).
                 if (g_entries != nullptr) {
                     h4m::InstallObservationHook(g_entries->hook_func, handle);
+                }
+                // Phase 4a: read-only observation hook on on_swipe_process
+                // (symbol-vaddr + exact fingerprint, fail closed on mismatch).
+                if (g_entries != nullptr) {
+                    h4m::InstallGestureObservationHook(g_entries->hook_func);
                 }
             }
         }
