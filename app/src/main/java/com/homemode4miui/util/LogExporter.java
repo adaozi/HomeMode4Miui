@@ -237,6 +237,19 @@ public final class LogExporter {
         // ⑦ 抓取：jar（dex 本体）+ xml（库映射）都要 —— 全量拷，不再首个 OK 即停
         String copied = tryCopyRustruntimeApk(libs, found);
         sb.append("rustruntime 抓取:\n").append(copied).append('\n');
+        // ⑧ v2.9.64 关键抓取：/product/priv-app/MiuiHome/MiuiHome.apk ——
+        //    实机 dumpsys（log 20261014_165508）实锤设备上存在【双份 MiuiHome】：
+        //    /data/app 更新包 vc=801027748（= 本地样本，hasCode=false 零 dex）+
+        //    /product/priv-app 原版 vc=801027719 —— OS4 壳层 Java 类的头号候选。
+        //    hasCode=false 更新压在 hasCode=true 系统包上时 PMS 的类装载走向
+        //    以此 APK 的实际内容为准 —— 拷出来即真相。
+        String privCopy = runSu("ls -la /product/priv-app/MiuiHome/;"
+                + " cp -f /product/priv-app/MiuiHome/MiuiHome.apk /sdcard/Download/MiuiHome_privapp.apk"
+                + " && chmod 644 /sdcard/Download/MiuiHome_privapp.apk && echo COPY_OK");
+        sb.append("priv-app MiuiHome 抓取:\n")
+                .append(privCopy.contains("COPY_OK")
+                        ? "OK → /sdcard/Download/MiuiHome_privapp.apk\n" + privCopy.replace("COPY_OK", "").trim()
+                        : orNa(privCopy)).append('\n');
         sb.append("# =======================================\n");
         return sb.toString();
     }
