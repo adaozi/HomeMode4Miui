@@ -14,10 +14,11 @@ import com.homemode4miui.util.ModLog;
  * 宿主版本兼容层 —— OS2（5.x）/ OS3（6.x）桌面双版本适配的路由中枢。
  *
  * 版本判据（逆向实证）：
+ *   - OS4 宿主：RELEASE-8.01.02.7748-260904，versionCode 801027748（≥ 8_0000_0000）
  *   - OS3 宿主：RELEASE-6.01.03.1927-12221511，versionCode 601031927（≥ 6_0000_0000）
  *   - OS2 宿主：RELEASE-5.39.40.10843，versionCode 53940xxxx（< 6_0000_0000）
- *   规则：versionCode ≥ 600_000_000 → OS3 家族；否则 OS2 家族。
- *   versionCode 读取失败时用 versionName 兜底（"RELEASE-6." 前缀）。
+ *   规则：versionCode ≥ 800_000_000 → OS4 家族；≥ 600_000_000 → OS3；否则 OS2。
+ *   versionCode 读取失败时用 versionName 兜底（"RELEASE-8." / "RELEASE-6." 前缀）。
  *
  * 关键签名漂移（OS3 vs OS2，androguard 全量比对结论）：
  *   - Launcher 大重构：com.miui.home.launcher.Launcher 在 OS3 只剩
@@ -29,6 +30,19 @@ import com.homemode4miui.util.ModLog;
  *   - LauncherMode 搜索条语义改为 getSupportSearchBarType(int)，
  *     isHomeSupportIconSearchBar 从 (Context) 变无参。
  *
+ * OS4 家族（v2.9.58，MiuiHomeOS4.apk 全量逆向实锤）：
+ *   OS4 桌面 = Flutter UI + Rust 核心的完全重写 —— APK 内【零 Java 字节码】
+ *   （无 classes.dex，全包 dex 魔数扫描 0 命中；<application android:hasCode="false">
+ *   明示无代码；MANIFEST.MF 933 条目与包内文件一一对应，平台签名 PLATFORM.SF）。
+ *   UI 层 libapp.so（Dart AOT，hyper_launcher_ui）+ libhyper_os_flutter.so（引擎）；
+ *   核心层 libapp_launcher.so（Rust，crate__api__* 符号）+ libresources_frb.so
+ *   （flutter_rust_bridge）。Manifest 依赖 <uses-library "hyperos.rustruntime.v5">
+ *   —— 声明的 23 个 Java Activity（com.miui.home.launcher.Launcher 等）的实现类
+ *   由系统侧共享库 APK 提供（壳层），需从设备另行提取才能确认可 hook 面。
+ *   结论：OS2/OS3 的全部桌面 hook 锚点在 OS4 上不存在（Launcher/LauncherMode/
+ *   SuperDraglayer/GadgetFactory 均无），模块在 OS4 上【优雅退场】——跳过全部
+ *   桌面 hook，仅保留 gate1 通信链（ping/pong 与家族回显）。
+ *
  * 类解析策略：launcherHookClass() 从 Launcher 沿父类链向上找【实际声明目标方法的类】——
  *   OS2 返回 Launcher 自身，OS3 返回 BaseLauncher；未来再上移也自动跟随。
  *   版本家族只用于日志标注与解析起点优化，不承担正确性（正确性由声明类解析保证）。
@@ -39,11 +53,14 @@ public final class HostCompat {
     public static final int FAMILY_UNKNOWN = 0;
     public static final int FAMILY_OS2 = 2;
     public static final int FAMILY_OS3 = 3;
+    public static final int FAMILY_OS4 = 4;
 
     private static final String LAUNCHER_CLS = "com.miui.home.launcher.Launcher";
     private static final String BASE_LAUNCHER_CLS = "com.miui.home.launcher.BaseLauncher";
     /** OS3 家族 versionCode 下界（OS2 5.39.40 = 53940xxxx，OS3 6.01.03 = 601031927） */
     private static final long OS3_MIN_VERSION_CODE = 600_000_000L;
+    /** OS4 家族 versionCode 下界（OS4 8.01.02 = 801027748） */
+    private static final long OS4_MIN_VERSION_CODE = 800_000_000L;
 
     private static final String TAG = "HomeMode4Miui";
     private static volatile int sFamily = FAMILY_UNKNOWN;
@@ -139,10 +156,14 @@ public final class HostCompat {
     /** 应用家族判定；返回是否改变了此前结论 */
     private static boolean applyFamily(long code, String name) {
         int newFamily;
-        if (code >= OS3_MIN_VERSION_CODE) {
+        if (code >= OS4_MIN_VERSION_CODE) {
+            newFamily = FAMILY_OS4;
+        } else if (code >= OS3_MIN_VERSION_CODE) {
             newFamily = FAMILY_OS3;
         } else if (code >= 0) {
             newFamily = FAMILY_OS2;
+        } else if (name != null && name.contains("RELEASE-8.")) {
+            newFamily = FAMILY_OS4; // versionCode 不可得时的 versionName 兜底
         } else if (name != null && name.contains("RELEASE-6.")) {
             newFamily = FAMILY_OS3; // versionCode 不可得时的 versionName 兜底
         } else {
@@ -158,9 +179,15 @@ public final class HostCompat {
         return sFamily == FAMILY_OS3;
     }
 
-    /** 日志用版本标签："OS2(5.x)" / "OS3(6.x)" / "UNKNOWN" */
+    /** OS4 家族：宿主零 Java 字节码，桌面 hook 全部失配，模块走优雅退场 */
+    public static boolean isOS4() {
+        return sFamily == FAMILY_OS4;
+    }
+
+    /** 日志用版本标签："OS2(5.x)" / "OS3(6.x)" / "OS4(8.x)" / "UNKNOWN" */
     public static String label() {
         switch (sFamily) {
+            case FAMILY_OS4: return "OS4(8.x)";
             case FAMILY_OS3: return "OS3(6.x)";
             case FAMILY_OS2: return "OS2(5.x)";
             default: return "UNKNOWN";
