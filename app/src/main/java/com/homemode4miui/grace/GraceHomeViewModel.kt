@@ -410,6 +410,11 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     val icons = rows.mapNotNull { row ->
                         com.galaxyrio.gracelauncher.data.ItemIcon.decode(row.iconJson)?.let { row.itemKey to it }
                     }.toMap()
+                    // 上游 itemsSnapshot 同构（LauncherViewModel.kt:427 在 collect 内落快照字段）：
+                    // 局部 icons 必须同步到 iconsSnapshot —— decorateApps/decorateFolders 的
+                    // 两条消费链（refreshApps 冷启动 + 本 collect 即时重装饰）都从该字段读
+                    // per-item 选择。漏赋值 = 单个图标/文件夹图标设计永不生效（装机实锤）。
+                    iconsSnapshot = icons
                     // Grace 按钮位图随 icons 流产出（上游 LauncherViewModel.kt:450-451 同构）：
                     // ItemIconStore.apply 走 isGraceButton 分支渲染 256px artwork。
                     // 图标渲染设置统一走 currentIconSettings（补 iconDesign/iconPackPackages，

@@ -465,3 +465,10 @@ DIFF vs 桩文件:
 - [x] **修复（对齐上游）**：① GraceHomeUiState 增 folderApps: Map<folderId, LauncherApp>；② folderItem 优先 folderApps[id] 回落 asApp()；③ 新增 decorateFolders（无选择的文件夹零渲染），接入 refreshApps（冷启动）+ iconsJob collect（设计器保存后立即生效）双链；④ AppDrawerScreen 补 folderApps 参数（上游签名对齐），抽屉 FolderRow app = folderApps[id] ?: asApp()（onSwipeLeft 同步）；⑤ Route 层透传 state.folderApps。
 - [x] 覆盖面：主页收藏区文件夹行 / 抽屉文件夹行 / 弹层锚点动画（行图标即锚）/ 左滑第一项 open 语义；文件夹弹层成员图标不做装饰为既有降级登记，不在本批范围。
 - [x] 构建：assembleRelease 通过，versionCode 83；产物已导出 .build/out/。
+
+### icon-snapshot（v2.9.51-icon-snapshot / versionCode 84，2026-10-14）—— 单个图标设计保存不生效
+
+- [x] **装机实锤**：图标设计器改单个应用图标，保存提示成功，主页不变。
+- [x] **根因**：iconsJob collect 里算出的 icons 只是局部变量，只喂了 itemIcons UI state 与 Grace 按钮；`iconsSnapshot` 字段声明后**从未赋值**——decorateApps / decorateFolders 的冷启动路径（refreshApps）与即时重装饰路径全部从该字段读 per-item 选择，永远拿到空 map。上游 LauncherViewModel.kt:427 的 itemsSnapshot 在 collect 内落快照字段，本仓搬运时漏了这一行。连带影响：v2.9.50 的文件夹图标热保存链（传局部 icons）生效、但冷启动链读空会丢。
+- [x] **修复**：iconsJob collect 头部 `iconsSnapshot = icons`（先落快照再渲染），一行修复覆盖单个应用图标 + 文件夹图标两条消费链（冷启动 / 即时）。
+- [x] 构建：assembleRelease 通过，versionCode 84；产物已导出 .build/out/。
