@@ -163,7 +163,93 @@ public final class LogExporter {
         out.append("# ==============================\n\n");
         out.append(body);
 
+        // OS4 适配诊断段（root 时追加；见方法注释）
+        out.append(buildOs4Diag(rootUsed));
+
         return writeToDownloads(ctx, out.toString(), minutes);
+    }
+
+    /* ==================== OS4 适配诊断 ==================== */
+
+    /**
+     * OS4 环境诊断段（v2.9.59）—— 服务于 OS4 适配的下一步取证：
+     * 宿主 OS4（Flutter+Rust 重写）的 Java Activity 壳由系统侧共享库
+     * hyperos.rustruntime.v5 提供，需要确认设备上该库的包名与 APK 路径。
+     * 本段用 LogExporter 现成的 su 通道执行四条只读 pm 探测；发现 rustruntime
+     * 库后自动 cp 一份 APK 到 Download（无需 adb，文件随日志一起发回即可分析）。
+     * 全部命令独立 try：单条失败只留 "N/A"，不影响日志主体。
+     */
+    private static String buildOs4Diag(boolean rootUsed) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n# ==== OS4 适配诊断（rustruntime 库定位） ====\n");
+        if (!rootUsed) {
+            sb.append("# 未取得 root，跳过（本段需要 su）\n");
+            return sb.toString();
+        }
+        // ① 宿主 APK 路径（确认设备上装的是哪族桌面）
+        sb.append("pm path com.miui.home:\n")
+                .append(orNa(runSu("pm path com.miui.home"))).append('\n');
+        // ② 包名探测：静态共享库包名 ≈ uses-library 名（hyperos.rustruntime.v5）
+        String grepPkgs = runSu("pm list packages | grep -i rust");
+        sb.append("pm list packages | grep -i rust:\n").append(orNa(grepPkgs)).append('\n');
+        // ③ 系统共享库声明表（uses-library 名单）
+        sb.append("pm list libraries | grep -i rust:\n")
+                .append(orNa(runSu("pm list libraries | grep -i rust"))).append('\n');
+        // ④ 命中库 → 自动拷贝 APK 到 Download（发给 AI 逆向壳层 hook 面）
+        String copied = tryCopyRustruntimeApk(grepPkgs);
+        sb.append("rustruntime APK 拷贝:\n").append(copied).append('\n');
+        sb.append("# =======================================\n");
+        return sb.toString();
+    }
+
+    /** su 执行单条 shell（管道 OK）；失败/空返回 ""（诊断段内再统一标注） */
+    private static String runSu(String shellCmd) {
+        try {
+            String r = runCommandCapture(new String[]{"su", "-c", shellCmd},
+                    0L, 15_000);
+            return r == null ? "" : r.trim();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** 从 `pm list packages` 输出提取首个包名 */
+    private static String firstPackageName(String pmListOutput) {
+        if (pmListOutput == null) return null;
+        java.util.regex.Matcher m =
+                java.util.regex.Pattern.compile("package:([^\\s\\r\\n]+)")
+                        .matcher(pmListOutput);
+        return m.find() ? m.group(1) : null;
+    }
+
+    /**
+     * 发现 rustruntime 共享库包 → su cp 其 APK 到 /sdcard/Download/。
+     * 返回给人读的结果行（成功含落盘路径；未命中/失败含原因）。
+     */
+    private static String tryCopyRustruntimeApk(String grepPkgs) {
+        String pkg = firstPackageName(grepPkgs);
+        if (pkg == null) {
+            return "N/A（未发现 *rust* 包 —— 设备可能非 OS4 宿主）";
+        }
+        String apkPath = runSu("pm path " + pkg);
+        if (apkPath == null || !apkPath.startsWith("package:")) {
+            return "N/A（pm path " + pkg + " 无结果）";
+        }
+        // split APK 时 pm path 返回多行（base + split_config*），只取 base 行
+        apkPath = apkPath.split("\n")[0]
+                .replaceFirst("^package:", "").trim();
+        String dest = "/sdcard/Download/" + pkg.replace('.', '_') + ".apk";
+        String cp = runSu("cp -f \"" + apkPath + "\" \"" + dest
+                + "\" && chmod 644 \"" + dest + "\" && echo COPY_OK");
+        if (cp.contains("COPY_OK")) {
+            return "OK → " + dest + "（源: " + apkPath + "）";
+        }
+        return "FAILED（cp 失败: " + cp + "）";
+    }
+
+    /** 诊断段占位：空串 → N/A 标注 */
+    private static String orNa(String s) {
+        return (s == null || s.length() == 0) ? "N/A" : s;
     }
 
     /* ==================== 来源采集 ==================== */
