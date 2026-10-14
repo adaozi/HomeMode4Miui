@@ -82,6 +82,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** B6.2：日程加载状态（语义对齐原版 ScheduleStatus）。 */
@@ -297,6 +299,11 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** 上游同步补漏：item_icons 快照（iconsJob 主线程写，refreshApps/装饰读）。
      *  上游 LauncherViewModel.itemsSnapshot.icons 的宿主同构。 */
     private var iconsSnapshot: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon> = emptyMap()
+    /** 内存列表（apps + folderApps）当前已按哪个 icons 快照装饰完成的标记；
+     *  null = 未装饰/上次装饰失败（下次快照到达强制重试）。 */
+    private var itemsDecoratedWith: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon>? = null
+    /** 「读内存列表 → 装饰 → 原子换入」串行化：iconsJob 重装饰与 refreshApps 收尾互斥。 */
+    private val decorateMutex = Mutex()
     /** hotfix folders2：已保存快捷方式流（saved_shortcuts 表） */
     private var savedShortcutsJob: Job? = null
     /** P6：图标包开关变化 → 重刷应用列表（渲染装饰跟随包顺序）。 */
@@ -442,31 +449,17 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                         ModLog.e("GraceHomeViewModel renderGraceButtonIcon failed", error)
                         null
                     }
-                    // 上游同步补漏：icons 变化 → 已加载应用重装饰（设计器保存后桌面立即生效，
-                    // 不重查系统；refreshApps 侧同链路覆盖冷启动/包变化路径）。
-                    val redecorated = try {
-                        decorateApps(_uiState.value.apps)
-                    } catch (error: kotlinx.coroutines.CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        ModLog.e("GraceHomeViewModel redecorateApps failed", error)
-                        null
-                    }
-                    // 上游 LauncherViewModel.kt:445-447 同构：文件夹图标项跟随 icons 流
-                    // （设计器保存文件夹图标后主页/抽屉立即生效，无需重启）。
-                    val redecoratedFolders = try {
-                        decorateFolders(_uiState.value.folders, icons)
-                    } catch (error: kotlinx.coroutines.CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        ModLog.e("GraceHomeViewModel redecorateFolders failed", error)
-                        null
-                    }
-                    _uiState.update { state ->
-                        state.copy(itemIcons = icons, graceButtonApp = buttonApp,
-                            apps = redecorated ?: state.apps,
-                            folderApps = redecoratedFolders ?: state.folderApps)
-                    }
+                    // 上游同步补漏（LauncherViewModel.kt:305-310 reload 语义）：快照变化 → 内存
+                    // 列表重装饰（设计器保存后桌面立即生效，不重查系统；refreshApps 侧同链路
+                    // 覆盖冷启动/包变化路径）。去重 + 装载中让路：
+                    // ① 快照与 itemsDecoratedWith 相同 = 内存列表已按该快照装饰过，跳过
+                    //   （Room 流可能在失效追踪器初始化等场景重发；Grace 按钮 artwork 不受影响，
+                    //   上方仍无条件产出）；
+                    // ② isLoadingApps = refreshApps 在途，其 decorateApps 会读到刚落的最新
+                    //   快照，无需（也不能）在此并发重装饰——否则读到的旧/空 apps 会在
+                    //   update 时覆盖装载结果（空列表闪断竞态，v2.9.51 起存在）。
+                    if (icons != itemsDecoratedWith) applyItemIconSnapshot()
+                    _uiState.update { it.copy(itemIcons = icons, graceButtonApp = buttonApp) }
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
@@ -512,9 +505,11 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 lastIconPacks = packs
                 // 上游同步补漏（LauncherViewModel.kt:443 decorate 逐字语义）：
                 // 应用图标设计器产出（item_icons）+ 全局面设计 + 主题化在入库前套用。
+                // 快照在装饰前取定：装载期间 icons 流前进的场景由尾部补偿轮处理。
+                val snapshotAtDecorate = iconsSnapshot
                 val apps = decorateApps(loadApps(packs))
                 // 上游 LauncherViewModel.kt:445-447 同构：文件夹图标项一并装饰。
-                val folderApps = decorateFolders(_uiState.value.folders, iconsSnapshot)
+                val folderApps = decorateFolders(_uiState.value.folders, snapshotAtDecorate)
                 // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
                 // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
                 val order = favoritesStore.favoritesFor(apps)
@@ -528,11 +523,40 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                         isLoadingApps = false,
                         workProfiles = workProfiles, workProfileApps = workProfileApps)
                 }
+                itemsDecoratedWith = snapshotAtDecorate
+                // 装载期间 icons 流前进过（iconsJob 因 isLoadingApps 让路）：
+                // 以最新快照补一轮内存重装饰，否则新快照要等下次 emission 才生效。
+                if (iconsSnapshot != snapshotAtDecorate) applyItemIconSnapshot()
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Exception) {
                 ModLog.e("GraceHomeViewModel loadApps failed", error)
                 _uiState.update { it.copy(isLoadingApps = false, appLoadFailed = true) }
+            }
+        }
+    }
+
+    /**
+     * 用当前 iconsSnapshot 重装饰内存中的应用/文件夹图标列表（不重查系统），原子换入。
+     * icons 快照到达（iconsJob）与 refreshApps 装载尾部补偿共用；装载在途时直接让路
+     * （在途 refreshApps 的 decorateApps 会读到刚落的最新快照）。成功后落 itemsDecoratedWith
+     * 标记；失败不落（下次快照到达强制重试）。
+     */
+    private suspend fun applyItemIconSnapshot(): Boolean {
+        if (_uiState.value.isLoadingApps) return false
+        return decorateMutex.withLock {
+            try {
+                val state = _uiState.value
+                val apps = decorateApps(state.apps)
+                val folderApps = decorateFolders(state.folders, iconsSnapshot)
+                _uiState.update { it.copy(apps = apps, folderApps = folderApps) }
+                itemsDecoratedWith = iconsSnapshot
+                true
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                ModLog.e("GraceHomeViewModel applyItemIconSnapshot failed", error)
+                false
             }
         }
     }
@@ -575,7 +599,22 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         return kotlinx.coroutines.withContext(Dispatchers.IO) {
             apps.map { app ->
                 runCatching {
-                    iconStore.applyDesign(app, icons[app.key], iconSettings.iconDesign, iconSettings, themed)
+                    val special = icons[app.key]
+                    // 宿主性能适配（装机实锤 v2.9.51 后每次重启桌面字母条滑动卡顿）：
+                    // 无 per-item 选择 + 无全局面设计 + 未开主题化的应用，applyDesign 仍会走
+                    // "默认设计全量重渲染"——systemDrawable binder 往返 + 144px 多层位图渲染 +
+                    // monochrome 逐像素扫描，冷启动 200+ 次，IO 线程与宿主 UI/Render 线程抢
+                    // CPU 且 ~20MB 位图分配引发 GC 抖动。上游独立进程扛得住，宿主
+                    // com.miui.home 进程（MIUI 自身 UI 同线程竞争）扛不住。
+                    // 快速路径与重渲染视觉等价：保留 loadApps 原图标，仅按设计分支语义清空
+                    // monochromeIcon（桌面 themed 圆显隐一致）；iconPackPackage/themeIconPackPackage
+                    // 保持 loadApps 原值（theme kind 本就原样保留）；loadApps 图标缺失的应用
+                    // 仍走全量渲染（systemDrawable 兜底补图标的既有能力不受影响）。
+                    if (special == null && iconSettings.iconDesign == null && !themed && app.icon != null) {
+                        if (app.monochromeIcon == null) app else app.copy(monochromeIcon = null)
+                    } else {
+                        iconStore.applyDesign(app, special, iconSettings.iconDesign, iconSettings, themed)
+                    }
                 }.getOrElse { app }
             }
         }

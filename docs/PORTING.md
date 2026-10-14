@@ -479,3 +479,11 @@ DIFF vs 桩文件:
 - [x] **定性**：移植引入的偏差，非上游设计。上游 favoriteApps/appListApps 只挡 settings 加载/失败（isLoadingSettings || settingsLoadFailed）；本仓 P1 搬运时在 favorites/favoriteItems/appListApps 三个 getter 加了 `isLoadingApps ||` 空化 —— 包变化事件触发 refreshApps（重查 LauncherApps + 200+ 次图标装饰，耗时数秒），刷新期 getters 返回空列表 → 整列消失。上游语义是后台刷新、旧列表保持显示、新列表就绪后原位换入。
 - [x] **修复**：三个 getter 去掉 isLoadingApps（保留 appLoadFailed 失败语义）；refreshApps 本就不清 apps（成功才整体换入），去掉空化后即天然对齐上游。Route 不消费 loading 态，无副作用；isLoadingApps 字段保留（收藏编辑 shim 的 loading 指示仍消费）。
 - [x] 构建：assembleRelease 通过，versionCode 85；产物已导出 .build/out/。
+
+### icon-perf（v2.9.53-icon-perf / versionCode 86，2026-10-14）—— 重启桌面后字母索引滑动卡顿
+
+- [x] **装机实锤**：每次重启桌面后，抽屉字母索引条滑动卡顿。
+- [x] **定性**：v2.9.51（iconsSnapshot 修复）激活的冷启动装饰渲染风暴。v2.9.51 前 iconsSnapshot 恒空 → decorateApps 全局短路 → 冷启动零图标渲染；之后只要 item_icons 非空，**每个应用**（含无自定义选择的）都走 applyDesign「默认设计全量重渲染」：systemDrawable binder 往返 + 144px 多层位图渲染 + monochrome 逐像素扫描，冷启动 200+ 次、~20MB 位图分配。上游独立进程可承受；宿主 com.miui.home 进程 IO 线程与 MIUI 自身 UI/Render 线程抢 CPU + GC 压力 → 重启后首次滑动字母条窗口期卡顿。
+- [x] **修复①（主）decorateApps 逐应用快速路径**：无 per-item 选择 + 无全局面设计 + 未开主题化 + loadApps 图标存在 → 跳过重渲染，保留原图标、仅按设计分支语义清 monochromeIcon（桌面 themed 圆显隐与重渲染版逐字节一致，iconPackPackage 同为 theme kind 原样保留语义）；monochrome 本就为空时零 copy（保持实例同一性，行重组最少化）。渲染量从 200+ 收敛到「有自定义选择 + 有全局面 + themed 开」的子集。loadApps 图标缺失的应用仍走全量渲染（systemDrawable 兜底补图不受影响）。
+- [x] **修复②重装饰收敛为单一入口 applyItemIconSnapshot**（Mutex 串行「读列表→装饰→原子换入」）：iconsJob 与 refreshApps 装载尾部补偿共用；itemsDecoratedWith 快照标记去重（Room 流重发不重复全量渲染）；isLoadingApps 在途让路（在途 refreshApps 会读到刚落的最新快照）——**顺带修复 v2.9.51 起的空列表覆盖竞态**（iconsJob 在 refreshApps 换入间隙用空/旧 apps update 覆盖装载结果）；装载期间快照前进由 refreshApps 尾部以最新快照补一轮。
+- [x] 构建：assembleRelease 通过，versionCode 86；产物已导出 .build/out/。
