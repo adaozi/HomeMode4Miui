@@ -587,3 +587,11 @@ DIFF vs 桩文件:
 - 目的：导出按钮一站式拿齐"管理器日志页"才有的容器侧信息（native 模块注册、
   hyos_spawner 注入记录），不用再让用户手动截图。
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.69-os4b-diag3-100.apk。
+
+### 容器日志采集修复（2026-10-14）—— v2.9.70-os4b-diag4 / vc101
+
+- 双发现：① fork 日志文件名带时间戳（modules_2026-10-14T*.log），写死路径永远
+  落空；② 容器段的时间窗过滤把启动期的模块加载记录全滤掉。
+- 修复：tryLspLog 改目录 glob（modules*.log）；容器诊断段 cat 不过滤时间
+  （400 行保最新已限幅）；删除死常量 LSP_LOG_PATHS。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.70-os4b-diag4-101.apk。

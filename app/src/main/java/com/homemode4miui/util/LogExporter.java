@@ -51,13 +51,6 @@ public final class LogExporter {
         void onDone(boolean success, String message, String path);
     }
 
-    /** LSPosed 模块日志候选路径（新旧版本布局漂移，依次探测） */
-    private static final String[] LSP_LOG_PATHS = {
-            "/data/adb/lspd/log/modules.log",       // LSPosed 1.9.x+（JingMatrix 同）
-            "/data/adb/lsposed/logs/modules.log",   // 旧版 1.8.x
-            "/data/adb/lsposed/log/modules.log",    // 旧版备选布局
-    };
-
     /** LSPosed 容器日志目录候选（verbose/all 日志所在，fork 布局漂移依次探测） */
     private static final String[] LSP_LOG_DIRS = {
             "/data/adb/lspd/log",
@@ -202,23 +195,28 @@ public final class LogExporter {
     /* ==================== 来源采集 ==================== */
     // 来源描述（source）与文件头同属导出文件内容，非设备 UI，保持中文原样。
 
-    /** 逐路径探测 LSPosed 模块日志；按 tag 过滤后非空即返回，全失败返回 null */
+    /** 逐目录 glob 探测 LSPosed 模块日志（fork 文件名带时间戳后缀，modules_*.log）；按 tag 过滤后非空即返回，全失败返回 null */
     private static String tryLspLog(long startMs) {
-        for (String path : LSP_LOG_PATHS) {
-            try {
-                String content = runCommandCapture(
-                        new String[]{"su", "-c", "cat " + path}, startMs, 10_000);
-                if (content != null && content.trim().length() > 0) {
-                    // 内容级 tag 过滤：modules.log 是所有 LSPosed 模块共享文件，
-                    // 不按 tag 过滤时其他模块的日志量可轻松达到每分钟数 MB
-                    content = filterByTag(content);
-                    if (content.trim().length() == 0) continue; // 本路径无本模块日志
-                    StringBuilder sb = new StringBuilder("# ---- ").append(path).append(" ----\n");
-                    sb.append(content);
-                    return sb.toString();
+        for (String dir : LSP_LOG_DIRS) {
+            String ls = runCommandCapture(new String[]{"su", "-c",
+                    "ls " + dir + "/modules*.log 2>/dev/null"}, 0L, 10_000);
+            if (ls == null || ls.trim().length() == 0) continue;
+            for (String path : ls.trim().split("\n")) {
+                try {
+                    String content = runCommandCapture(
+                            new String[]{"su", "-c", "cat " + path.trim()}, startMs, 10_000);
+                    if (content != null && content.trim().length() > 0) {
+                        // 内容级 tag 过滤：modules.log 是所有 LSPosed 模块共享文件，
+                        // 不按 tag 过滤时其他模块的日志量可轻松达到每分钟数 MB
+                        content = filterByTag(content);
+                        if (content.trim().length() == 0) continue; // 本路径无本模块日志
+                        StringBuilder sb = new StringBuilder("# ---- ").append(path.trim()).append(" ----\n");
+                        sb.append(content);
+                        return sb.toString();
+                    }
+                } catch (Throwable ignored) {
+                    // su 不存在 / 路径不存在 / 读失败 → 试下一路径
                 }
-            } catch (Throwable ignored) {
-                // su 不存在 / 路径不存在 / 读失败 → 试下一路径
             }
         }
         return null;
@@ -310,21 +308,22 @@ public final class LogExporter {
             }
         }
 
-        // ③ 容器日志关键词行（逐文件探测，取第一个命中目录的全量文件）
+        // ③ 容器日志关键词行（逐文件探测，取第一个命中目录的全量文件；
+        //    不做时间过滤 —— 模块加载记录多在启动期，400 行保最新已限幅）
         boolean captured = false;
         for (String dir : LSP_LOG_DIRS) {
             String ls = runCommandCapture(new String[]{"su", "-c",
-                    "ls " + dir + " 2>/dev/null"}, startMs, 10_000);
+                    "ls " + dir + " 2>/dev/null"}, 0L, 10_000);
             if (ls == null || ls.trim().length() == 0) continue;
             for (String f : ls.trim().split("\n")) {
                 if (!f.endsWith(".log") && !f.endsWith(".txt")) continue;
                 String content = runCommandCapture(new String[]{"su", "-c",
-                        "cat " + dir + "/" + f}, startMs, 20_000);
+                        "cat " + dir + "/" + f}, 0L, 20_000);
                 if (content == null || content.trim().length() == 0) continue;
                 String filtered = filterByKeywords(content, 400);
                 if (filtered.trim().length() == 0) continue;
                 sec.append("# -- 容器日志 ").append(dir).append('/').append(f)
-                        .append("（关键词过滤，最多 400 行）--\n")
+                        .append("（关键词过滤，不做时间过滤，最多 400 行）--\n")
                         .append(filtered);
                 captured = true;
             }
