@@ -199,8 +199,20 @@ public final class LogExporter {
         String grepPkgs = runSu("pm list packages | grep -iE 'rustruntime|hyperos'");
         sb.append("pm list packages | grep -iE 'rustruntime|hyperos':\n")
                 .append(orNa(grepPkgs)).append('\n');
-        // ④ 精确抓取：库名（v5 优先）→ pm path → cp APK 到 Download
-        String copied = tryCopyRustruntimeApk(libs);
+        // ④ 文件系统直查（v2.9.61 新增，实机 20261014_160334 实锤：提供方包名
+        //    既不含 hyperos 也不含 rustruntime，pm path <库名> 全部落空）——
+        //    静态共享库 APK 物理上必有落点（/system_ext /product /vendor 等）
+        String found = runSu("find /system /system_ext /product /vendor"
+                + " -maxdepth 4 -iname '*rustruntime*' 2>/dev/null");
+        sb.append("find *rustruntime*（系统分区）:\n").append(orNa(found)).append('\n');
+        // ⑤ dumpsys 兜底（find 全空时：包 dump 里必现 rustruntime 字样，含提供方包名）
+        String dump = found == null || found.length() == 0
+                ? runSu("dumpsys package | grep -i rustruntime | head -20", 30_000) : "";
+        if (dump.length() > 0) {
+            sb.append("dumpsys package | grep -i rustruntime:\n").append(dump).append('\n');
+        }
+        // ⑥ 抓取：find 命中路径优先（v5 优先）→ pm path 库名兜底 → cp APK 到 Download
+        String copied = tryCopyRustruntimeApk(libs, found);
         sb.append("rustruntime APK 拷贝:\n").append(copied).append('\n');
         sb.append("# =======================================\n");
         return sb.toString();
@@ -208,9 +220,14 @@ public final class LogExporter {
 
     /** su 执行单条 shell（管道 OK）；失败/空返回 ""（诊断段内再统一标注） */
     private static String runSu(String shellCmd) {
+        return runSu(shellCmd, 15_000);
+    }
+
+    /** 重命令变体：dumpsys package 在大 ROM 上可达 10s+，给 30s */
+    private static String runSu(String shellCmd, long timeoutMs) {
         try {
             String r = runCommandCapture(new String[]{"su", "-c", shellCmd},
-                    0L, 15_000);
+                    0L, timeoutMs);
             return r == null ? "" : r.trim();
         } catch (Throwable t) {
             return "";
@@ -219,10 +236,35 @@ public final class LogExporter {
 
     /**
      * 定位 rustruntime 共享库 APK 并 cp 到 /sdcard/Download/。
-     * 候选序：pm list libraries 命中的库名（v5 天然在前）→ 固定候选兜底。
-     * 静态共享库包名 ≈ 库名，pm path <库名> 直接命中 APK（split 时只取 base 行）。
+     * 候选序：① find 命中的物理路径（文件名含 v5 优先，pm path 落空时的主路径
+     * —— 实机实锤提供方包名与库名不一致）；② pm list libraries 库名 → pm path。
+     * split APK 时 pm path 返回多行，只取 base 行。
      */
-    private static String tryCopyRustruntimeApk(String libsOutput) {
+    private static String tryCopyRustruntimeApk(String libsOutput, String foundPaths) {
+        // ① find 命中的物理路径直接拷（v5 命名优先）
+        if (foundPaths != null && foundPaths.length() > 0) {
+            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+            for (String line : foundPaths.split("\n")) {
+                String p = line.trim();
+                if (p.startsWith("/")) paths.add(p);
+            }
+            paths.sort((a, b) -> {
+                boolean v5a = a.contains("v5"), v5b = b.contains("v5");
+                if (v5a != v5b) return v5a ? -1 : 1;
+                return a.compareTo(b);
+            });
+            for (String src : paths) {
+                if (!src.endsWith(".apk")) continue;
+                String dest = "/sdcard/Download/"
+                        + new java.io.File(src).getName();
+                String cp = runSu("cp -f \"" + src + "\" \"" + dest
+                        + "\" && chmod 644 \"" + dest + "\" && echo COPY_OK");
+                if (cp.contains("COPY_OK")) {
+                    return "OK → " + dest + "（源: " + src + "）";
+                }
+            }
+        }
+        // ② pm path 库名兜底（静态共享库包名 ≈ 库名；候选 v5 天然在前）
         java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
         if (libsOutput != null) {
             java.util.regex.Matcher m = java.util.regex.Pattern
@@ -243,7 +285,7 @@ public final class LogExporter {
             }
             return "FAILED [" + lib + "]（cp 失败: " + cp + "）";
         }
-        return "N/A（rustruntime 库均未定位到 APK —— 请把上面 ②③ 段原样反馈）";
+        return "N/A（find 与 pm path 均未命中 —— 请把 ②③④⑤ 段原样反馈）";
     }
 
     /** 诊断段占位：空串 → N/A 标注 */
