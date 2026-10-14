@@ -128,6 +128,15 @@ public class MainHook implements IXposedHookLoadPackage {
             }
         });
 
+        // OS4 运行时结构探针（只读）：非 OS4 家族静默退出；OS4 上 hook 框架类
+        // Instrumentation，dump 桌面 Activity 壳 / DecorView 树 / classloader
+        // 可用类 —— 决定「Compose 桌面挂载到 OS4 窗口层」的落点设计。
+        tryHook("0c.Os4Probe.viewTree", new HookTask() {
+            @Override public void run() {
+                com.homemode4miui.hook.Os4Probe.install(lpp, cl);
+            }
+        });
+
         tryHook("0.Application.onCreate (gate1 接收器前置)", new HookTask() {
             @Override public void run() {
                 XposedHelpers.findAndHookMethod("android.app.Application", cl, "onCreate",

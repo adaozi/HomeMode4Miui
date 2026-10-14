@@ -684,3 +684,20 @@ DIFF vs 桩文件:
 - 实机判读：`phase4a: gesture observation hook installed` + 侧滑返回手势时
   `call #1` / `Ready edge #n`（dist 递增）+ 桌面手势功能正常 = 观测闭环，
   phase 4b（阈值门控改写 s0）具备全部前置。
+
+### OS4 运行时结构探针（2026-10-14）—— v2.9.77-os4b-probe / vc108
+
+- 方向定案（User）：phase 4b 起，目标是**让 HomeMode4Miui 完整功能跑在 OS4 桌面**，
+  非独立小功能。phase 3 实锤 legacy 注入可用 → 架构 = Java 侧（框架类 hook，不依赖
+  宿主 dex）挂载 Compose 桌面到窗口层 + native 侧（已验证）状态读取/门控。
+- 关键前置问题：OS4 桌面的 View 层级结构（FlutterView/SurfaceView/DecorView 形态）。
+  uiautomator 对 Flutter null root，但模块 Java 代码在进程内 —— 直接探。
+- 本批：Os4Probe.java（hook 框架类 Instrumentation.callActivityOnCreate，after 后
+  2s 遍历 DecorView 树 14 层深度：类名/id/尺寸/visibility/alpha）+ classloader
+  类探测（com.miui.home.Launcher / io.flutter.embedding.* 五连）+ 每活动类只 dump
+  一次。HostCompat 补 FAMILY_OS4（vc ≥ 800M，先于 OS3 阈值判定）+ family()/
+  hostVersionCode() getter + label()。
+- 既有 OS2/OS3 hook 在 OS4 上会自然 FAILED（宿主类不存在）——日志即证据，无行为风险。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.77-os4b-probe-108.apk。
+- 判读：导出日志中 Os4Probe: 段 —— activity created 类名 + view tree + classloader
+  HAS/MISSING 清单 → 直接决定挂载落点（往哪挂、怎么压住 Flutter 面）。
