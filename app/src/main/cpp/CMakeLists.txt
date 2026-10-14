@@ -5,7 +5,8 @@ project(homemode4miui_native CXX)
 
 add_library(homemode4miui_native SHARED
         homemode4miui_native.cpp
-        hook_guard.cpp)
+        hook_guard.cpp
+        obs_hook.cpp)
 
 target_compile_options(homemode4miui_native PRIVATE
         -O2

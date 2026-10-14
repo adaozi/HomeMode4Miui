@@ -638,3 +638,22 @@ DIFF vs 桩文件:
   lseek/read 全记 errno；③ 文件镜像三路径（user_de/user/data）+ 失败 errno 诊断
   （50 次封顶）；④ 导出器同步支持三路径。
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.73-os4b-p2c-104.apk。
+
+### Route B phase 3：Rust 层只读观测 hook（2026-10-14）—— v2.9.74-os4b-p3 / vc105
+
+- phase 2 实机 PASSED（19:19）：guard 安装 + 双页自测试全绿，且安装后 1 分钟内
+  拦下一次 HyperOS 真实 MADV_DONTNEED（0x73f9f1b000+0x2000）——守卫实战验证。
+  /proc/self/mem 被拒 errno=13（SELinux）→ trampoline 检查永久降级为诊断，
+  后续以补丁读回验证为主。
+- 本批 obs_hook.{h,cpp}：在 libapp_launcher.so 的 load 回调里，dlsym(handle)
+  解析 FRB 导出符号（ARC increment Uri 主选 / frb_free_wire_sync_rust2dart_dco
+  备选，均为 extern C 单指针 ABI），hook_func 只读观测 hook：计数 + 首次/每 256
+  次落日志，原样转发。幂等（回调重复 2 次）。目标选择 fail-closed（全失败不装）。
+- 已知小风险：hook_func 返回与 backup 存储之间的窗口期丢一次调用（ARC 泄 1 引用，
+  观测期可接受，有日志）。
+- 文件镜像仍缺席但 native 无 open 失败日志 → 加一次性 "file mirror active path="
+  诊断（疑似 launcher mnt namespace 隔离，su 全局命名空间读不到其写入）。
+- 构建通过（APK mtime 19:43 校验）；产物 .build/out/HomeMode4Miui-v2.9.74-os4b-p3-105.apk。
+- 实机判读：`phase3: observation hook installed on ...` + 桌面操作后
+  `observation hook call #1/#256/...` + launcher 不崩 = phase 3 过，进 phase 4
+  （on_swipe_process 真门控，按符号定位）。

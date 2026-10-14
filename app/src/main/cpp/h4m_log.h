@@ -29,6 +29,13 @@ inline void write_file(const char *message) {
         if (fd >= 0) {
             dprintf(fd, "%s\n", message == nullptr ? "" : message);
             close(fd);
+            // 一次性诊断：确认镜像写入的实际路径（排查 mnt namespace 隔离）
+            static uint32_t active_logged = 0u;
+            if (__atomic_exchange_n(&active_logged, 1u, __ATOMIC_RELAXED) ==
+                    0u) {
+                __android_log_print(ANDROID_LOG_WARN, "H4MNative",
+                                    "file mirror active path=%s", path);
+            }
             return;
         }
         // 诊断：每个候选路径失败原因各报一次（首行起 50 次封顶防刷屏）

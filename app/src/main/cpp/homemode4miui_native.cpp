@@ -20,6 +20,7 @@
 #include "h4m_log.h"
 #include "hook_guard.h"
 #include "native_api.h"
+#include "obs_hook.h"
 
 #include <dlfcn.h>
 #include <elf.h>
@@ -145,6 +146,13 @@ void onLibraryLoaded(const char *name, void *handle) {
                 // Phase 2: install the madvise guard and run its self test
                 // once, on the first Dart image load.
                 RunPhase2Probe();
+            }
+            if (endsWith(name, "libapp_launcher.so")) {
+                // Phase 3: read-only observation hook on a Rust export
+                // (idempotent; the libapp_launcher callback also repeats).
+                if (g_entries != nullptr) {
+                    h4m::InstallObservationHook(g_entries->hook_func, handle);
+                }
             }
         }
     }
