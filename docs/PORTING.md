@@ -701,3 +701,23 @@ DIFF vs 桩文件:
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.77-os4b-probe-108.apk。
 - 判读：导出日志中 Os4Probe: 段 —— activity created 类名 + view tree + classloader
   HAS/MISSING 清单 → 直接决定挂载落点（往哪挂、怎么压住 Flutter 面）。
+
+### Modern API 入口（OS4 Java 触达路径）（2026-10-14）—— v2.9.78-os4b-modern / vc109
+
+- v2.9.77 探针轮判读：native 全绿，但 Java 侧在 OS4 launcher 进程零日志 + 容器
+  verbose 只有 native 加载记录（legacy 派发从不进 com.miui.home 主进程）→
+  装机实锤 7854 fork 对 OS4 主进程只派发 Modern API 模块（Eta 同款路径）。
+- 本批补 Modern 轨：ModernEntry.java（extends libxposed XposedModule，无参构造，
+  onPackageLoaded 过滤 com.miui.home → hook 框架 Instrumentation.callActivityOnCreate
+  → 回调 Os4Probe.probeActivity）+ META-INF/xposed/java_init.list + proguard keep。
+- Os4Probe 重构：日志直写 logcat（modern 模块禁访问 legacy API，ModLog 的
+  XposedBridge 引用不可靠）；probeActivity 内做 vc≥800M 门禁（PackageInfo.
+  getLongVersionCode，规避 api-82 jar 的 ApplicationInfo 桩缺 longVersionCode）；
+  MainHook 0c 探针任务移除（legacy 路径在 OS4 永不派发）。
+- libxposed api 102.0.0 主构件是 AAR（Maven Central .jar 404），已提取 classes.jar
+  为 app/libs/libxposed-api-102.jar。
+- 双轨并存：legacy（xposed_init，OS2/OS3）+ modern（java_init.list，OS4），门禁
+  互不越界。构建通过；产物 .build/out/HomeMode4Miui-v2.9.78-os4b-modern-109.apk。
+- 判读：OS4 导出应首次出现 Java 侧日志 —— "ModernEntry: Instrumentation hook
+  installed" + "Os4Probe: activity created: <壳类名>" + view tree + classloader
+  HAS/MISSING。OS2/OS3 机回归确认 legacy 不受影响（modern 路径 vc<800M 零行为）。
