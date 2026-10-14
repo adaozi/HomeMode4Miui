@@ -42,19 +42,17 @@ object MiuiGadgets {
         val icon: Drawable?,
     )
 
-    /**
-     * 宿主类解析（装机实锤 v2.9.56 hotfix）：必须用宿主 context 的 classLoader。
-     * 模块类由 LSPosed 模块 classloader 加载，裸 Class.forName 解析不到
-     * com.miui.home 类（ModePrefs 同款姿势：Class.forName(name, true, ctx.classLoader)）。
-     */
-    private fun hostClass(context: Context, name: String): Class<*>? = runCatching {
-        Class.forName(name, true, context.classLoader)
-    }.getOrNull()
+    private val gadgetFactoryClass: Class<*>? by lazy {
+        runCatching { Class.forName("com.miui.home.launcher.gadget.GadgetFactory") }.getOrNull()
+    }
+    private val gadgetInfoClass: Class<*>? by lazy {
+        runCatching { Class.forName("com.miui.home.launcher.gadget.GadgetInfo") }.getOrNull()
+    }
 
     /** getNoMtzInfo(id) → Entry；宿主不支持该 id 或反射失败时返回 null。 */
     fun loadEntry(context: Context, gadgetId: Int): Entry? {
-        val factory = hostClass(context, "com.miui.home.launcher.gadget.GadgetFactory") ?: return null
-        val infoClass = hostClass(context, "com.miui.home.launcher.gadget.GadgetInfo") ?: return null
+        val factory = gadgetFactoryClass ?: return null
+        val infoClass = gadgetInfoClass ?: return null
         return runCatching {
             val info = factory.getMethod("getNoMtzInfo", Int::class.javaPrimitiveType)
                 .invoke(null, gadgetId) ?: return null
@@ -81,8 +79,8 @@ object MiuiGadgets {
      * 返回 null = 宿主不支持该 id（渲染层落"部件不可用"占位）。
      */
     fun createView(context: Context, gadgetId: Int): View? {
-        val factory = hostClass(context, "com.miui.home.launcher.gadget.GadgetFactory") ?: return null
-        val infoClass = hostClass(context, "com.miui.home.launcher.gadget.GadgetInfo") ?: return null
+        val factory = gadgetFactoryClass ?: return null
+        val infoClass = gadgetInfoClass ?: return null
         return runCatching {
             val info = factory.getMethod("getNoMtzInfo", Int::class.javaPrimitiveType)
                 .invoke(null, gadgetId) ?: return null
