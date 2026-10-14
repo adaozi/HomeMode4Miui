@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.homemode4miui.R // P4：模块 namespace，R 类随之（原版为 com.galaxyrio.gracelauncher.R）
 import com.galaxyrio.gracelauncher.data.LauncherApp
+import com.galaxyrio.gracelauncher.platform.MiuiGadgets
 import com.galaxyrio.gracelauncher.ui.components.LauncherSearchBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -63,7 +65,12 @@ private data class WidgetAppGroup(
 )
 
 @Composable
-internal fun WidgetPicker(providers: List<AppWidgetProviderInfo>?, busy: Boolean, apps: List<LauncherApp>, onBack: () -> Unit, onSelect: (AppWidgetProviderInfo) -> Unit) {
+internal fun WidgetPicker(
+    providers: List<AppWidgetProviderInfo>?, busy: Boolean, apps: List<LauncherApp>,
+    gadgets: List<MiuiGadgets.Entry>?,
+    onBack: () -> Unit, onSelect: (AppWidgetProviderInfo) -> Unit,
+    onSelectGadget: (MiuiGadgets.Entry) -> Unit,
+) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val queryState = rememberTextFieldState()
@@ -78,6 +85,10 @@ internal fun WidgetPicker(providers: List<AppWidgetProviderInfo>?, busy: Boolean
             if (term.isEmpty() || app.label.contains(term, true) || app.packageName.contains(term, true)) app
             else app.widgets.filter { it.label.contains(term, true) }.takeIf { it.isNotEmpty() }?.let { app.copy(widgets = it) }
         }
+    }
+    val filteredGadgets = remember(gadgets, query) {
+        val term = query.trim()
+        gadgets.orEmpty().filter { term.isEmpty() || it.label.contains(term, true) }
     }
     val toggle: (String) -> Unit = { key -> expandedApps = if (key in expandedApps) expandedApps - key else expandedApps + key }
     // 同窗口 scaffold（原版 SettingsScaffold 形态：返回 + 大标题）
@@ -99,7 +110,7 @@ internal fun WidgetPicker(providers: List<AppWidgetProviderInfo>?, busy: Boolean
                 if (groups == null || busy) {
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 } else {
-                    WidgetGroups(filtered, expandedApps, !busy, toggle, onSelect, Modifier.weight(1f))
+                    WidgetGroups(filtered, filteredGadgets, expandedApps, !busy, toggle, onSelect, onSelectGadget, Modifier.weight(1f))
                 }
             }
         }
@@ -108,11 +119,25 @@ internal fun WidgetPicker(providers: List<AppWidgetProviderInfo>?, busy: Boolean
 
 @Composable
 private fun WidgetGroups(
-    groups: List<WidgetAppGroup>, expandedApps: List<String>, enabled: Boolean,
-    onToggle: (String) -> Unit, onSelect: (AppWidgetProviderInfo) -> Unit, modifier: Modifier = Modifier,
+    groups: List<WidgetAppGroup>, gadgets: List<MiuiGadgets.Entry>, expandedApps: List<String>,
+    enabled: Boolean, onToggle: (String) -> Unit, onSelect: (AppWidgetProviderInfo) -> Unit,
+    onSelectGadget: (MiuiGadgets.Entry) -> Unit, modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        if (groups.isEmpty()) item {
+        // G1：MIUI 内置部件分区置顶（时钟/一键清理/全局搜索等，与 MIUI 桌面选择器同一集合）
+        if (gadgets.isNotEmpty()) item(key = "gadget_section", contentType = "gadget") {
+            Column {
+                Text(stringResource(R.string.widget_gadget_section),
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                gadgets.forEach { entry ->
+                    GadgetCard(entry, enabled, onSelectGadget,
+                        Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                }
+            }
+        }
+        if (groups.isEmpty() && gadgets.isEmpty()) item {
             Text(stringResource(R.string.widget_none), Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         groups.forEach { app ->
@@ -150,6 +175,41 @@ private fun WidgetGroups(
 internal fun WidgetAppIcon(icon: ImageBitmap?, modifier: Modifier = Modifier.size(44.dp)) {
     if (icon != null) Image(icon, contentDescription = null, modifier = modifier)
     else Icon(painterResource(R.drawable.ms_apps), null, modifier, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/**
+ * G1：MIUI 内置部件选择卡片。预览取 GadgetInfo.getPreviewImage（时钟 id4 无预览图
+ * 时回退 icon），drawable → bitmap 走 IO；卡片形态对齐 appwidget 的 OutlinedCard。
+ */
+@Composable
+private fun GadgetCard(
+    entry: MiuiGadgets.Entry, enabled: Boolean,
+    onSelect: (MiuiGadgets.Entry) -> Unit, modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val image by produceState<ImageBitmap?>(null, entry) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val drawable = entry.preview ?: entry.icon ?: return@withContext null
+                val width = drawable.intrinsicWidth.coerceAtLeast(1)
+                val height = drawable.intrinsicHeight.coerceAtLeast(1)
+                val scale = minOf(1f, 1024f / maxOf(width, height))
+                drawable.toBitmap((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1)).asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    OutlinedCard(
+        onClick = { onSelect(entry) }, enabled = enabled,
+        modifier = modifier.fillMaxWidth().testTag("widget_gadget:${entry.gadgetId}"),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.fillMaxWidth().height(184.dp), contentAlignment = Alignment.Center) {
+                if (image != null) Image(image!!, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                else WidgetAppIcon(null, Modifier.size(48.dp))
+            }
+            Text(entry.label, style = MaterialTheme.typography.titleMedium)
+        }
+    }
 }
 
 private suspend fun loadWidgetGroups(context: Context, providers: List<AppWidgetProviderInfo>, apps: List<LauncherApp>): List<WidgetAppGroup> {

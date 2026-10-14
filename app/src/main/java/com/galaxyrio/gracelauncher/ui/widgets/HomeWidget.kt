@@ -14,6 +14,7 @@ import android.appwidget.AppWidgetProviderInfo
 import android.os.Build
 import android.os.Bundle
 import android.util.SizeF
+import android.view.View
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
@@ -33,8 +34,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.homemode4miui.R // P4：模块 namespace，R 类随之（原版为 com.galaxyrio.gracelauncher.R）
 import com.galaxyrio.gracelauncher.data.HomeLayout
+import com.galaxyrio.gracelauncher.platform.GadgetHostView
 import com.galaxyrio.gracelauncher.platform.HomeWidgetHost
 import com.galaxyrio.gracelauncher.platform.HomeWidgetHostView
+import com.galaxyrio.gracelauncher.platform.MiuiGadgets
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
 
@@ -44,6 +47,8 @@ internal data class HostedWidget(
     val defaultHeight: Int,
     val minHeight: Int,
     val maxHeight: Int,
+    /** G1：MIUI 内置部件（gadget）id；非 null = 本条目渲染走 gadget 分支。 */
+    val gadgetId: Int? = null,
 )
 
 @Stable
@@ -83,6 +88,16 @@ internal fun rememberHostedWidget(layout: HomeLayout): HostedWidget {
     val density = LocalDensity.current.density
     val state = LocalWidgetHost.current ?: rememberWidgetHost()
     val host = state.host
+    // G1：MIUI 内置部件（gadget）——无 AppWidgetHost 语义，按 spanY 折算默认高度
+    //（MIUI 4 列网格经验值 96dp/行，编辑把手仍可手动调整），不参与 provider 校验。
+    val gadgetId = layout.gadgetId()
+    if (gadgetId != null) {
+        val entry = remember(gadgetId) { runCatching { MiuiGadgets.loadEntry(context, gadgetId) }.getOrNull() }
+        return remember(host, gadgetId, entry, density) {
+            val default = ((entry?.spanY ?: 1) * 96).coerceIn(48, 1600)
+            HostedWidget(host, null, default, default, 1600, gadgetId)
+        }
+    }
     val info = remember(layout.widgetId, layout.widgetProvider, state.revision) {
         runCatching { AppWidgetManager.getInstance(context).getAppWidgetInfo(layout.widgetId) }
             .getOrNull()?.takeIf { it.provider.flattenToString() == layout.widgetProvider }
@@ -109,31 +124,72 @@ internal fun HomeWidget(
     val latestLongPress by rememberUpdatedState(onLongPress)
     var size by remember { mutableStateOf(IntSize.Zero) }
     var view by remember(layout.widgetId) { mutableStateOf<HomeWidgetHostView?>(null) }
-    var creationFailed by remember(layout.widgetId, widget.info) { mutableStateOf(false) }
+    var creationFailed by remember(layout.widgetId, widget.info, widget.gadgetId) { mutableStateOf(false) }
     val modifier = Modifier.fillMaxWidth().height(height.dp).onSizeChanged { size = it }
-    if (widget.info == null || creationFailed) {
-        Surface(modifier.combinedClickable(enabled = enabled && !editing, onClick = onLongPress, onLongClick = onLongPress),
+    when {
+        // G1：MIUI 内置部件（gadget）分支 —— GadgetHostView 手势壳 + MiuiGadgets 生命周期
+        widget.gadgetId != null && !creationFailed -> key(widget.gadgetId) {
+            val lifecycle = LocalLifecycleOwner.current.lifecycle
+            var gadget by remember { mutableStateOf<View?>(null) }
+            AndroidView(
+                modifier = modifier,
+                factory = { context ->
+                    GadgetHostView(context).apply {
+                        // addGadget 同构：createView 内含 onAdded/onCreate；失败落占位
+                        MiuiGadgets.createView(context, widget.gadgetId!!)?.let(::addView)
+                            ?: run { creationFailed = true }
+                        gadget = getChildAt(0)
+                    }
+                },
+                update = {
+                    it.onWidgetLongPress = { latestLongPress() }
+                    it.interactionEnabled = enabled && !editing
+                    it.hapticsEnabled = hapticsEnabled
+                },
+                onRelease = { it.removeAllViews(); gadget = null },
+            )
+            DisposableEffect(lifecycle, gadget) {
+                val child = gadget
+                val observer = LifecycleEventObserver { _, event ->
+                    when (event) {
+                        Lifecycle.Event.ON_RESUME -> child?.let(MiuiGadgets::resume)
+                        Lifecycle.Event.ON_PAUSE -> child?.let(MiuiGadgets::pause)
+                        else -> Unit
+                    }
+                }
+                lifecycle.addObserver(observer)
+                child?.let(MiuiGadgets::resume)
+                onDispose {
+                    lifecycle.removeObserver(observer)
+                    child?.let(MiuiGadgets::destroy)
+                }
+            }
+        }
+        widget.info == null || creationFailed -> Surface(
+            modifier.combinedClickable(enabled = enabled && !editing, onClick = onLongPress, onLongClick = onLongPress),
             shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
             Text(stringResource(R.string.widget_unavailable), Modifier.padding(20.dp))
         }
-    } else key(layout.widgetId, widget.info.provider) {
-        AndroidView(
-            modifier = modifier,
-            factory = { context ->
-                // A provider may be removed/updated between lookup and creation.
-                runCatching { widget.host.createView(context, layout.widgetId, widget.info) as HomeWidgetHostView }
-                    .getOrElse { creationFailed = true; HomeWidgetHostView(context) }
-                    .also { view = it }
-            },
-            update = {
-                it.onWidgetLongPress = { latestLongPress() }
-                it.interactionEnabled = enabled && !editing
-                it.hapticsEnabled = hapticsEnabled
-            },
-            onRelease = { it.onWidgetLongPress = null; if (view === it) view = null },
-        )
+        else -> key(layout.widgetId, widget.info.provider) {
+            AndroidView(
+                modifier = modifier,
+                factory = { context ->
+                    // A provider may be removed/updated between lookup and creation.
+                    runCatching { widget.host.createView(context, layout.widgetId, widget.info) as HomeWidgetHostView }
+                        .getOrElse { creationFailed = true; HomeWidgetHostView(context) }
+                        .also { view = it }
+                },
+                update = {
+                    it.onWidgetLongPress = { latestLongPress() }
+                    it.interactionEnabled = enabled && !editing
+                    it.hapticsEnabled = hapticsEnabled
+                },
+                onRelease = { it.onWidgetLongPress = null; if (view === it) view = null },
+            )
+        }
     }
     LaunchedEffect(view, size, editing, density) {
+        if (view == null) return@LaunchedEffect
         if (size.width == 0 || size.height == 0) return@LaunchedEffect
         // Avoid flooding providers with RemoteViews rebuilds on every drag frame.
         if (editing) delay(100)

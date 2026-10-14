@@ -3,6 +3,8 @@
  * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/data/HomeLayout.kt
  * P3 移植：逐字拷贝，未改动。launcher_settings.homeLayoutJson 的编解码模型，
  *   P4 widget 布局（widgetId/provider/height）复用同一 JSON 格式。
+ * G1（gadget 部件接入）：MIUI 内置部件（非标准 AppWidget）复用同一 JSON 格式落库，
+ *   约定 widgetProvider = "gadget:<id>"、widgetId = -1（无 AppWidgetHost id）。
  */
 package com.galaxyrio.gracelauncher.data
 
@@ -16,7 +18,13 @@ data class HomeLayout(
     val widgetLabel: String? = null,
     val widgetHeightDp: Int = 0,
 ) {
-    val hasWidget: Boolean get() = widgetId >= 0
+    val hasWidget: Boolean get() = widgetId >= 0 || isGadget
+
+    /** G1：MIUI 内置部件（gadget）标识前缀；widgetId 恒为 -1（不占 AppWidgetHost id）。 */
+    val isGadget: Boolean get() = widgetProvider?.startsWith(GADGET_PREFIX) == true
+
+    fun gadgetId(): Int? =
+        widgetProvider?.removePrefix(GADGET_PREFIX)?.toIntOrNull()?.takeIf { isGadget }
 
     fun withoutWidget() = copy(widgetId = -1, widgetProvider = null, widgetLabel = null, widgetHeightDp = 0)
 
@@ -29,6 +37,8 @@ data class HomeLayout(
     }.toString()
 
     companion object {
+        const val GADGET_PREFIX = "gadget:"
+
         fun decode(value: String?): HomeLayout = runCatching {
             val data = JSONObject(value ?: "{}")
             HomeLayout(

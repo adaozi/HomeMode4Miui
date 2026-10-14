@@ -227,6 +227,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     val widgetHost = rememberWidgetHost()
     val widgetPickerBusy by viewModel.widgetPickerBusy.collectAsState()
     val widgetProviders by viewModel.widgetProviders.collectAsState()
+    // G1：MIUI 内置部件（gadget）条目（与 providers 同批加载）
+    val gadgetEntries by viewModel.gadgetEntries.collectAsState()
 
     // ---- P6（B6.x）附属特性状态 ----
     val iconPacks by viewModel.iconPacks.collectAsState()
@@ -871,13 +873,15 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         // GraceButton 的 tap 动作承担（编辑态完成键 = GraceButton editing 分支）。----
 
         // ---- WidgetPicker 全屏浮层（P4：原版 WidgetSetupActivity 的宿主内等价物；
-        // ---- hotfix folders2：popupPickerOwner 非 null 时为弹层 widget 模式）----
+        // ---- hotfix folders2：popupPickerOwner 非 null 时为弹层 widget 模式；
+        // ---- G1：gadgetEntries = MIUI 内置部件分区（时钟/一键清理/全局搜索））----
         val popupOwner = popupPickerOwner
         if (pickerOpen || popupOwner != null) {
             WidgetPicker(
                 providers = widgetProviders,
                 busy = widgetPickerBusy,
                 apps = state.apps,
+                gadgets = gadgetEntries,
                 onBack = { pickerOpen = false; popupPickerOwner = null },
                 onSelect = { info ->
                     pickerOpen = false
@@ -889,6 +893,16 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                         viewModel.addPopupWidgetTo(owner, info)
                     }
                     else viewModel.addHomeWidget(info)
+                },
+                onSelectGadget = { entry ->
+                    pickerOpen = false
+                    val owner = popupPickerOwner
+                    popupPickerOwner = null
+                    if (owner != null) {
+                        popupWidgetReturn = owner
+                        viewModel.addPopupGadgetTo(owner, entry.gadgetId)
+                    }
+                    else viewModel.addHomeGadget(entry.gadgetId)
                 },
             )
         }

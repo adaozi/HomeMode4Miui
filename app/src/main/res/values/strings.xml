@@ -51,6 +51,7 @@
     <string name="widget_choose">Choose a widget</string>
     <string name="widget_search">Search widgets</string>
     <string name="widget_none">No widgets found</string>
+    <string name="widget_gadget_section">MIUI widgets</string>
     <string name="widget_single_limit">Only one custom widget is supported for now. Stacked widgets are coming later.</string>
     <string name="widget_setup_error">Couldn’t add this widget. Please try again.</string>
     <string name="widget_unavailable">This widget is unavailable. Long-press to manage it.</string>

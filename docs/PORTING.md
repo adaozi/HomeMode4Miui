@@ -502,3 +502,25 @@ DIFF vs 桩文件:
 - [x] **需求（装机反馈）**：等收藏区应用解码完成后再显示时钟/widget/文件夹等一切首页内容，整体一起出现（消除"时钟先出、应用后跳"的分层加载观感）。
 - [x] **实现**：GraceHomeUiState 新增 homeReady 门控位——三条路径置 true：两段式 phase 1 收藏子集换入（v2.9.54）/ 无已存收藏序的全量换入 / 装载失败（空态兜底，不让桌面永久空白）；后续包变化刷新不重置（桌面已显示，防闪断）。Route 侧 HomeScreen 与 GraceButton 按 homeReady 条件组合（条件组合而非 alpha=0，避免不可见但可点击的幽灵热区）；AlphabetRail 无需门控（apps 未就绪时 letters 为空，rail 自行不渲染）；壁纸背景层不受影响。
 - [x] 构建：assembleRelease 通过，versionCode 88；产物已导出 .build/out/。
+
+### gadget（v2.9.56-gadget / versionCode 89，2026-10-14）—— MIUI 内置部件（gadget）接入
+
+- [x] **需求**：小组件适配不是标准安卓小组件，要和 MIUI 桌面可以添加的一样；主题应用部件暂不考虑。
+- [x] **逆向实锤**（MiuiHomeOS3 RELEASE-6.01.03.1927 + OS2 5.39.40.10843 双族签名比对一致）：
+  MIUI 桌面"添加小组件"三类来源 = ① 标准 AppWidget（模块已有）② 内置 gadget
+  （com.miui.home.launcher.gadget，非标准 AppWidget）③ MtzGadget/MaMl 主题部件（本次不接入）。
+  gadget 描述构建 `GadgetFactory.getNoMtzInfo(id)` → GadgetInfo（span/label/icon/preview 资源内聚）；
+  实例化 `GadgetFactory.createGadget(ctx, info)`（内部 setTag(info)），字节码实锤 id 映射：
+  4/6/7/8 → ClockGadgetDelegate（12h 2x1 / 24h 4x2 / 24h 4x1 / 24h 4x3）、12 → NormalClearButton
+  （一键清理）、21 → CommonGlobalSearch（全局搜索）；13=GoogleSearch（GMS）/14=PowerClearButton
+  （support_power_clean feature gate）不列入国行集合。生命周期（BaseLauncher.addGadget 同构）：
+  onAdded → onCreate → onResume … onPause → onDestroy。
+- [x] **实现**：新增 platform/MiuiGadgets.kt 反射门面（loadEntries/createView/resume/pause/destroy，
+  全链路 runCatching 降级）；HomeWidgetHost.kt 抽 WidgetGestureDelegate 共用长按观察手势 +
+  新增 GadgetHostView 手势壳；HomeLayout 扩展 `gadget:<id>` 约定（widgetId 恒 -1，isGadget/gadgetId）；
+  WidgetController.addGadgetHome/addGadgetPopupTo（免 host 免 bind 直落库）+ removeHome 对 gadget 跳过
+  host 删除；VM 加 gadgetEntries 与 addHomeGadget/addPopupGadgetTo；WidgetPicker 顶部"MIUI 小组件"
+  分区（预览图 = GadgetInfo.getPreviewImage，时钟 2x1 无预览回退 icon）；HomeWidget gadget 渲染分支
+  （GadgetHostView + ON_RESUME/ON_PAUSE 生命周期 + 弃用时 onDestroy 注销 receiver）。
+  首页与文件夹弹层两个挂点同时生效（同走 HomeWidget）。默认高度 spanY×96dp（编辑把手可调）。
+- [x] 构建：assembleRelease 通过，versionCode 89；产物已导出 .build/out/。
