@@ -472,3 +472,10 @@ DIFF vs 桩文件:
 - [x] **根因**：iconsJob collect 里算出的 icons 只是局部变量，只喂了 itemIcons UI state 与 Grace 按钮；`iconsSnapshot` 字段声明后**从未赋值**——decorateApps / decorateFolders 的冷启动路径（refreshApps）与即时重装饰路径全部从该字段读 per-item 选择，永远拿到空 map。上游 LauncherViewModel.kt:427 的 itemsSnapshot 在 collect 内落快照字段，本仓搬运时漏了这一行。连带影响：v2.9.50 的文件夹图标热保存链（传局部 icons）生效、但冷启动链读空会丢。
 - [x] **修复**：iconsJob collect 头部 `iconsSnapshot = icons`（先落快照再渲染），一行修复覆盖单个应用图标 + 文件夹图标两条消费链（冷启动 / 即时）。
 - [x] 构建：assembleRelease 通过，versionCode 84；产物已导出 .build/out/。
+
+### refresh-keep（v2.9.52-refresh-keep / versionCode 85，2026-10-14）—— 安装/卸载刷新期列表不再整列消失
+
+- [x] **装机实锤**：每次安装/卸载应用，主页收藏区 + 抽屉整个列表消失几秒才显示。
+- [x] **定性**：移植引入的偏差，非上游设计。上游 favoriteApps/appListApps 只挡 settings 加载/失败（isLoadingSettings || settingsLoadFailed）；本仓 P1 搬运时在 favorites/favoriteItems/appListApps 三个 getter 加了 `isLoadingApps ||` 空化 —— 包变化事件触发 refreshApps（重查 LauncherApps + 200+ 次图标装饰，耗时数秒），刷新期 getters 返回空列表 → 整列消失。上游语义是后台刷新、旧列表保持显示、新列表就绪后原位换入。
+- [x] **修复**：三个 getter 去掉 isLoadingApps（保留 appLoadFailed 失败语义）；refreshApps 本就不清 apps（成功才整体换入），去掉空化后即天然对齐上游。Route 不消费 loading 态，无副作用；isLoadingApps 字段保留（收藏编辑 shim 的 loading 指示仍消费）。
+- [x] 构建：assembleRelease 通过，versionCode 85；产物已导出 .build/out/。

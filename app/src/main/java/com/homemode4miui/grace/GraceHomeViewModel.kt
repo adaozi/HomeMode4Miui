@@ -135,10 +135,13 @@ data class GraceHomeUiState(
      */
     val graceButtonApp: com.galaxyrio.gracelauncher.data.LauncherApp? = null,
 ) {
-    /** 原版 LauncherUiState.favoriteItems 的 P1 同构：按 favoriteOrder 排出已装应用。 */
+    /** 原版 LauncherUiState.favoriteItems 的 P1 同构：按 favoriteOrder 排出已装应用。
+     *  刷新期不清空（上游 favoriteApps 只挡 settings 加载/失败）——安装/卸载触发的
+     *  refreshApps 后台跑，旧列表保持显示，新列表就绪后原位换入（装机实锤：整列表
+     *  消失几秒是移植引入的 isLoadingApps 空化，非上游设计）。 */
     val favorites: List<LauncherApp>
         get() {
-            if (isLoadingApps || appLoadFailed) return emptyList()
+            if (appLoadFailed) return emptyList()
             val byKey = apps.associateBy(LauncherApp::key)
             return favoriteOrder.mapNotNull(byKey::get)
         }
@@ -157,7 +160,7 @@ data class GraceHomeUiState(
      */
     val favoriteItems: List<LauncherApp>
         get() {
-            if (isLoadingApps || appLoadFailed) return emptyList()
+            if (appLoadFailed) return emptyList()
             val items = (favorites + folders.filter { it.placement.inFavorites }.map(::folderItem))
                 .associateBy(LauncherApp::key)
             // Existing folders keep their old position at the end until reordered.
@@ -168,9 +171,12 @@ data class GraceHomeUiState(
      * 原版 LauncherViewModel.appListApps 逐字语义（hotfix7）：
      * "Hide Apps affects only the alphabetical app list, not other launcher surfaces."
      * 加载中/失败 = 空列表；favorites 等其余表面仍用全量 apps。
+     * 上游仅挡 settings 加载（appListApps: isLoadingSettings || settingsLoadFailed）；
+     * isLoadingApps 空化会让安装/卸载刷新期整列表消失（装机实锤），去掉 —— 刷新期
+     * 旧列表保持显示。appLoadFailed 保留：加载失败且无旧数据时空列表即失败态。
      */
     val appListApps: List<LauncherApp>
-        get() = if (isLoadingApps || appLoadFailed) emptyList()
+        get() = if (appLoadFailed) emptyList()
         else apps.filterNot { it.key in hiddenAppKeys }
             // 上游同步 v1.1.8 S8a：工作资料应用从主列表收编进独立文件夹（仅 managed profile，
             // MIUI 双开/clone 永不进入——见 AppRepository.workProfiles 严格过滤）
