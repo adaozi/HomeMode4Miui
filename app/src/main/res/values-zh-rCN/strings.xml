@@ -662,7 +662,6 @@
     <string name="widget_choose">选择小组件</string>
     <string name="widget_search">搜索小组件</string>
     <string name="widget_none">未找到小组件</string>
-    <string name="widget_gadget_section">MIUI 小组件</string>
     <string name="widget_single_limit">暂时只支持一个自定义小组件，堆叠小组件后续推出。</string>
     <string name="widget_setup_error">无法添加此小组件，请重试。</string>
     <string name="widget_unavailable">此小组件不可用。长按进行管理。</string>

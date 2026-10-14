@@ -281,9 +281,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** null = 加载中；空列表 = 无可用 provider。宿主进程单 profile（原版多 profile 过滤裁剪）。 */
     private val _widgetProviders = MutableStateFlow<List<AppWidgetProviderInfo>?>(null)
     val widgetProviders = _widgetProviders.asStateFlow()
-    /** G1：MIUI 内置部件（gadget）选择器条目；null = 加载中，与 providers 同批加载。 */
-    private val _gadgetEntries = MutableStateFlow<List<com.galaxyrio.gracelauncher.platform.MiuiGadgets.Entry>?>(null)
-    val gadgetEntries = _gadgetEntries.asStateFlow()
     private val _widgetPickerBusy = MutableStateFlow(true)
     val widgetPickerBusy = _widgetPickerBusy.asStateFlow()
     /** P4：widget 添加链路结果（false = bind/写库失败，UI 侧 Toast）。 */
@@ -739,10 +736,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     }
             }.onFailure { ModLog.e("GraceHomeViewModel loadWidgetProviders failed", it) }.getOrNull()
             _widgetProviders.value = result
-            // G1：MIUI 内置部件条目同批加载（反射宿主 GadgetFactory，失败安全降级为空集）
-            _gadgetEntries.value = runCatching {
-                com.galaxyrio.gracelauncher.platform.MiuiGadgets.loadEntries(getApplication<Application>())
-            }.onFailure { ModLog.e("GraceHomeViewModel loadGadgetEntries failed", it) }.getOrDefault(emptyList())
             _widgetPickerBusy.value = false
         }
     }
@@ -756,17 +749,10 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** widget 增删委托 WidgetController（v2.9.44-refactor2 抽离，语义见该类头注）。 */
     fun addHomeWidget(info: AppWidgetProviderInfo) = widgetController.addHome(info)
 
-    /** G1：添加 MIUI 内置部件（gadget，非标准 AppWidget）到桌面。 */
-    fun addHomeGadget(gadgetId: Int) = widgetController.addGadgetHome(gadgetId)
-
     fun removeHomeWidget() = widgetController.removeHome(_uiState.value.settings.homeLayout)
 
     fun addPopupWidgetTo(ownerKey: String, info: AppWidgetProviderInfo) =
         widgetController.addPopupTo(ownerKey, info)
-
-    /** G1：添加 MIUI 内置部件（gadget）到弹层。 */
-    fun addPopupGadgetTo(ownerKey: String, gadgetId: Int) =
-        widgetController.addGadgetPopupTo(ownerKey, gadgetId)
 
     /**
      * folders 阶段（hotfix folders2）：模块设置页快捷方式代查（SHORTCUTS_QUERY）。

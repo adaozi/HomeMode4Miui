@@ -20,7 +20,6 @@ import com.galaxyrio.gracelauncher.data.LauncherItemsRepository
 import com.galaxyrio.gracelauncher.data.GraceHomeSettings
 import com.galaxyrio.gracelauncher.data.PopupItem
 import com.galaxyrio.gracelauncher.platform.HomeWidgetHost
-import com.galaxyrio.gracelauncher.platform.MiuiGadgets
 import com.homemode4miui.util.ModLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,17 +63,14 @@ internal class WidgetController(
         }
     }
 
-    /** 移除桌面 widget：先删 host id（provider 收到删除通知）再清 homeLayout。
-     *  G1：MIUI 内置部件（gadget）不占 AppWidgetHost id，直接清 homeLayout。 */
+    /** 移除桌面 widget：先删 host id（provider 收到删除通知）再清 homeLayout。 */
     fun removeHome(homeLayout: HomeLayout) {
         val host = host ?: return
         if (!homeLayout.hasWidget) return
         val id = homeLayout.widgetId
         scope.launch(Dispatchers.IO) {
-            if (!homeLayout.isGadget) {
-                runCatching { host.deleteAppWidgetId(id) }
-                    .onFailure { ModLog.e("GraceHomeViewModel deleteAppWidgetId($id) failed", it) }
-            }
+            runCatching { host.deleteAppWidgetId(id) }
+                .onFailure { ModLog.e("GraceHomeViewModel deleteAppWidgetId($id) failed", it) }
             val saved = settingsRepository.mutateSettings { it.copy(homeLayout = it.homeLayout.withoutWidget()) }
             onHomeLayoutSaved(saved)
         }
@@ -109,57 +105,10 @@ internal class WidgetController(
         }
     }
 
-    /**
-     * G1：添加 MIUI 内置部件（gadget）到桌面。gadget 非标准 AppWidget：不占
-     * AppWidgetHost id、无需 bind，直接按 "gadget:<id>" 约定落 homeLayout
-     * （widgetId = -1，见 HomeLayout.isGadget）。渲染由 HomeWidget 的 gadget 分支
-     * 经 MiuiGadgets.createView 完成。label 从宿主资源取（IO 线程）。
-     */
-    fun addGadgetHome(gadgetId: Int) {
-        scope.launch(Dispatchers.Main) {
-            val success = withContext(Dispatchers.IO) {
-                runCatching {
-                    settingsRepository.mutateSettings { current -> current.copy(
-                        homeLayout = current.homeLayout.copy(
-                            widgetId = -1, widgetProvider = "${HomeLayout.GADGET_PREFIX}$gadgetId",
-                            widgetLabel = MiuiGadgets.loadEntry(appContext, gadgetId)?.label,
-                            widgetHeightDp = 0,
-                        )) }.let { saved -> onHomeLayoutSaved(saved) }
-                    true
-                }.getOrElse { error ->
-                    ModLog.e("WidgetController addGadgetHome($gadgetId) failed", error); false
-                }
-            }
-            onSetupResult(success)
-        }
-    }
-
-    /** G1：添加 MIUI 内置部件（gadget）到弹层，同 addPopupTo 仅写库目标不同。 */
-    fun addGadgetPopupTo(ownerKey: String, gadgetId: Int) {
-        scope.launch(Dispatchers.Main) {
-            val success = withContext(Dispatchers.IO) {
-                runCatching {
-                    val layout = HomeLayout(
-                        widgetId = -1, widgetProvider = "${HomeLayout.GADGET_PREFIX}$gadgetId",
-                        widgetLabel = MiuiGadgets.loadEntry(appContext, gadgetId)?.label, widgetHeightDp = 0,
-                    )
-                    val items = LauncherItemsRepository(LauncherDatabase.getInstance(appContext))
-                    items.updatePopup(ownerKey, emptyList()) { entries ->
-                        if (entries.any { it.widget?.widgetProvider == layout.widgetProvider }) entries
-                        else entries + PopupItem("${HomeLayout.GADGET_PREFIX}$gadgetId", layout)
-                    }
-                    true
-                }.getOrElse { error ->
-                    ModLog.e("WidgetController addGadgetPopupTo($ownerKey, $gadgetId) failed", error); false
-                }
-            }
-            onSetupResult(success)
-        }
-    }
-
     /** bind 公共段：allocate → bind（home category）→ 失败回收 → label。
      *  返回 (id, label)，bind 失败返回 null（id 已回收）。 */
-    private fun bindWidgetOrCleanup(info: AppWidgetProviderInfo): Pair<Int, String>? {        val manager = AppWidgetManager.getInstance(appContext)
+    private fun bindWidgetOrCleanup(info: AppWidgetProviderInfo): Pair<Int, String>? {
+        val manager = AppWidgetManager.getInstance(appContext)
         val host = host ?: return null
         val id = host.allocateAppWidgetId()
         val bound = runCatching {
