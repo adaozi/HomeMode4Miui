@@ -32,6 +32,9 @@ import java.util.regex.Pattern;
  *     ② tag 过滤（内容级）：modules.log 是所有 LSPosed 模块共享文件、logcat 是全设备
  *        缓冲，必须按 "HomeMode4Miui" tag 过滤，否则 1 分钟就能导出数 MB 噪音；
  *        无时间戳的续行跟随上一行去留，保证堆栈不割裂。
+ *   - OS4 观察探针段（H4MNative）：末尾独立采集 native_init PoC 日志（su logcat
+ *     -s H4MNative，降级无 su 本进程），附宿主 APK 路径上下文（判 OS 家族用）；
+ *     非 OS4 设备该段为"未采集"占位，不影响主体。
  *   - 10MB 上限：超限保留【最新】部分（ArrayDeque 头部裁剪）；
  *   - 落盘：MediaStore.Downloads（Download 文件夹，无需存储权限，min-api 29+）。
  *   - 全程 try/catch 兜底：导出失败只影响本功能，绝不二次崩溃。
@@ -163,6 +166,13 @@ public final class LogExporter {
         out.append("# ==============================\n\n");
         out.append(body);
 
+        // OS4 native 探针段：独立来源（tag -s 精准过滤），空段落占位说明，永不抛异常
+        try {
+            out.append(buildH4mSection(startMs));
+        } catch (Throwable t) {
+            out.append("\n# ---- H4MNative 观察探针 ----\n# 采集失败: ").append(t).append('\n');
+        }
+
         return writeToDownloads(ctx, out.toString(), minutes);
     }
 
@@ -189,6 +199,57 @@ public final class LogExporter {
             }
         }
         return null;
+    }
+
+    /* ==================== OS4 native 探针段 ==================== */
+
+    /**
+     * H4MNative 观察探针段（Route B PoC，native_init 日志 tag = H4MNative）：
+     *   - su logcat -s H4MNative 优先（logd 全局缓冲，含宿主/launcher 进程日志）；
+     *   - 无 su 降级本进程 logcat（UID 隔离下多半为空，注明局限）；
+     *   - 附宿主 APK 路径 + 宿主 versionName/versionCode（判 OS2/OS3/OS4 家族）；
+     *   - 段内容为导出文件正文，中文保持原样（反馈文件不随设备语言变化）。
+     */
+    private static String buildH4mSection(long startMs) {
+        StringBuilder sec = new StringBuilder();
+        sec.append("\n# ==== H4MNative 观察探针（OS4 native_init PoC）====\n");
+
+        // 宿主上下文：APK 路径 + 版本（versionCode ≥ 800_000_000 → OS4 家族）
+        String pmPath = runCommandCapture(
+                new String[]{"su", "-c", "pm path com.miui.home"}, startMs, 10_000);
+        if (pmPath != null && pmPath.trim().length() > 0) {
+            sec.append("# 宿主 APK   : ").append(pmPath.trim().replace('\n', ' ')).append('\n');
+            String ver = runCommandCapture(new String[]{"su", "-c",
+                    "dumpsys package com.miui.home | grep -m2 version"}, startMs, 10_000);
+            if (ver != null && ver.trim().length() > 0) {
+                sec.append("# 宿主版本   : ").append(ver.trim().replace("\n", " | ")).append('\n');
+            }
+        } else {
+            sec.append("# 宿主上下文 : 不可用（无 su 或 pm 查询失败）\n");
+        }
+
+        // 探针日志：su 优先，无 su 降级
+        String lc = runCommandCapture(new String[]{"su", "-c",
+                "logcat -d -v time -s H4MNative:V"}, startMs, 15_000);
+        String src;
+        if (lc != null) {
+            src = "root logcat（logd 全局缓冲，含宿主进程）";
+        } else {
+            lc = runCommandCapture(new String[]{"logcat", "-d",
+                    "-v", "time", "-s", "H4MNative:V"}, startMs, 15_000);
+            src = "无 root 本进程 logcat（UID 隔离，读不到宿主进程日志，可能为空）";
+        }
+        if (lc == null) lc = "";
+        if (lc.trim().length() == 0) {
+            sec.append("# 探针日志   : 本时间范围内无 H4MNative 输出 ——"
+                    + " OS4 宿主未加载探针 / 设备非 OS4 / LSPosed 未启用 native 入口\n");
+        } else {
+            sec.append("# 日志来源   : ").append(src).append('\n');
+            sec.append(lc);
+            if (!lc.endsWith("\n")) sec.append('\n');
+        }
+        sec.append("# ========================================\n");
+        return sec.toString();
     }
 
     /* ==================== tag 过滤 ==================== */

@@ -549,3 +549,15 @@ DIFF vs 桩文件:
   是否要求 META-INF/xposed/module.prop 与 java_init.list 同批声明。
 - 里程碑批次规划：phase 2 = madvise guard；phase 3 = 只读 trampoline 验证；
   phase 4 = 选点真 hook（建议 Rust 层起步）。
+
+### 导出日志附 H4MNative 探针段（2026-10-14）—— v2.9.67-os4b-diag / vc98
+
+- LogExporter 新增 buildH4mSection（追加在主体之后，独立 try/catch 永不拖垮导出）：
+  ① su `logcat -d -v time -s H4MNative:V` 采集 native_init PoC 日志（logd 全局
+  缓冲，含宿主/launcher 进程），无 su 降级本进程（注明 UID 隔离局限）；
+  ② 附宿主上下文：`pm path com.miui.home` + dumpsys version（判 OS 家族）；
+  ③ 时间范围内无输出时给出占位说明（非 OS4 / 未加载探针 / native 入口未启用）。
+- 复用 runCommandCapture（行级时间过滤 + 10MB 限幅 + stderr 排空），零新依赖。
+- 用途：OS4 实机上点导出按钮即可拿到 spawner/launcher 身份判定与库加载回调
+  日志，直接发给 AI 定位 PoC phase 1 是否触发。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.67-os4b-diag-98.apk。
