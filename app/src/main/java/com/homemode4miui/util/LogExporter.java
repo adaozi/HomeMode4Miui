@@ -205,15 +205,38 @@ public final class LogExporter {
         String found = runSu("find /system /system_ext /product /vendor"
                 + " -maxdepth 4 -iname '*rustruntime*' 2>/dev/null");
         sb.append("find *rustruntime*（系统分区）:\n").append(orNa(found)).append('\n');
-        // ⑤ dumpsys 兜底（find 全空时：包 dump 里必现 rustruntime 字样，含提供方包名）
-        String dump = found == null || found.length() == 0
-                ? runSu("dumpsys package | grep -i rustruntime | head -20", 30_000) : "";
-        if (dump.length() > 0) {
-            sb.append("dumpsys package | grep -i rustruntime:\n").append(dump).append('\n');
+        // ⑤ v2.9.63：壳层类载体仍未锁定（rustruntime.jar 已实锤为 Empty 桩，
+        //    仅 rust.core.runtime.Empty 一个类）—— 直接问设备要：
+        //    a) 库声明配置原文（v5 究竟映射到哪个文件）
+        String cfg = runSu("cat /product/etc/permissions/rustruntime_cfg_v3_v5.xml 2>/dev/null"
+                + " || find /product/etc /system/etc -iname '*rustruntime*' -exec cat {} \\;");
+        sb.append("cat rustruntime_cfg*.xml:\n").append(orNa(cfg)).append('\n');
+        //    b) /system_ext/framework 全量 jar 清单（壳层类可能在别的 framework jar）
+        String fwJars = runSu("ls /system_ext/framework/ | grep -iE 'jar$'");
+        sb.append("ls /system_ext/framework/*.jar:\n").append(orNa(fwJars)).append('\n');
+        //    c) launcher/home 相关 jar 定点搜索
+        String launcherJars = runSu("find /system /system_ext /product /apex"
+                + " -maxdepth 4 \\( -iname '*launcher*' -o -iname '*miuihome*' \\)"
+                + " -not -path '*/oat/*' 2>/dev/null | head -20");
+        sb.append("find *launcher*|*miuihome*（排除 oat）:\n").append(orNa(launcherJars)).append('\n');
+        //    d) 宿主包接线方式：uses-library 挂了哪些库 + 版本 + 代码路径
+        String dump = runSu("dumpsys package com.miui.home"
+                + " | grep -iE 'uses-library|sharedLibrary|versionName|versionCode|codePath|flags' | head -30",
+                30_000);
+        sb.append("dumpsys package com.miui.home（库/版本/路径）:\n")
+                .append(orNa(dump)).append('\n');
+        //    e) 设备 base.apk 校验（比对本地 MiuiHomeOS4.apk 是否同一文件）
+        String base = runSu("p=$(pm path com.miui.home | head -1 | sed 's/package://');"
+                + " md5sum \"$p\"; ls -la \"$(dirname \"$p\")\"");
+        sb.append("设备 base.apk md5 + 目录:\n").append(orNa(base)).append('\n');
+        // ⑥ dumpsys 全局兜底（find 全空时：包 dump 里必现 rustruntime 字样，含提供方包名）
+        if (found == null || found.length() == 0) {
+            String dumpAll = runSu("dumpsys package | grep -i rustruntime | head -20", 30_000);
+            sb.append("dumpsys package | grep -i rustruntime:\n").append(orNa(dumpAll)).append('\n');
         }
-        // ⑥ 抓取：find 命中路径优先（v5 优先）→ pm path 库名兜底 → cp APK 到 Download
+        // ⑦ 抓取：jar（dex 本体）+ xml（库映射）都要 —— 全量拷，不再首个 OK 即停
         String copied = tryCopyRustruntimeApk(libs, found);
-        sb.append("rustruntime APK 拷贝:\n").append(copied).append('\n');
+        sb.append("rustruntime 抓取:\n").append(copied).append('\n');
         sb.append("# =======================================\n");
         return sb.toString();
     }
@@ -243,9 +266,11 @@ public final class LogExporter {
      * 兜底固定路径；pm path 库名兜底保留（未来若改回 static-shared-lib 形态）。
      */
     private static String tryCopyRustruntimeApk(String libsOutput, String foundPaths) {
-        // ① find 命中的物理路径直接拷（jar=壳层 dex 本体；xml=库映射配置）
+        StringBuilder results = new StringBuilder();
+        // 去重候选集：find 命中 + 固定路径；全量拷（不再首个 OK 即停 ——
+        // v2.9.62 实机只拷出 jar 漏了 cfg xml 的教训）
+        java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
         if (foundPaths != null && foundPaths.length() > 0) {
-            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
             for (String line : foundPaths.split("\n")) {
                 String p = line.trim();
                 if (!p.startsWith("/")) continue;
@@ -254,38 +279,20 @@ public final class LogExporter {
                 if (!(p.endsWith(".jar") || p.endsWith(".apk") || p.endsWith(".xml"))) continue;
                 paths.add(p);
             }
-            // jar（dex 本体）优先于 xml（配置）
-            paths.sort((a, b) -> {
-                boolean ja = a.endsWith(".jar"), jb = b.endsWith(".jar");
-                if (ja != jb) return ja ? -1 : 1;
-                return a.compareTo(b);
-            });
-            for (String src : paths) {
-                String dest = "/sdcard/Download/"
-                        + new java.io.File(src).getName();
-                String cp = runSu("cp -f \"" + src + "\" \"" + dest
-                        + "\" && chmod 644 \"" + dest + "\" && echo COPY_OK");
-                if (cp.contains("COPY_OK")) {
-                    return "OK → " + dest + "（源: " + src + "）";
-                }
-            }
         }
-        // ② 固定路径兜底（find 因 maxdepth/权限漏扫时）
-        String[] fallbacks = {
-                "/system_ext/framework/hyperos.rustruntime.jar",
-                "/product/etc/permissions/rustruntime_cfg_v3_v5.xml",
-        };
-        for (String src : fallbacks) {
-            String test = runSu("test -f \"" + src + "\" && echo EXISTS");
-            if (!test.contains("EXISTS")) continue;
+        // 固定兜底（find 因 maxdepth/权限漏扫时）
+        paths.add("/system_ext/framework/hyperos.rustruntime.jar");
+        paths.add("/product/etc/permissions/rustruntime_cfg_v3_v5.xml");
+        for (String src : paths) {
             String dest = "/sdcard/Download/" + new java.io.File(src).getName();
             String cp = runSu("cp -f \"" + src + "\" \"" + dest
                     + "\" && chmod 644 \"" + dest + "\" && echo COPY_OK");
             if (cp.contains("COPY_OK")) {
-                return "OK → " + dest + "（源: " + src + "）";
+                results.append("OK → ").append(dest).append("（源: ").append(src).append("）\n");
             }
         }
-        // ③ pm path 库名兜底（未来若改回 static-shared-lib APK 形态）
+        if (results.length() > 0) return results.toString().trim();
+        // pm path 库名兜底（未来若改回 static-shared-lib APK 形态）
         java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
         if (libsOutput != null) {
             java.util.regex.Matcher m = java.util.regex.Pattern
@@ -300,10 +307,12 @@ public final class LogExporter {
             String cp = runSu("cp -f \"" + apkPath + "\" \"" + dest
                     + "\" && chmod 644 \"" + dest + "\" && echo COPY_OK");
             if (cp.contains("COPY_OK")) {
-                return "OK [" + lib + "] → " + dest + "（源: " + apkPath + "）";
+                results.append("OK [").append(lib).append("] → ").append(dest)
+                        .append("（源: ").append(apkPath).append("）\n");
+                break;
             }
-            return "FAILED [" + lib + "]（cp 失败: " + cp + "）";
         }
+        if (results.length() > 0) return results.toString().trim();
         return "N/A（三路均未命中 —— 请把 ②③④⑤ 段原样反馈）";
     }
 
