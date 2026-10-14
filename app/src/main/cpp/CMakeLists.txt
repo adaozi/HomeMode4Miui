@@ -3,7 +3,9 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(homemode4miui_native CXX)
 
-add_library(homemode4miui_native SHARED homemode4miui_native.cpp)
+add_library(homemode4miui_native SHARED
+        homemode4miui_native.cpp
+        hook_guard.cpp)
 
 target_compile_options(homemode4miui_native PRIVATE
         -O2

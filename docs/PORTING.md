@@ -595,3 +595,22 @@ DIFF vs 桩文件:
 - 修复：tryLspLog 改目录 glob（modules*.log）；容器诊断段 cat 不过滤时间
   （400 行保最新已限幅）；删除死常量 LSP_LOG_PATHS。
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.70-os4b-diag4-101.apk。
+
+### Route B phase 2：madvise guard（2026-10-14）—— v2.9.71-os4b-p2 / vc102
+
+- phase 1 实机通过（18:51）：Zygisk Next 1.5.2 换装后 H4MNative 全链路打通
+  （native_init accepted / load 回调全命中 / Dart 符号可达）；关键观察 = libapp.so
+  load 回调重复 4 次（同 handle），installer 幂等实锤。
+- 本批新增 hook_guard.{h,cpp}（机制改自 WOMMO lsposed_hook_backend.cpp，GPL-3.0
+  同源）：
+  ① EnsureMadviseGuard：LSPosed hookFunc inline hook libc madvise，一次性状态机
+  （幂等，防重复回调重复安装）；
+  ② GuardedMadvise：MADV_DONTNEED 区间按登记页分段剔除，其余透传；
+  ③ ProtectHookRange：补丁前登记（时序硬约束），32 页上限；
+  ④ RunGuardSelfTest：trampoline 读回（/proc/self/mem，bti c prologue 消失判定）
+  + 双页自测试（登记页 DONTNEED 后 0xA5 存活、对照页被内核清零）。
+- 触发时机：native_init backfill（libapp 已映射）或首个 libapp.so load 回调，
+  原子一次性；phase 1 的 dart image dlsym 检查由 self test 取代。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.71-os4b-p2-102.apk。
+- 实机判读：H4MNative 期待 `guard: madvise guard installed` +
+  `guard self-test: ... => PASSED`；FAILED 时先看 head hex 与 trampoline=0。

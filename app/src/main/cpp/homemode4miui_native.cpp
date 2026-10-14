@@ -17,6 +17,7 @@
 // the spawner; business hooks (later phases) must only act inside the launcher
 // child once the target libraries are mapped.
 
+#include "hook_guard.h"
 #include "native_api.h"
 
 #include <android/log.h>
@@ -87,6 +88,27 @@ bool endsWith(const char *value, const char *suffix) {
     return strcmp(value + valueLen - suffixLen, suffix) == 0;
 }
 
+// ---- Phase 2: madvise guard probe (one-shot per process) ----
+
+const NativeAPIEntries *g_entries = nullptr;
+uint32_t g_phase2_state = 0u;  // 0 = pending, 1 = done
+
+// Called from native_init backfill (launcher, libs mapped) or the first
+// libapp.so load callback — whichever comes first. Phase 1's callbacks repeat
+// (libapp.so fired 4x on device), so the one-shot guard is mandatory.
+void RunPhase2Probe() {
+    if (__atomic_exchange_n(&g_phase2_state, 1u, __ATOMIC_ACQ_REL) != 0u) {
+        return;
+    }
+    if (!h4m::EnsureMadviseGuard(g_entries)) {
+        logLine(ANDROID_LOG_ERROR, "phase2: madvise guard unavailable — aborting probe");
+        return;
+    }
+    // Guard must be in place BEFORE any protected write; the self test
+    // exercises the splitting logic end-to-end through the real madvise PLT.
+    h4m::RunGuardSelfTest();
+}
+
 // Backfill probe: log which observation targets are already mapped when
 // native_init runs in the launcher child (hot reload / late init scenario).
 void backfillProbe() {
@@ -121,12 +143,9 @@ void onLibraryLoaded(const char *name, void *handle) {
             logLine(ANDROID_LOG_WARN, "poc library loaded: %s handle=%p", name,
                     handle);
             if (endsWith(name, "libapp.so")) {
-                // Phase 1 verification aid: confirm the Dart snapshot symbol is
-                // resolvable through the LSPosed-reported handle.
-                void *snapshot = dlsym(handle, "_kDartIsolateSnapshotInstructions");
-                logLine(ANDROID_LOG_WARN,
-                        "poc dart image check: _kDartIsolateSnapshotInstructions=%p",
-                        snapshot);
+                // Phase 2: install the madvise guard and run its self test
+                // once, on the first Dart image load.
+                RunPhase2Probe();
             }
         }
     }
@@ -156,8 +175,19 @@ NativeOnModuleLoaded native_init(const NativeAPIEntries *entries) {
         return nullptr;
     }
 
+    g_entries = entries;
+
     if (launcher) {
         backfillProbe();
+        // Launcher child with libapp.so already mapped (hot reload / late
+        // init): run the phase 2 probe immediately; the load callback would
+        // not fire again for an already-loaded library.
+        void *dart_handle = dlopen("libapp.so", RTLD_NOLOAD);
+        if (dart_handle != nullptr) {
+            logLine(ANDROID_LOG_WARN,
+                    "poc native_init: libapp.so already mapped, phase2 now");
+            RunPhase2Probe();
+        }
     }
 
     logLine(ANDROID_LOG_WARN,
