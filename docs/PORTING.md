@@ -561,3 +561,19 @@ DIFF vs 桩文件:
 - 用途：OS4 实机上点导出按钮即可拿到 spawner/launcher 身份判定与库加载回调
   日志，直接发给 AI 定位 PoC phase 1 是否触发。
 - 构建通过；产物 .build/out/HomeMode4Miui-v2.9.67-os4b-diag-98.apk。
+
+### META-INF 元数据补齐：module.prop + scope.list（2026-10-14）—— v2.9.68-os4b-diag2 / vc99
+
+- 双机日志定位：OS2 机 legacy 无回归（hook installed 12 条 0 FAILED）；OS4 机
+  （LSPosed 2.2.0 / 7854 + NeoZygisk 2.4）重启桌面后 native_init 仍未触发，且
+  OS4 launcher 进程零模块日志。
+- 根因候选实锤：对照 WOMMO/SwipeGate，两者 META-INF/xposed/module.prop 均为
+  必填（minApiVersion=102 / targetApiVersion=102），本模块缺该文件 → fork 不把
+  模块注册为 modern/native 入口。补 module.prop（staticScope=false /
+  autoHotReload=false）+ META-INF/xposed/scope.list（com.miui.home）。
+- OS2/OS3 兼容性：旧容器不解析 META-INF/xposed/*（modern 格式是 fork 引入的），
+  legacy 链路不受影响；OS2 机导日志复核一次即可闭环。
+- 若 vc99 后 native_init 仍不触发：下一嫌疑是 NeoZygisk（ptrace 注入）不向
+  hyos_spawner 注入 native 模块（SwipeGate 要求 Zygisk Next 1.5.0+ 的 HyOS
+  Runtime），届时查 LSPosed 管理器日志页的 native 模块加载行。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.68-os4b-diag2-99.apk。
