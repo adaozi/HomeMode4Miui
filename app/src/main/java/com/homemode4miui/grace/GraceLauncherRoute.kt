@@ -734,6 +734,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             onAppDetails = viewModel::openAppDetails,
             onAppShortcuts = { app, bounds -> overlay = LauncherOverlay.Shortcuts(app, bounds) },
             rowGestures = rowGestures,
+            // 上游 AppDrawerScreen.kt:171 同构：装饰后的文件夹图标项（图标设计器产出）
+            folderApps = state.folderApps,
             // folders 阶段：抽屉文件夹（原版 AppDrawerScreen FolderRow 分支）
             onOpenFolder = { folder, bounds ->
                 // 上游同步 v1.1.8 S8a：抽屉内工作资料文件夹点击 = 展开/收起

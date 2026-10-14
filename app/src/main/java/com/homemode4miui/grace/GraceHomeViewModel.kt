@@ -116,6 +116,10 @@ data class GraceHomeUiState(
     val folderWidgets: Map<String, List<com.galaxyrio.gracelauncher.data.HomeLayout>> = emptyMap(),
     /** hotfix folders2：已保存快捷方式（saved_shortcuts 表 → LauncherApp，文件夹成员解析用）。 */
     val savedShortcutApps: List<LauncherApp> = emptyList(),
+    /** 上游 LauncherUiState.folderApps 同构：装饰后的文件夹图标项（key = folder id）。
+     *  图标设计器（FolderEditor → IconDesigner）对文件夹的产出存 item_icons
+     *  （key "folder:<id>"），经 ItemIconStore.apply 渲染成位图 —— 主页/抽屉文件夹行消费。 */
+    val folderApps: Map<String, LauncherApp> = emptyMap(),
     // 上游同步 v1.1.8 S8a：工作资料数据面（仅 managed profile；MIUI 双开不受影响）
     val workProfiles: List<com.galaxyrio.gracelauncher.data.WorkProfile> = emptyList(),
     val workProfileApps: List<LauncherApp> = emptyList(),
@@ -139,8 +143,11 @@ data class GraceHomeUiState(
             return favoriteOrder.mapNotNull(byKey::get)
         }
 
-    /** 文件夹图标项（原版 LauncherViewModel.folderItem 语义；label = 文件夹名）。 */
-    fun folderItem(folder: LauncherFolder): LauncherApp = folder.asApp()
+    /** 文件夹图标项（原版 LauncherViewModel.folderItem 语义；label = 文件夹名）。
+     *  上游 LauncherViewModel.kt:166-169：优先取装饰后的 folderApps（图标设计器对
+     *  文件夹的产出 key "folder:<id>" 已渲染成位图），无自定义设计回落 asApp() 默认圆标。 */
+    fun folderItem(folder: LauncherFolder): LauncherApp =
+        folderApps[folder.id] ?: folder.asApp()
 
     /**
      * 原版 LauncherViewModel.favoriteItems 逐字语义（LauncherViewModel.kt:183-195）：
@@ -434,9 +441,20 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                         ModLog.e("GraceHomeViewModel redecorateApps failed", error)
                         null
                     }
+                    // 上游 LauncherViewModel.kt:445-447 同构：文件夹图标项跟随 icons 流
+                    // （设计器保存文件夹图标后主页/抽屉立即生效，无需重启）。
+                    val redecoratedFolders = try {
+                        decorateFolders(_uiState.value.folders, icons)
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        ModLog.e("GraceHomeViewModel redecorateFolders failed", error)
+                        null
+                    }
                     _uiState.update { state ->
                         state.copy(itemIcons = icons, graceButtonApp = buttonApp,
-                            apps = redecorated ?: state.apps)
+                            apps = redecorated ?: state.apps,
+                            folderApps = redecoratedFolders ?: state.folderApps)
                     }
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
@@ -484,6 +502,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 // 上游同步补漏（LauncherViewModel.kt:443 decorate 逐字语义）：
                 // 应用图标设计器产出（item_icons）+ 全局面设计 + 主题化在入库前套用。
                 val apps = decorateApps(loadApps(packs))
+                // 上游 LauncherViewModel.kt:445-447 同构：文件夹图标项一并装饰。
+                val folderApps = decorateFolders(_uiState.value.folders, iconsSnapshot)
                 // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
                 // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
                 val order = favoritesStore.favoritesFor(apps)
@@ -493,7 +513,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     appRepository.loadWorkApps(workProfiles, packs)
                 } else emptyList()
                 _uiState.update {
-                    it.copy(apps = apps, favoriteOrder = order, isLoadingApps = false,
+                    it.copy(apps = apps, folderApps = folderApps, favoriteOrder = order,
+                        isLoadingApps = false,
                         workProfiles = workProfiles, workProfileApps = workProfileApps)
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
@@ -546,6 +567,26 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     iconStore.applyDesign(app, icons[app.key], iconSettings.iconDesign, iconSettings, themed)
                 }.getOrElse { app }
             }
+        }
+    }
+
+    /**
+     * 上游 LauncherViewModel.kt:445-447 逐字语义：文件夹图标项装饰 —— item_icons 里
+     * key "folder:<id>" 的自定义选择（图标设计器 FolderEditor 入口产出）经 ItemIconStore
+     * .apply 渲染成位图。无自定义选择的文件夹不进 map（folderItem 回落 asApp() 默认圆标）。
+     */
+    private suspend fun decorateFolders(
+        folders: List<LauncherFolder>,
+        icons: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon>,
+    ): Map<String, LauncherApp> {
+        if (icons.isEmpty() || folders.isEmpty()) return emptyMap()
+        val iconSettings = currentIconSettings()
+        return kotlinx.coroutines.withContext(Dispatchers.IO) {
+            folders.mapNotNull { folder ->
+                val choice = icons[folder.key] ?: return@mapNotNull null
+                runCatching { iconStore.apply(folder.asApp(), choice, iconSettings) }
+                    .getOrNull()?.takeIf { it.icon != null }?.let { folder.id to it }
+            }.toMap()
         }
     }
 

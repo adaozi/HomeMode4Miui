@@ -84,6 +84,9 @@ fun AppDrawerScreen(
     // 上游同步 v1.1.8 S8a：工作资料（文件夹展开态 + 空态设置入口）
     workExpanded: Boolean = false,
     onWorkProfileSettings: () -> Unit = {},
+    // 上游 LauncherViewModel.kt:445-447 同构：装饰后的文件夹图标项（key = folder id），
+    // 图标设计器对文件夹的产出经 ItemIconStore.apply 渲染；空 map = 全部默认圆标。
+    folderApps: Map<String, LauncherApp> = emptyMap(),
 ) {
     val appearance = LocalLauncherAppearance.current
     // 上游同步 v1.1.8：列表外观（边距/字号/名字可见性）+ 行标签样式
@@ -147,11 +150,13 @@ fun AppDrawerScreen(
                     )
                     is DrawerItem.Folder -> FolderRow(
                         folder = item.folder,
+                        // 上游 AppDrawerScreen.kt:171 同构：优先装饰后的文件夹图标
+                        app = folderApps[item.folder.id] ?: item.folder.asApp(),
                         onOpen = { onOpenFolder(item.folder, it) },
                         onLongClick = { onEditFolder(item.folder) },
                         // 上游同步 v1.1.8 S7：抽屉文件夹行左滑打开内部第一项
                         onSwipeLeft = rowGestures.onOpenFirst?.let { open -> { bounds ->
-                            open(item.folder.asApp(), bounds)
+                            open(folderApps[item.folder.id] ?: item.folder.asApp(), bounds)
                         } },
                     )
                     // 上游同步 v1.1.8 S8a：工作资料空态（无应用时提示 + 设置入口）

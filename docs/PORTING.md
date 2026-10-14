@@ -457,3 +457,11 @@ DIFF vs 桩文件:
 - [x] **修复**：SettingsActivity 新增 exitToHome()（CATEGORY_HOME 拉起被接管的 com.miui.home + finishAffinity 清整个模块任务栈），三处退出路径统一接入：① Compose 根页返回箭头 onBack；② 系统返回手势（onBackPressedDispatcher callback，仅根页生效——NavHost 子页返回自持弹栈，handleRootBack=false 保证 PredictiveBackHandler 不拦截）；③ closeRequests（跨进程 moveWidget 关页回桌面看编辑态）。
 - [x] **防回归**：finishAffinity 同时清掉残留 gate 页，任务栈归零，后续入口不再堆叠。
 - [x] 构建：assembleRelease 通过，versionCode 82；产物已导出 .build/out/。
+
+### folder-icon（v2.9.50-folder-icon / versionCode 83，2026-10-14）—— 文件夹自定义图标主页生效
+
+- [x] **装机实锤**：设置文件夹图标（FolderEditor → 图标设计器）预览正常，主页/抽屉仍是默认圆标。
+- [x] **根因**：宿主 GraceHomeViewModel.folderItem 直接 folder.asApp()（icon=null）—— 上游 LauncherViewModel.kt:445-447 会先把 item_icons 里 key "folder:<id>" 的自定义选择经 ItemIconStore.apply 渲染成位图存进 LauncherUiState.folderApps，folderItem 优先取装饰项；本仓 folders 阶段搬运时裁掉了 folderApps 链路，设置页设计器预览直连 ItemIconStore 所以能显示。
+- [x] **修复（对齐上游）**：① GraceHomeUiState 增 folderApps: Map<folderId, LauncherApp>；② folderItem 优先 folderApps[id] 回落 asApp()；③ 新增 decorateFolders（无选择的文件夹零渲染），接入 refreshApps（冷启动）+ iconsJob collect（设计器保存后立即生效）双链；④ AppDrawerScreen 补 folderApps 参数（上游签名对齐），抽屉 FolderRow app = folderApps[id] ?: asApp()（onSwipeLeft 同步）；⑤ Route 层透传 state.folderApps。
+- [x] 覆盖面：主页收藏区文件夹行 / 抽屉文件夹行 / 弹层锚点动画（行图标即锚）/ 左滑第一项 open 语义；文件夹弹层成员图标不做装饰为既有降级登记，不在本批范围。
+- [x] 构建：assembleRelease 通过，versionCode 83；产物已导出 .build/out/。
