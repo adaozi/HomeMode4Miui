@@ -14,8 +14,8 @@ android {
         applicationId "com.homemode4miui"
         minSdk 33          // 与宿主一致（com.miui.home minSdk 33）
         targetSdk 34
-        versionCode 86
-        versionName "2.9.53-icon-perf"
+        versionCode 87
+        versionName "2.9.54-favorites-first"
     }
 
     sourceSets {

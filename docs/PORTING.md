@@ -487,3 +487,12 @@ DIFF vs 桩文件:
 - [x] **修复①（主）decorateApps 逐应用快速路径**：无 per-item 选择 + 无全局面设计 + 未开主题化 + loadApps 图标存在 → 跳过重渲染，保留原图标、仅按设计分支语义清 monochromeIcon（桌面 themed 圆显隐与重渲染版逐字节一致，iconPackPackage 同为 theme kind 原样保留语义）；monochrome 本就为空时零 copy（保持实例同一性，行重组最少化）。渲染量从 200+ 收敛到「有自定义选择 + 有全局面 + themed 开」的子集。loadApps 图标缺失的应用仍走全量渲染（systemDrawable 兜底补图不受影响）。
 - [x] **修复②重装饰收敛为单一入口 applyItemIconSnapshot**（Mutex 串行「读列表→装饰→原子换入」）：iconsJob 与 refreshApps 装载尾部补偿共用；itemsDecoratedWith 快照标记去重（Room 流重发不重复全量渲染）；isLoadingApps 在途让路（在途 refreshApps 会读到刚落的最新快照）——**顺带修复 v2.9.51 起的空列表覆盖竞态**（iconsJob 在 refreshApps 换入间隙用空/旧 apps update 覆盖装载结果）；装载期间快照前进由 refreshApps 尾部以最新快照补一轮。
 - [x] 构建：assembleRelease 通过，versionCode 86；产物已导出 .build/out/。
+
+### favorites-first（v2.9.54-favorites-first / versionCode 87，2026-10-14）—— 重启桌面后应用区延迟 1-2 秒
+
+- [x] **装机实锤**：重启桌面后时钟/文件夹立即显示，应用（收藏区）要等 1-2 秒。
+- [x] **根因**：收藏行渲染依赖全量 apps 列表，而装载是 200+ 应用**串行** getBadgedIcon 图标解码（单 IO 线程 1-2s），收藏区被迫等全量就绪。时钟（widget）与收藏文件夹（Room folders 流）不依赖 apps 所以先出。
+- [x] **修复①（主）两段式装载**：AppRepository 新增 enumerateApps（枚举全量骨架：label/key/包图标就绪，系统图标延后为按 key 的惰性解码句柄）+ AppInventory.withIcons(keys)（limitedParallelism(4) 并行解码子集回填）。VM refreshApps：phase 1 = withIcons(已存收藏序子集) → decorateApps → 先换入（收藏区随时钟立即绘制，favoriteOrder 用 currentOrder() 只读值）；phase 2 = 全量解码 → favoritesFor/workProfiles → 整体换入。首装无已存收藏序（currentOrder()=null）自动跳过 phase 1（默认收藏要由 favoritesFor 基于全量列表生成）。loadApps 保留为 enumerate+withIcons(全量) 便捷封装（SettingsViewModel 应用选择列表等调用方零变化）。
+- [x] **修复②decorateApps 骨架跳过**：icon==null 的骨架应用（phase 1 未解码）在无 per-item 选择 + 无全局面设计时跳过装饰 —— 否则 systemDrawable 兜底会对 200+ 骨架触发全量重渲染（v2.9.53 修复的风暴复现）；phase 2 解码全量后统一装饰兜底。装饰分支重写为 when 三路（骨架跳过 / 快速路径 / 全量渲染）。
+- [x] **已知权衡**：phase 1→2 间隙（约 0.5-1s）若立即打开抽屉，未解码完成的应用行短暂显示字母占位圆标，全量换入后恢复 —— 上游为同款瞬时行为（其独立进程装载更快），实测窗口很短。
+- [x] 构建：assembleRelease 通过，versionCode 87；产物已导出 .build/out/。

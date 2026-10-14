@@ -507,13 +507,33 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 // 应用图标设计器产出（item_icons）+ 全局面设计 + 主题化在入库前套用。
                 // 快照在装饰前取定：装载期间 icons 流前进的场景由尾部补偿轮处理。
                 val snapshotAtDecorate = iconsSnapshot
-                val apps = decorateApps(loadApps(packs))
-                // 上游 LauncherViewModel.kt:445-447 同构：文件夹图标项一并装饰。
+                // 两段式装载（宿主性能适配，装机实锤：重启桌面后时钟/文件夹先出、应用要等
+                // 1-2 秒 —— 200+ 应用串行 getBadgedIcon 解码，收藏行又依赖全量列表）：
+                // ① 枚举全量骨架（不解码系统图标）→ 并行解码收藏子集 → 先换入
+                //    （收藏区随时钟/文件夹立即绘制，无自定义的应用走 decorateApps 骨架跳过）；
+                // ② 全量解码在后台继续，完成后整体换入（抽屉/搜索等全量表面就绪）。
+                // 首装无已存收藏序（currentOrder()=null）时跳过①：默认收藏要由
+                // favoritesFor 基于全量列表生成，两段无收益。
+                val inventory = appRepository.enumerateApps(packs)
+                val savedOrder = favoritesStore.currentOrder()
+                if (savedOrder != null) {
+                    val partial = inventory.withIcons(savedOrder.toSet())
+                    val apps = decorateApps(partial)
+                    val folderApps = decorateFolders(_uiState.value.folders, snapshotAtDecorate)
+                    _uiState.update {
+                        it.copy(apps = apps, folderApps = folderApps, favoriteOrder = savedOrder,
+                            isLoadingApps = false)
+                    }
+                    itemsDecoratedWith = snapshotAtDecorate
+                }
+                val full = inventory.withIcons(inventory.apps.map(LauncherApp::key).toSet())
+                val apps = decorateApps(full)
                 val folderApps = decorateFolders(_uiState.value.folders, snapshotAtDecorate)
                 // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
                 // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
                 val order = favoritesStore.favoritesFor(apps)
-                // 上游同步 v1.1.8 S8a：工作资料枚举（无 managed profile 时零开销静默跳过）
+                // 上游同步 v1.1.8 S8a：工作资料枚举（无 managed profile 时零开销静默跳过）。
+                // 两段式下归入②：收藏区不依赖工作资料，phase 1 不为它买单。
                 val workProfiles = appRepository.workProfiles()
                 val workProfileApps = if (workProfiles.isNotEmpty()) {
                     appRepository.loadWorkApps(workProfiles, packs)
@@ -561,10 +581,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** B3.1：查询逻辑已抽入 AppRepository（AOSP 稳定 API，宿主进程直接可用）。 */
-    private suspend fun loadApps(iconPackPackages: List<String>): List<LauncherApp> =
-        appRepository.loadApps(iconPackPackages)
-
     // ---- 上游同步补漏：应用图标装饰链（LauncherViewModel.kt:430/443 + LauncherSettingsRepository 主题三参同源）----
 
     /**
@@ -600,20 +616,23 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             apps.map { app ->
                 runCatching {
                     val special = icons[app.key]
+                    // 骨架应用（两段式装载 phase 1，系统图标尚未解码）：无 per-item 选择 +
+                    // 无全局面设计时跳过渲染 —— 否则 systemDrawable 兜底会对 200+ 骨架触发
+                    // 全量重渲染（风暴复现）；phase 2 解码全量后统一装饰兜底。
                     // 宿主性能适配（装机实锤 v2.9.51 后每次重启桌面字母条滑动卡顿）：
                     // 无 per-item 选择 + 无全局面设计 + 未开主题化的应用，applyDesign 仍会走
                     // "默认设计全量重渲染"——systemDrawable binder 往返 + 144px 多层位图渲染 +
                     // monochrome 逐像素扫描，冷启动 200+ 次，IO 线程与宿主 UI/Render 线程抢
                     // CPU 且 ~20MB 位图分配引发 GC 抖动。上游独立进程扛得住，宿主
                     // com.miui.home 进程（MIUI 自身 UI 同线程竞争）扛不住。
-                    // 快速路径与重渲染视觉等价：保留 loadApps 原图标，仅按设计分支语义清空
-                    // monochromeIcon（桌面 themed 圆显隐一致）；iconPackPackage/themeIconPackPackage
-                    // 保持 loadApps 原值（theme kind 本就原样保留）；loadApps 图标缺失的应用
-                    // 仍走全量渲染（systemDrawable 兜底补图标的既有能力不受影响）。
-                    if (special == null && iconSettings.iconDesign == null && !themed && app.icon != null) {
-                        if (app.monochromeIcon == null) app else app.copy(monochromeIcon = null)
-                    } else {
-                        iconStore.applyDesign(app, special, iconSettings.iconDesign, iconSettings, themed)
+                    // 快速路径与重渲染视觉等价：保留枚举原图标，仅按设计分支语义清空
+                    // monochromeIcon（桌面 themed 圆显隐一致）；iconPackPackage 保持枚举原值
+                    // （theme kind 本就原样保留语义）。
+                    when {
+                        special == null && iconSettings.iconDesign == null && app.icon == null -> app
+                        special == null && iconSettings.iconDesign == null && !themed ->
+                            if (app.monochromeIcon == null) app else app.copy(monochromeIcon = null)
+                        else -> iconStore.applyDesign(app, special, iconSettings.iconDesign, iconSettings, themed)
                     }
                 }.getOrElse { app }
             }

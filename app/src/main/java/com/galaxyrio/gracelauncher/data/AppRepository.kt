@@ -26,6 +26,9 @@ import androidx.core.graphics.drawable.toBitmap
 import com.galaxyrio.gracelauncher.data.icons.LoadedIconPack
 import com.galaxyrio.gracelauncher.data.icons.IconPackRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -40,7 +43,38 @@ class AppRepository(
 ) {
     private val launcherApps = context.getSystemService(LauncherApps::class.java)
 
-    suspend fun loadApps(iconPackPackages: List<String> = emptyList()): List<LauncherApp> = withContext(Dispatchers.IO) {
+    /**
+     * 两段式装载骨架（宿主性能适配，装机实锤：重启桌面后时钟/文件夹先出、应用要等
+     * 1-2 秒 —— 根因是 200+ 个应用串行 getBadgedIcon 解码，而收藏行要等全量列表就绪）。
+     * 枚举返回应用骨架（label/key/包图标就绪，系统图标延后解码）＋按 key 的惰性解码句柄；
+     * 消费方先 `withIcons(收藏子集)` 立即出收藏区，再后台 `withIcons(全量)` 换入。
+     */
+    class AppInventory internal constructor(
+        val apps: List<LauncherApp>,
+        private val decoders: Map<String, suspend () -> androidx.compose.ui.graphics.ImageBitmap?>,
+    ) {
+        /** 并行解码指定 key 的系统图标并回填（icon 仍为空的项；有包图标的保持包图标）。 */
+        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+        suspend fun withIcons(keys: Set<String>, parallelism: Int = 4): List<LauncherApp> {
+            if (keys.isEmpty() || decoders.isEmpty()) return apps
+            val limited = Dispatchers.IO.limitedParallelism(parallelism)
+            val decoded = coroutineScope {
+                decoders.filterKeys { it in keys }
+                    .map { (key, decode) ->
+                        async(limited) {
+                            key to runCatching { decode() }.getOrNull()
+                        }
+                    }.awaitAll()
+            }.toMap()
+            if (decoded.isEmpty()) return apps
+            return apps.map { app ->
+                val icon = decoded[app.key] ?: return@map app
+                if (app.icon != null || icon == null) app else app.copy(icon = icon)
+            }
+        }
+    }
+
+    suspend fun enumerateApps(iconPackPackages: List<String> = emptyList()): AppInventory = withContext(Dispatchers.IO) {
         val pm = context.packageManager
         val launcher = checkNotNull(launcherApps)
         val myUser = Process.myUserHandle()
@@ -52,7 +86,8 @@ class AppRepository(
         val profiles = runCatching { launcher.profiles }.getOrNull() ?: listOf(myUser)
         // B6.4：图标包预载（解析失败 = 排除出 packs，应用回退系统图标）
         val packs = normalizeIconPackOrder(iconPackPackages).mapNotNull { iconPacks.load(it) }
-        val apps = profiles.flatMap { profile ->
+        class Entry(val app: LauncherApp, val decode: (suspend () -> androidx.compose.ui.graphics.ImageBitmap?)?)
+        val entries = profiles.flatMap { profile ->
             // 单 profile 失败不拖垮整体（XSpace 受限/未就绪时 getActivityList 抛
             // SecurityException，降级为该 profile 无应用）
             val items = runCatching { launcher.getActivityList(null, profile) }.getOrDefault(emptyList())
@@ -66,13 +101,17 @@ class AppRepository(
                 currentCoroutineContext().ensureActive()
                 val component = info.componentName ?: return@mapNotNull null
                 val label = info.label.toString().trim().ifBlank { return@mapNotNull null }
-                // getBadgedIcon 对非主 profile 自动叠加系统角标（双开/工作资料标识）
-                val icon = runCatching { info.getBadgedIcon(0)?.toBitmap()?.asImageBitmap() }.getOrNull()
-                val base = makeApp(component, label, icon, packs)
-                if (serial == null) base else base.copy(user = profile, userSerial = serial)
+                // getBadgedIcon 对非主 profile 自动叠加系统角标（双开/工作资料标识）——
+                // 两段式装载下延后到 withIcons 解码（角标语义不变，解码时同样走 getBadgedIcon）。
+                val base = makeApp(component, label, null, packs)
+                val app = if (serial == null) base else base.copy(user = profile, userSerial = serial)
+                // 包图标命中的应用不需要系统图标解码（原版语义包图标直接顶替系统图标）
+                Entry(app, if (app.icon == null) {
+                    { runCatching { info.getBadgedIcon(0)?.toBitmap()?.asImageBitmap() }.getOrNull() }
+                } else null)
             }
         }
-        val result = if (apps.isNotEmpty()) apps else {
+        val result = if (entries.isNotEmpty()) entries else {
             // PM 兜底路径：部分 ROM 对宿主 profile 限制 LauncherApps 时使用。
             val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             pm.queryIntentActivities(intent, 0).mapNotNull { resolve ->
@@ -81,11 +120,19 @@ class AppRepository(
                 val label = resolve.loadLabel(pm).toString().trim()
                 if (label.isBlank()) return@mapNotNull null
                 val component = ComponentName(activity.packageName, activity.name)
-                val icon = runCatching { resolve.loadIcon(pm)?.toBitmap()?.asImageBitmap() }.getOrNull()
-                makeApp(component, label, icon, packs)
+                val app = makeApp(component, label, null, packs)
+                Entry(app) { runCatching { resolve.loadIcon(pm)?.toBitmap()?.asImageBitmap() }.getOrNull() }
             }
         }
-        result.sortedWith(LauncherAppOrder)
+        AppInventory(
+            apps = result.map(Entry::app).sortedWith(LauncherAppOrder),
+            decoders = result.mapNotNull { e -> e.decode?.let { e.app.key to it } }.toMap(),
+        )
+    }
+
+    suspend fun loadApps(iconPackPackages: List<String> = emptyList()): List<LauncherApp> {
+        val inventory = enumerateApps(iconPackPackages)
+        return inventory.withIcons(inventory.apps.map(LauncherApp::key).toSet())
     }
 
     /** 原版 makeApp 对齐：包内组件匹配图标 → 包通用 fallback → 系统图标。 */
