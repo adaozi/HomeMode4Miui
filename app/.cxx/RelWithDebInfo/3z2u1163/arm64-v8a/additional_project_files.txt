@@ -1,1 +1,0 @@
-C:\Users\31399\Desktop\HomeMode4Miui\app\src\main\cpp\gesture_hook.S

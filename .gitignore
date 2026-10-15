@@ -50,3 +50,6 @@ GraceLauncher-src/
 _devkit/
 # gradle wrapper 引导 jar 必须入库（fresh clone 后 gradlew 才能跑），覆盖上面的 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# AGP native 构建缓存
+app/.cxx/
