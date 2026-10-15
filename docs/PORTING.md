@@ -746,3 +746,11 @@ DIFF vs 桩文件:
   ②dlopen("libart.so") ③/proc/self/maps 找 libart 基址 + 手解文件 ELF dynsym
   （symtab 紧邻 strtab 启发式计数，文件读取不受 proc_mem SELinux 限制）。
 - 产物 .build/out/HomeMode4Miui-v2.9.79-os4b-jb2-110.apk（版本号未变，同 vc110）。
+
+### JavaVM 解析修复批（2026-10-15）—— v2.9.80-os4b-jb3 / vc111
+
+- vc110 实机：`vm resolver exhausted` —— 三级全败。根因 = maps 解析权限位判断
+  笔误：`r-xp` 的 'x' 在第 3 位，判成了第 1 位 → 所有可执行行被跳过，
+  FindLibartPath 永远为空，tier 3 短路。
+- 修复：perms 判定改为 [1]=='r' && [3]=='x'；exhausted 日志附 libart 路径诊断。
+- 构建通过（APK mtime 18:54 校验）；产物 .build/out/HomeMode4Miui-v2.9.80-os4b-jb3-111.apk。

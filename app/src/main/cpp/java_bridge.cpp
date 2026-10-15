@@ -53,9 +53,10 @@ std::string FindLibartPath() {
     while (fgets(line, sizeof(line), f) != nullptr) {
         if (strstr(line, "libart.so") == nullptr) continue;
         const char *perms = strchr(line, ' ');
-        if (perms == nullptr || strlen(perms) < 4 ||
-                perms[1] != 'x') {  // 需要可执行段
-            continue;
+        // perms 形如 " r-xp ..."：'r' 在 [1]，'x' 在 [3]
+        if (perms == nullptr || strlen(perms) < 4 || perms[1] != 'r' ||
+                perms[3] != 'x') {
+            continue;  // 只取可执行段
         }
         uintptr_t start = 0;
         if (sscanf(line, "%lx-", &start) != 1) continue;
@@ -213,7 +214,9 @@ GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
             }
         }
     }
-    h4m_log::log(ANDROID_LOG_ERROR, "java bridge: vm resolver exhausted");
+    h4m_log::log(ANDROID_LOG_ERROR,
+                 "java bridge: vm resolver exhausted (libart=%s)",
+                 FindLibartPath().c_str());
     return nullptr;
 }
 
