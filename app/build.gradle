@@ -14,8 +14,8 @@ android {
         applicationId "com.homemode4miui"
         minSdk 33          // 与宿主一致（com.miui.home minSdk 33）
         targetSdk 34
-        versionCode 111
-        versionName "2.9.80-os4b-jb3"
+        versionCode 112
+        versionName "2.9.81-os4b-jb4"
         ndk {
             abiFilters 'arm64-v8a'   // Route B：OS4 桌面 native 探针仅 arm64
         }

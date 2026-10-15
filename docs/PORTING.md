@@ -754,3 +754,14 @@ DIFF vs 桩文件:
   FindLibartPath 永远为空，tier 3 短路。
 - 修复：perms 判定改为 [1]=='r' && [3]=='x'；exhausted 日志附 libart 路径诊断。
 - 构建通过（APK mtime 18:54 校验）；产物 .build/out/HomeMode4Miui-v2.9.80-os4b-jb3-111.apk。
+
+### tier4：主可执行文件内存 dynsym（2026-10-15）—— v2.9.81-os4b-jb4 / vc112
+
+- vc111 实机：`vm resolver exhausted (libart=)` —— perms 修好后 maps 里依然
+  没有任何 libart.so → **静态 ART 假设**：ART 可能静态链接进 hyos_spawner
+  单体 exe（launcher 子进程 exe 就是它，与"无 libart 映射"吻合）。
+- 新增 tier 4：getauxval(AT_PHDR/AT_PHNUM) 定位主可执行 program headers →
+  ELF magic 向下扫描定 base → 内存内直读 PT_DYNAMIC → dynsym/strtab →
+  按符号名直查 JNI_GetCreatedJavaVMs。无文件读取、无 namespace/SELinux 限制。
+- tier3 open 失败补 errno 日志（区分"maps 没路径"和"SELinux 拒打开"）。
+- 构建通过（APK mtime 19:19 校验）；产物 .build/out/HomeMode4Miui-v2.9.81-os4b-jb4-112.apk。

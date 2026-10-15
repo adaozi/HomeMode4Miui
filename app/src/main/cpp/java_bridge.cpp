@@ -5,6 +5,7 @@
 #include "h4m_log.h"
 
 #include <dlfcn.h>
+#include <sys/auxv.h>
 #include <elf.h>
 #include <fcntl.h>
 #include <jni.h>
@@ -79,7 +80,12 @@ std::string FindLibartPath() {
 void *FindSymbolInElfFile(const char *filePath, uintptr_t base,
                           const char *symbol) {
     const int fd = open(filePath, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return nullptr;
+    if (fd < 0) {
+        h4m_log::log(ANDROID_LOG_WARN,
+                     "java bridge: elf open failed path=%s errno=%d", filePath,
+                     errno);
+        return nullptr;
+    }
     ElfW(Ehdr) ehdr;
     if (pread(fd, &ehdr, sizeof(ehdr), 0) != (ssize_t) sizeof(ehdr) ||
             memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0) {
@@ -171,6 +177,64 @@ void *FindSymbolInElfFile(const char *filePath, uintptr_t base,
 
 using GetCreatedJavaVMsFn = jint (*)(JavaVM **, jsize, jsize *);
 
+// Tier 4：主可执行文件（PIE）内存内 dynsym 直查。
+// AT_PHDR = base + e_phoff；base 由 ELF magic 从 AT_PHDR 所在页向下扫描校验。
+void *FindSymbolInMainExecutableInMemory(const char *symbol) {
+    const uintptr_t phdrAddr = getauxval(AT_PHDR);
+    const size_t phnum = static_cast<size_t>(getauxval(AT_PHNUM));
+    if (phdrAddr == 0u || phnum == 0u) return nullptr;
+
+    // base：从 AT_PHDR 所在页向下逐页校验 ELF magic（e_phoff 通常在首页内）
+    uintptr_t base = 0;
+    for (uintptr_t probe = phdrAddr & ~uintptr_t{0xFFFUL};
+            phdrAddr - probe <= uintptr_t{0x10000}; probe -= 0x1000UL) {
+        if (*reinterpret_cast<const uint32_t *>(probe) == 0x464C457Fu) {  // \x7fELF
+            base = probe;
+            break;
+        }
+    }
+    if (base == 0u) return nullptr;
+
+    auto *phdrs = reinterpret_cast<const ElfW(Phdr) *>(phdrAddr);
+    ElfW(Dyn) *dynamic = nullptr;
+    for (size_t i = 0; i < phnum; ++i) {
+        if (phdrs[i].p_type == PT_DYNAMIC) {
+            dynamic = reinterpret_cast<ElfW(Dyn) *>(base + phdrs[i].p_vaddr);
+            break;
+        }
+    }
+    if (dynamic == nullptr) return nullptr;
+
+    ElfW(Addr) symtab = 0;
+    ElfW(Addr) strtab = 0;
+    ElfW(Xword) syment = sizeof(ElfW(Sym));
+    size_t dynCount = 0;
+    for (ElfW(Dyn) *d = dynamic; d->d_tag != DT_NULL && dynCount < 4096u;
+            ++d, ++dynCount) {
+        if (d->d_tag == DT_SYMTAB) symtab = d->d_un.d_ptr;
+        if (d->d_tag == DT_STRTAB) strtab = d->d_un.d_ptr;
+        if (d->d_tag == DT_SYMENT) syment = d->d_un.d_val;
+    }
+    if (symtab == 0u || strtab == 0u || strtab <= symtab ||
+            syment == 0u) {
+        return nullptr;
+    }
+    // 符号数启发式：symtab 紧邻 strtab 之前（静态链接布局同样适用）
+    const size_t symbolCount =
+            static_cast<size_t>((strtab - symtab) / syment);
+    if (symbolCount == 0u || symbolCount > 4000000u) return nullptr;
+
+    auto *syms = reinterpret_cast<const ElfW(Sym) *>(symtab);
+    const char *strs = reinterpret_cast<const char *>(strtab);
+    for (size_t i = 0; i < symbolCount; ++i) {
+        if (syms[i].st_value == 0u || syms[i].st_name == 0u) continue;
+        if (strcmp(strs + syms[i].st_name, symbol) == 0) {
+            return reinterpret_cast<void *>(base + syms[i].st_value);
+        }
+    }
+    return nullptr;
+}
+
 GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
     // ① 全局符号表
     void *sym = dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs");
@@ -189,6 +253,8 @@ GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
     }
     // ③ maps + 手解 ELF dynsym
     const std::string libart = FindLibartPath();
+    h4m_log::log(ANDROID_LOG_WARN, "java bridge: maps libart path='%s'",
+                 libart.c_str());
     if (!libart.empty()) {
         FILE *f = fopen(libart.c_str(), "r");
         if (f != nullptr) {
@@ -214,9 +280,20 @@ GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
             }
         }
     }
+    // ④ 主可执行文件内存内 dynsym 直查（静态 ART 假设：ART 可能静态链接进
+    // hyos_spawner 单体 exe —— maps 里根本没有 libart.so）。经 AT_PHDR/AT_PHNUM
+    // 定位 program headers，base 由 ELF magic 向下扫描校验，dynsym 表直接在
+    // 内存中遍历（无文件读取、无 namespace/SELinux 限制）。
+    sym = FindSymbolInMainExecutableInMemory("JNI_GetCreatedJavaVMs");
+    if (sym != nullptr) {
+        h4m_log::log(ANDROID_LOG_WARN,
+                     "java bridge: vm resolver tier4 ok (main exe in-memory)");
+        return reinterpret_cast<GetCreatedJavaVMsFn>(sym);
+    }
+
     h4m_log::log(ANDROID_LOG_ERROR,
-                 "java bridge: vm resolver exhausted (libart=%s)",
-                 FindLibartPath().c_str());
+                 "java bridge: vm resolver exhausted (libart='%s')",
+                 libart.c_str());
     return nullptr;
 }
 
