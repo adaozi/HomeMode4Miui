@@ -516,3 +516,21 @@ DIFF vs 桩文件:
 - **下次重启该方向的排查线索**：addGadget 返回的 Gadget 直接放进 Compose AndroidView 不可用，
   疑似依赖宿主 Launcher 环境（mWorkspace.addInScreen / LauncherFrameLayout 的属性动画体系 /
   TrackView 统计），需对照 CellLayout.createNewGadget 完整宿主上下文，而非裸 View 挂载。
+
+### OS4 适配终止归档（2026-10-15）—— revert 9f52967，恢复 v2.9.55-sync-reveal / vc88
+
+- **决策（User）**：放弃 OS4 适配。revert 4206741..ffde171 全段（v2.9.58~v2.9.86，
+  vc89~117），代码与版本号恢复到 v2.9.55-sync-reveal / vc88。
+- **技术定案**（完整证据链见 docs/RE_HyperOS4_NATIVE_HOOK.md 归档）：
+  OS4 桌面主进程 = 纯原生进程（Flutter AOT + Rust + binder-ndk 直连
+  system_server），**无 ART 虚拟机**（JNI_GetCreatedJavaVMs 返回 vm=0x0 count=0，
+  libnativehelper 转发符号经 tier5 命中实测）——legacy/modern Java 派发与
+  native→Java 自举均架构性不可行。
+- 保留资产：
+  - docs/RE_HyperOS4_NATIVE_HOOK.md（Route B 全评估 + 进程模型 + 符号体系）
+  - .workbuddy/re/os4/（libapp.so 78,505 符号 / libapp_launcher.so 23,071 符号 CSV、
+    7719/7748 宿主分析、WOMMO/SwipeGate 参考源码 os4-ref/）
+  - .workbuddy/memory/2026-10-14~15.md（逐批排障记录：五级符号解析、断路器、
+    文件镜像、崩溃循环复盘）
+- 若未来 OS4 桌面架构变化（如恢复 dex/ART）或出现 Java 派发能力，本归档可直接续命。
+- 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.55-sync-reveal-88.apk。

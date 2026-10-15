@@ -1,0 +1,26 @@
+# ninja log v5
+29	345	8136837395085365	CMakeFiles/homemode4miui_native.dir/homemode4miui_native.cpp.o	78d4a770fad17911
+3	310	8136813645853034	CMakeFiles/homemode4miui_native.dir/obs_hook.cpp.o	daa9f7a972e4587d
+332	983	8136838655490206	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	6b930cb73054912f
+55	400	8136813646732914	CMakeFiles/homemode4miui_native.dir/hook_guard.cpp.o	4534b1fef0cb9736
+3	631	8136837684656175	CMakeFiles/homemode4miui_native.dir/gesture_hook.S.o	6511d938af265274
+3	331	8136838648932196	CMakeFiles/homemode4miui_native.dir/gesture_hook.cpp.o	3b716763098a9ff5
+3	362	8136871813740893	CMakeFiles/homemode4miui_native.dir/homemode4miui_native.cpp.o	78d4a770fad17911
+27	1752	8136871827594658	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+1755	2452	8136871834387410	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+7	1334	8136878937944180	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+1335	1948	8136878944034531	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+39	1970	8137647975502332	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+1971	2834	8137647983911062	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+5	1326	8137663374635796	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+1327	2519	8137663386448984	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+5	1337	8137674950013242	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+1338	1881	8137674955428826	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+7	2675	8137703615544134	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+2677	3669	8137703625379631	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+15	2922	8137710519958357	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+2924	3927	8137710529766391	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+18	2599	8137716591084535	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+2601	3603	8137716601140832	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801
+10	2671	8137727133167496	CMakeFiles/homemode4miui_native.dir/java_bridge.cpp.o	e760a0f2aa4ac53f
+2673	3535	8137727141843377	C:/Users/31399/Desktop/HomeMode4Miui/app/build/intermediates/cxx/RelWithDebInfo/3z2u1163/obj/arm64-v8a/libhomemode4miui_native.so	1270e708b605e801

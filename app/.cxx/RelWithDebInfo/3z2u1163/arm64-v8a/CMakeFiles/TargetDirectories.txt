@@ -1,0 +1,3 @@
+C:/Users/31399/Desktop/HomeMode4Miui/app/.cxx/RelWithDebInfo/3z2u1163/arm64-v8a/CMakeFiles/homemode4miui_native.dir
+C:/Users/31399/Desktop/HomeMode4Miui/app/.cxx/RelWithDebInfo/3z2u1163/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/31399/Desktop/HomeMode4Miui/app/.cxx/RelWithDebInfo/3z2u1163/arm64-v8a/CMakeFiles/rebuild_cache.dir
