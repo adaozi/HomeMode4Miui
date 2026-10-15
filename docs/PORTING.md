@@ -783,3 +783,13 @@ DIFF vs 桩文件:
   手势指纹按设计 fail-closed（不装），7748 符号表仍作参考资产。
 - 构建通过（APK mtime 19:39 校验）；产物 .build/out/HomeMode4Miui-v2.9.82-os4b-jb5-113.apk。
 - 用户恢复步骤：LSPosed 停用模块 → 重启（桌面恢复）→ 装 vc113 → 重新启用 → 重启桌面。
+
+### 状态语义修正 + 全量诊断（2026-10-15）—— v2.9.83-os4b-jb6 / vc114
+
+- vc113 实机：resolver 优雅失败后状态留 "running" → 断路器误伤后续启动。
+  语义修正：优雅失败写 "failed:<apk>"（可重试），仅真崩溃（未写终态）留在
+  "running" 触发跳过。
+- tier4 静默退出点全补日志（readlink/header/base/PT_DYNAMIC/符号未命中）；
+  resolver 新增 **maps 全量 so 路径枚举**（/apex + /system + /product 去重，
+  64 条封顶）—— 一次导出终结"ART 到底在哪"的猜测。
+- 构建通过（APK mtime 20:27 校验）；产物 .build/out/HomeMode4Miui-v2.9.83-os4b-jb6-114.apk。

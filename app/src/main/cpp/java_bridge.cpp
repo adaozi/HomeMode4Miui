@@ -194,7 +194,10 @@ void *FindSymbolInMainExecutableByFile(const char *symbol) {
     char exePath[256] = {0};
     const ssize_t rl = readlink("/proc/self/exe", exePath,
                                 sizeof(exePath) - 1u);
-    if (rl <= 0) return nullptr;
+    if (rl <= 0) {
+        h4m_log::log(ANDROID_LOG_WARN, "java bridge: exe readlink failed");
+        return nullptr;
+    }
     exePath[rl] = '\0';
 
     const int fd = open(exePath, O_RDONLY | O_CLOEXEC);
@@ -209,8 +212,14 @@ void *FindSymbolInMainExecutableByFile(const char *symbol) {
             memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0 ||
             ehdr.e_machine != EM_AARCH64) {
         close(fd);
+        h4m_log::log(ANDROID_LOG_WARN,
+                     "java bridge: exe header invalid (read/magic/machine)");
         return nullptr;
     }
+    h4m_log::log(ANDROID_LOG_WARN,
+                 "java bridge: exe parsed type=%u phnum=%u phoff=%llx",
+                 ehdr.e_type, ehdr.e_phnum,
+                 (unsigned long long) ehdr.e_phoff);
     // 强校验：AT_PHDR 必须等于 base + e_phoff（base 由该关系反推）
     const uintptr_t base = phdrAddr - ehdr.e_phoff;
     if (base == 0u || base > phdrAddr) {
@@ -245,6 +254,7 @@ void *FindSymbolInMainExecutableByFile(const char *symbol) {
                      "java bridge: exe has no PT_DYNAMIC (fully static?)");
         return nullptr;
     }
+    h4m_log::log(ANDROID_LOG_WARN, "java bridge: exe PT_DYNAMIC found");
     auto vaddrToFile = [&phdrs](ElfW(Addr) vaddr) -> off_t {
         for (const ElfW(Phdr) &ph : phdrs) {
             if (ph.p_type == PT_LOAD && vaddr >= ph.p_vaddr &&
@@ -329,6 +339,10 @@ void *FindSymbolInMainExecutableByFile(const char *symbol) {
         }
     }
     close(fd);
+    if (result == nullptr) {
+        h4m_log::log(ANDROID_LOG_WARN,
+                     "java bridge: exe symbol %s NOT in dynsym", symbol);
+    }
     return result;
 }
 
@@ -350,6 +364,39 @@ GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
     }
     // ③ maps + 手解 ELF dynsym
     const std::string libart = FindLibartPath();
+    {
+        // 一次性枚举映射中的库路径（回答"ART 到底叫什么/在哪"）
+        FILE *mf = fopen("/proc/self/maps", "r");
+        if (mf != nullptr) {
+            char ml[512];
+            char seen[64][256];
+            int seenCount = 0;
+            while (fgets(ml, sizeof(ml), mf) != nullptr) {
+                const char *slash = strchr(ml, '/');
+                if (slash == nullptr) continue;
+                if (strstr(slash, ".so") == nullptr) continue;
+                if (strstr(slash, "/apex/") == nullptr &&
+                        strstr(slash, "/system") == nullptr &&
+                        strstr(slash, "/product") == nullptr) {
+                    continue;
+                }
+                char path[256];
+                if (sscanf(slash, "%255s", path) != 1) continue;
+                bool dup = false;
+                for (int i = 0; i < seenCount; ++i) {
+                    if (strcmp(seen[i], path) == 0) { dup = true; break; }
+                }
+                if (dup) continue;
+                if (seenCount < 64) {
+                    strncpy(seen[seenCount], path, sizeof(seen[seenCount]) - 1u);
+                    ++seenCount;
+                    h4m_log::log(ANDROID_LOG_WARN, "java bridge: mapped lib %s",
+                                 path);
+                }
+            }
+            fclose(mf);
+        }
+    }
     h4m_log::log(ANDROID_LOG_WARN, "java bridge: maps libart path='%s'",
                  libart.c_str());
     if (!libart.empty()) {
@@ -428,8 +475,16 @@ void WriteBridgeState(const char *content) {
 
 
 void JavaBridgeThread() {
+    const std::string apkPath = ModuleApkPath();
+    const std::string failState = "failed:" + apkPath;
+    auto finishFailed = [&]() {
+        // 优雅失败（非崩溃）：写 failed 状态，下次启动重试
+        WriteBridgeState(failState.c_str());
+    };
+
     auto getVMs = ResolveGetCreatedJavaVMs();
     if (getVMs == nullptr) {
+        finishFailed();
         return;
     }
     JavaVM *vm = nullptr;
@@ -437,29 +492,30 @@ void JavaBridgeThread() {
     getVMs(&vm, 1, &count);
     if (vm == nullptr || count < 1) {
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: no java vm");
+        finishFailed();
         return;
     }
     h4m_log::log(ANDROID_LOG_WARN, "java bridge: vm acquired");
     JNIEnv *env = nullptr;
     if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK || env == nullptr) {
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: attach failed");
+        finishFailed();
         return;
     }
 
-    const std::string apkPath = ModuleApkPath();
     if (apkPath.empty()) {
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: apk path unresolved");
+        finishFailed();
         vm->DetachCurrentThread();
         return;
     }
     h4m_log::log(ANDROID_LOG_WARN, "java bridge: apk=%s", apkPath.c_str());
 
-    // Context = ActivityThread.currentApplication()（进程专精早期可能为 null，
-    // 重试兜底；launcher 场景下 libapp.so 加载时 Application 必已就绪）
     jclass activityThread = env->FindClass("android/app/ActivityThread");
     if (activityThread == nullptr) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: ActivityThread not found");
+        finishFailed();
         vm->DetachCurrentThread();
         return;
     }
@@ -480,15 +536,16 @@ void JavaBridgeThread() {
     if (context == nullptr) {
         h4m_log::log(ANDROID_LOG_ERROR,
                      "java bridge: currentApplication never ready");
+        finishFailed();
         vm->DetachCurrentThread();
         return;
     }
 
-    // PathClassLoader(moduleApk, appClassLoader)
     jclass pathLoaderClass = env->FindClass("dalvik/system/PathClassLoader");
     if (pathLoaderClass == nullptr) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: PathClassLoader not found");
+        finishFailed();
         vm->DetachCurrentThread();
         return;
     }
@@ -504,11 +561,11 @@ void JavaBridgeThread() {
     if (env->ExceptionCheck() || loader == nullptr) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: loader creation failed");
+        finishFailed();
         vm->DetachCurrentThread();
         return;
     }
 
-    // Class.forName equivalent: loader.loadClass(Os4Bootstrap)
     jmethodID loadClass = env->GetMethodID(
             pathLoaderClass, "loadClass",
             "(Ljava/lang/String;)Ljava/lang/Class;");
@@ -518,6 +575,7 @@ void JavaBridgeThread() {
     if (env->ExceptionCheck() || bootstrap == nullptr) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: Os4Bootstrap load failed");
+        finishFailed();
         vm->DetachCurrentThread();
         return;
     }
@@ -528,6 +586,7 @@ void JavaBridgeThread() {
     if (init == nullptr) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: init method missing");
+        finishFailed();
         vm->DetachCurrentThread();
         return;
     }
@@ -535,14 +594,14 @@ void JavaBridgeThread() {
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
         h4m_log::log(ANDROID_LOG_ERROR, "java bridge: init threw");
+        finishFailed();
     } else {
         h4m_log::log(ANDROID_LOG_WARN,
-                     "java bridge: bootstrap invoked — Java side is live");
+                     "java bridge: bootstrap invoked - Java side is live");
         WriteBridgeState(("ok:" + apkPath).c_str());
     }
     vm->DetachCurrentThread();
 }
-
 }  // namespace
 
 void StartJavaBridge(const NativeAPIEntries *entries) {
