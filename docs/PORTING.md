@@ -793,3 +793,11 @@ DIFF vs 桩文件:
   resolver 新增 **maps 全量 so 路径枚举**（/apex + /system + /product 去重，
   64 条封顶）—— 一次导出终结"ART 到底在哪"的猜测。
 - 构建通过（APK mtime 20:27 校验）；产物 .build/out/HomeMode4Miui-v2.9.83-os4b-jb6-114.apk。
+
+### 断路器时间窗语义（2026-10-15）—— v2.9.84-os4b-jb7 / vc115
+
+- vc114 实机：断路器再次误伤 —— 同签名覆盖安装不换 /data/app 路径，vc113 的
+  "running:<path>" 拦住 vc114。"APK 更新路径变化自动重试"假设不成立。
+- 修正：running 状态改为 "running:<unix秒>"，**90 秒时间窗**——窗内视为崩溃
+  （快速循环立即切断），超窗或 failed/ok 一律放行重试。用户重启/等待即可恢复。
+- 构建通过（APK mtime 20:39 校验）；产物 .build/out/HomeMode4Miui-v2.9.84-os4b-jb7-115.apk。

@@ -15,6 +15,7 @@
 #include <string.h>
 #include <string>
 #include <thread>
+#include <ctime>
 #include <unistd.h>
 #include <vector>
 #include <cerrno>
@@ -609,17 +610,23 @@ void StartJavaBridge(const NativeAPIEntries *entries) {
     if (__atomic_exchange_n(&g_bridge_state, 1u, __ATOMIC_ACQ_REL) != 0u) {
         return;
     }
-    // 断路器：同 APK 路径下上次未走到 ok = 上次崩溃 → 本次跳过
+    // 断路器（时间窗语义）：running:<unix秒> 仅在 90 秒内视为"上次崩了"
+    // （快速崩溃循环立刻切断）；超窗或 failed/ok 一律放行重试。
     const std::string apk = ModuleApkPath();
     std::string prev;
-    if (ReadBridgeState(&prev) && prev.rfind("running:", 0) == 0 &&
-            prev.find(apk) != std::string::npos) {
-        h4m_log::log(ANDROID_LOG_ERROR,
-                     "java bridge: circuit breaker — previous attempt with"
-                     " this build crashed, bootstrap skipped");
-        return;
+    if (ReadBridgeState(&prev) && prev.rfind("running:", 0) == 0) {
+        const long long prevTs = strtoll(prev.c_str() + 8, nullptr, 10);
+        const long long now = static_cast<long long>(time(nullptr));
+        if (prevTs > 0 && now - prevTs < 90) {
+            h4m_log::log(ANDROID_LOG_ERROR,
+                         "java bridge: circuit breaker — previous attempt"
+                         " crashed %llds ago, bootstrap skipped",
+                         now - prevTs);
+            return;
+        }
     }
-    WriteBridgeState(("running:" + apk).c_str());
+    WriteBridgeState(("running:" +
+            std::to_string(static_cast<long long>(time(nullptr)))).c_str());
     std::thread(JavaBridgeThread).detach();
 }
 
