@@ -801,3 +801,14 @@ DIFF vs 桩文件:
 - 修正：running 状态改为 "running:<unix秒>"，**90 秒时间窗**——窗内视为崩溃
   （快速循环立即切断），超窗或 failed/ok 一律放行重试。用户重启/等待即可恢复。
 - 构建通过（APK mtime 20:39 校验）；产物 .build/out/HomeMode4Miui-v2.9.84-os4b-jb7-115.apk。
+
+### tier5：全映射库符号扫描（2026-10-15）—— v2.9.85-os4b-jb8 / vc116
+
+- vc115 实机定案：launcher 进程映射库里**没有任何 libart.so**（枚举全是
+  libhyper_os_* / Rust dylibs），spawner exe 的 dynsym 也没有
+  JNI_GetCreatedJavaVMs（type=3 PIE，phnum=13，PT_DYNAMIC 正常）。
+- 新增 tier5：遍历 maps 全部已映射库（去重），逐个**文件解析** dynsym +
+  SHT_SYMTAB（完整符号表，静态/未 strip 二进制常带）查符号——静态 ART 的
+  符号若保留在任一映射文件的符号表中即命中。全程 pread，零内存直读。
+- tier4 顺带补 SHT_SYMTAB 回退（exe 搜索范围 dynsym → symtab）。
+- 构建通过（APK mtime 20:49 校验）；产物 .build/out/HomeMode4Miui-v2.9.85-os4b-jb8-116.apk。

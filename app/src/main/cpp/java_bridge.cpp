@@ -347,6 +347,132 @@ void *FindSymbolInMainExecutableByFile(const char *symbol) {
     return result;
 }
 
+// 在 ELF 文件的 SHT_SYMTAB（完整符号表，静态/未 strip 二进制常带）中查符号。
+// 与 dynsym 解析相互独立：走 section header 表 + sh_link 关联 strtab。
+void *FindSymbolInElfSections(const char *filePath, uintptr_t base,
+                              const char *symbol) {
+    const int fd = open(filePath, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return nullptr;
+    ElfW(Ehdr) ehdr;
+    if (pread(fd, &ehdr, sizeof(ehdr), 0) != (ssize_t) sizeof(ehdr) ||
+            memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0 ||
+            ehdr.e_shoff == 0 || ehdr.e_shnum == 0) {
+        close(fd);
+        return nullptr;
+    }
+    std::vector<ElfW(Shdr)> shdrs(ehdr.e_shnum);
+    if (pread(fd, shdrs.data(), sizeof(ElfW(Shdr)) * ehdr.e_shnum,
+              (off_t) ehdr.e_shoff) !=
+            (ssize_t)(sizeof(ElfW(Shdr)) * ehdr.e_shnum)) {
+        close(fd);
+        return nullptr;
+    }
+    ElfW(Shdr) symSh = {};
+    ElfW(Shdr) strSh = {};
+    bool found = false;
+    for (const ElfW(Shdr) &sh : shdrs) {
+        if (sh.sh_type == SHT_SYMTAB) {
+            symSh = sh;
+            if (sh.sh_link < ehdr.e_shnum) {
+                strSh = shdrs[sh.sh_link];
+                found = true;
+            }
+            break;
+        }
+    }
+    if (!found || symSh.sh_entsize == 0) {
+        close(fd);
+        return nullptr;
+    }
+    const size_t count = static_cast<size_t>(symSh.sh_size / symSh.sh_entsize);
+    void *result = nullptr;
+    for (size_t i = 0; i < count; ++i) {
+        ElfW(Sym) sym;
+        if (pread(fd, &sym, sizeof(sym),
+                  (off_t) symSh.sh_offset + (off_t)(i * symSh.sh_entsize)) !=
+                (ssize_t) sizeof(sym)) {
+            break;
+        }
+        if (sym.st_value == 0u || sym.st_name == 0u ||
+                sym.st_name >= strSh.sh_size) {
+            continue;
+        }
+        char name[128];
+        if (pread(fd, name, sizeof(name) - 1u,
+                  (off_t) strSh.sh_offset + (off_t) sym.st_name) <= 0) {
+            continue;
+        }
+        name[sizeof(name) - 1u] = '\0';
+        if (strcmp(name, symbol) == 0) {
+            result = reinterpret_cast<void *>(base + sym.st_value);
+            h4m_log::log(ANDROID_LOG_WARN,
+                         "java bridge: %s SHT_SYMTAB hit base+%llx", symbol,
+                         static_cast<unsigned long long>(sym.st_value));
+            break;
+        }
+    }
+    close(fd);
+    return result;
+}
+
+// 某映射路径的最低地址（= 该库加载基址）
+uintptr_t LowestMapBaseForPath(const char *pathSubstring) {
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (f == nullptr) return 0;
+    char line[512];
+    uintptr_t best = UINTPTR_MAX;
+    while (fgets(line, sizeof(line), f) != nullptr) {
+        if (strstr(line, pathSubstring) == nullptr) continue;
+        uintptr_t start = 0;
+        if (sscanf(line, "%lx-", &start) == 1 && start < best) {
+            best = start;
+        }
+    }
+    fclose(f);
+    return best == UINTPTR_MAX ? 0u : best;
+}
+
+// Tier 5：遍历所有已映射库（文件解析 dynsym + SHT_SYMTAB）逐个找符号。
+// 全程 pread，零内存直读，任何失败只跳过。
+void *FindSymbolAcrossMappedLibraries(const char *symbol) {
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (f == nullptr) return nullptr;
+    char line[512];
+    static char seen[256][256];
+    int seenCount = 0;
+    void *result = nullptr;
+    while (fgets(line, sizeof(line), f) != nullptr && result == nullptr) {
+        const char *slash = strchr(line, '/');
+        if (slash == nullptr || strstr(slash, ".so") == nullptr) continue;
+        char path[256];
+        if (sscanf(slash, "%255s", path) != 1) continue;
+        bool dup = false;
+        for (int i = 0; i < seenCount; ++i) {
+            if (strcmp(seen[i], path) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+        if (seenCount < 256) {
+            strncpy(seen[seenCount], path, sizeof(seen[seenCount]) - 1u);
+            ++seenCount;
+        }
+        const uintptr_t base = LowestMapBaseForPath(path);
+        if (base == 0u) continue;
+        result = FindSymbolInElfFile(path, base, symbol);
+        if (result == nullptr) {
+            result = FindSymbolInElfSections(path, base, symbol);
+        }
+        if (result != nullptr) {
+            h4m_log::log(ANDROID_LOG_WARN,
+                         "java bridge: tier5 hit in %s", path);
+        }
+    }
+    fclose(f);
+    return result;
+}
+
 GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
     // ① 全局符号表
     void *sym = dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs");
@@ -433,6 +559,13 @@ GetCreatedJavaVMsFn ResolveGetCreatedJavaVMs() {
     if (sym != nullptr) {
         h4m_log::log(ANDROID_LOG_WARN,
                      "java bridge: vm resolver tier4 ok (main exe in-memory)");
+        return reinterpret_cast<GetCreatedJavaVMsFn>(sym);
+    }
+
+    // ⑤ 遍历所有已映射库（dynsym + SHT_SYMTAB，纯文件解析）
+    sym = FindSymbolAcrossMappedLibraries("JNI_GetCreatedJavaVMs");
+    if (sym != nullptr) {
+        h4m_log::log(ANDROID_LOG_WARN, "java bridge: vm resolver tier5 ok");
         return reinterpret_cast<GetCreatedJavaVMsFn>(sym);
     }
 
