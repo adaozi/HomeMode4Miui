@@ -624,8 +624,13 @@ void JavaBridgeThread() {
     JavaVM *vm = nullptr;
     jsize count = 0;
     getVMs(&vm, 1, &count);
+    h4m_log::log(ANDROID_LOG_WARN,
+                 "java bridge: JNI_GetCreatedJavaVMs -> vm=%p count=%d",
+                 reinterpret_cast<void *>(vm), count);
     if (vm == nullptr || count < 1) {
-        h4m_log::log(ANDROID_LOG_ERROR, "java bridge: no java vm");
+        h4m_log::log(ANDROID_LOG_ERROR,
+                     "java bridge: no java vm - launcher process is"
+                     " native-only (architecture pivot required)");
         finishFailed();
         return;
     }

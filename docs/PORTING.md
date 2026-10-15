@@ -812,3 +812,16 @@ DIFF vs 桩文件:
   符号若保留在任一映射文件的符号表中即命中。全程 pread，零内存直读。
 - tier4 顺带补 SHT_SYMTAB 回退（exe 搜索范围 dynsym → symtab）。
 - 构建通过（APK mtime 20:49 校验）；产物 .build/out/HomeMode4Miui-v2.9.85-os4b-jb8-116.apk。
+
+### tier5 命中 + VM 计数诊断（2026-10-15）—— v2.9.86-os4b-jb9 / vc117
+
+- vc116 实机：tier5 在 **/apex/com.android.art/lib64/libnativehelper.so** 命中
+  JNI_GetCreatedJavaVMs（我此前只搜 "libart.so" 文件名，漏了 ART apex 里的其他
+  库）—— 但调用返回 **0 个虚拟机**。
+- 结合全部证据（无 libart 映射、映射表全是 hyper_os/Rust 库 + libbinder_rs_ndk）
+  形成新假设：OS4 launcher 主进程**未启动 ART**（rustruntime 纯原生方案，
+  binder-ndk 直连 system_server）。若坐实 → 进程内 Java 自举架构性不可行。
+- 本批：JNI_GetCreatedJavaVMs 返回值全量诊断（vm=%p count=%d）—— 一次导出定案。
+- 构建通过；产物 .build/out/HomeMode4Miui-v2.9.86-os4b-jb9-117.apk。
+- 判读：count=0 → 启动架构转向（方案 B：模块 App 进程外 overlay 桌面）；
+  count>0 → 继续自举（地址偏差则需修正解析）。
