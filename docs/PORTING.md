@@ -765,3 +765,21 @@ DIFF vs 桩文件:
   按符号名直查 JNI_GetCreatedJavaVMs。无文件读取、无 namespace/SELinux 限制。
 - tier3 open 失败补 errno 日志（区分"maps 没路径"和"SELinux 拒打开"）。
 - 构建通过（APK mtime 19:19 校验）；产物 .build/out/HomeMode4Miui-v2.9.81-os4b-jb4-112.apk。
+
+### 崩溃循环修复 + 断路器（2026-10-15）—— v2.9.82-os4b-jb5 / vc113
+
+- vc112 实机：SIGSEGV 崩溃循环（fault addr 0x390，SEGV_MAPERR）→ 系统兜底桌面。
+  符号化（未 strip 中间产物）：#00 = JavaBridgeThread+0xb5c、#01 = thread proxy
+  —— tier4 的**内存直读**（AT_PHDR magic 扫描 + dynsym 内存遍历）在 base 误判时
+  踩野指针。铁律事件。
+- 架构修正：tier4 重写为**纯文件解析** —— readlink /proc/self/exe（= spawner
+  本体，静态 ART 假设目标）→ pread 全量（Ehdr 强校验 magic/machine/base 推导
+  AT_PHDR - e_phoff → PT_DYNAMIC → DT_HASH nchain 精确符号数）→ 符号命中返回
+  base + st_value。零内存直读，任何失败只返回 null。
+- 断路器：/data/user_de/0/com.miui.home/cache/h4m_bridge_state 记录
+  "running:<apkPath>" / "ok:<apkPath>"；同 APK 路径上次未到 ok = 上次崩溃 →
+  本次跳过 bootstrap。任何缺陷最多崩一次，绝不进循环；APK 更新路径变化自动重试。
+- 宿主注意：设备已更新为 /product/priv-app 7719 版（vc 801027719 < 7748）——
+  手势指纹按设计 fail-closed（不装），7748 符号表仍作参考资产。
+- 构建通过（APK mtime 19:39 校验）；产物 .build/out/HomeMode4Miui-v2.9.82-os4b-jb5-113.apk。
+- 用户恢复步骤：LSPosed 停用模块 → 重启（桌面恢复）→ 装 vc113 → 重新启用 → 重启桌面。
