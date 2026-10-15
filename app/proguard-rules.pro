@@ -13,13 +13,6 @@
 -keep class * implements de.robv.android.xposed.IXposedHookZygoteInit { *; }
 -keep class * implements de.robv.android.xposed.IXposedHookInitPackageResources { *; }
 
-# ---- 1b. Modern API 入口（META-INF/xposed/java_init.list 引用，OS4 派发路径）--
--keep class com.homemode4miui.ModernEntry { *; }
--keep class com.homemode4miui.hook.Os4Probe { *; }
-
-# ---- 1c. OS4 自举入口（native → JNI 按类名反射加载，OS4 Java 触达路径）-------
--keep class com.homemode4miui.os4.Os4Bootstrap { *; }
-
 # ---- 2. 宿主同名桩：方法调用运行期解析到宿主真实类 --------------------------
 #    类名/成员名一旦被 R8 改写，调用点将指向不存在的类 → NoSuchMethodError，桌面必崩。
 -keep class com.miui.home.** { *; }

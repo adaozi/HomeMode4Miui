@@ -128,10 +128,6 @@ public class MainHook implements IXposedHookLoadPackage {
             }
         });
 
-        // OS4 的 Java 触达已迁至 Modern API（ModernEntry + java_init.list）：
-        // 装机实锤 7854 fork 对 OS4 launcher 主进程不派发 legacy loadPackage，
-        // 本文件的 hook 在 OS4 上自然 FAILED（宿主类不存在），属预期证据。
-
         tryHook("0.Application.onCreate (gate1 接收器前置)", new HookTask() {
             @Override public void run() {
                 XposedHelpers.findAndHookMethod("android.app.Application", cl, "onCreate",

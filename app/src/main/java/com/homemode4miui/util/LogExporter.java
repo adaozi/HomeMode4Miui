@@ -32,9 +32,6 @@ import java.util.regex.Pattern;
  *     ② tag 过滤（内容级）：modules.log 是所有 LSPosed 模块共享文件、logcat 是全设备
  *        缓冲，必须按 "HomeMode4Miui" tag 过滤，否则 1 分钟就能导出数 MB 噪音；
  *        无时间戳的续行跟随上一行去留，保证堆栈不割裂。
- *   - OS4 观察探针段（H4MNative）：末尾独立采集 native_init PoC 日志（su logcat
- *     -s H4MNative，降级无 su 本进程），附宿主 APK 路径上下文（判 OS 家族用）；
- *     非 OS4 设备该段为"未采集"占位，不影响主体。
  *   - 10MB 上限：超限保留【最新】部分（ArrayDeque 头部裁剪）；
  *   - 落盘：MediaStore.Downloads（Download 文件夹，无需存储权限，min-api 29+）。
  *   - 全程 try/catch 兜底：导出失败只影响本功能，绝不二次崩溃。
@@ -51,21 +48,12 @@ public final class LogExporter {
         void onDone(boolean success, String message, String path);
     }
 
-    /** LSPosed 容器日志目录候选（verbose/all 日志所在，fork 布局漂移依次探测） */
-    private static final String[] LSP_LOG_DIRS = {
-            "/data/adb/lspd/log",
-            "/data/adb/lsposed/log",
-            "/data/adb/lsposed/logs",
+    /** LSPosed 模块日志候选路径（新旧版本布局漂移，依次探测） */
+    private static final String[] LSP_LOG_PATHS = {
+            "/data/adb/lspd/log/modules.log",       // LSPosed 1.9.x+（JingMatrix 同）
+            "/data/adb/lsposed/logs/modules.log",   // 旧版 1.8.x
+            "/data/adb/lsposed/log/modules.log",    // 旧版备选布局
     };
-
-    /**
-     * 容器日志关键词过滤（OS4 native 链路诊断用）：
-     * 模块包名 / 宿主包名 / hyos spawner / native 入口相关行。
-     */
-    private static final java.util.regex.Pattern CONTAINER_KEYWORD =
-            java.util.regex.Pattern.compile(
-                    "homemode4miui|com\\.miui\\.home|hyos|spawner|native_init|NativeModule",
-                    java.util.regex.Pattern.CASE_INSENSITIVE);
 
     /** 模块日志 tag（MainHook/HomeController/HostCompat/ModLog 四处出口统一前缀） */
     private static final String TAG = "HomeMode4Miui";
@@ -175,223 +163,32 @@ public final class LogExporter {
         out.append("# ==============================\n\n");
         out.append(body);
 
-        // OS4 native 探针段：独立来源（tag -s 精准过滤），空段落占位说明，永不抛异常
-        try {
-            out.append(buildH4mSection(startMs));
-        } catch (Throwable t) {
-            out.append("\n# ---- H4MNative 观察探针 ----\n# 采集失败: ").append(t).append('\n');
-        }
-
-        // LSPosed 容器诊断段：模块清单 + 日志目录结构 + 容器日志关键词行
-        try {
-            out.append(buildContainerSection(startMs));
-        } catch (Throwable t) {
-            out.append("\n# ---- LSPosed 容器诊断 ----\n# 采集失败: ").append(t).append('\n');
-        }
-
         return writeToDownloads(ctx, out.toString(), minutes);
     }
 
     /* ==================== 来源采集 ==================== */
     // 来源描述（source）与文件头同属导出文件内容，非设备 UI，保持中文原样。
 
-    /** 逐目录 glob 探测 LSPosed 模块日志（fork 文件名带时间戳后缀，modules_*.log）；按 tag 过滤后非空即返回，全失败返回 null */
+    /** 逐路径探测 LSPosed 模块日志；按 tag 过滤后非空即返回，全失败返回 null */
     private static String tryLspLog(long startMs) {
-        for (String dir : LSP_LOG_DIRS) {
-            String ls = runCommandCapture(new String[]{"su", "-c",
-                    "ls " + dir + "/modules*.log 2>/dev/null"}, 0L, 10_000);
-            if (ls == null || ls.trim().length() == 0) continue;
-            for (String path : ls.trim().split("\n")) {
-                try {
-                    String content = runCommandCapture(
-                            new String[]{"su", "-c", "cat " + path.trim()}, startMs, 10_000);
-                    if (content != null && content.trim().length() > 0) {
-                        // 内容级 tag 过滤：modules.log 是所有 LSPosed 模块共享文件，
-                        // 不按 tag 过滤时其他模块的日志量可轻松达到每分钟数 MB
-                        content = filterByTag(content);
-                        if (content.trim().length() == 0) continue; // 本路径无本模块日志
-                        StringBuilder sb = new StringBuilder("# ---- ").append(path.trim()).append(" ----\n");
-                        sb.append(content);
-                        return sb.toString();
-                    }
-                } catch (Throwable ignored) {
-                    // su 不存在 / 路径不存在 / 读失败 → 试下一路径
+        for (String path : LSP_LOG_PATHS) {
+            try {
+                String content = runCommandCapture(
+                        new String[]{"su", "-c", "cat " + path}, startMs, 10_000);
+                if (content != null && content.trim().length() > 0) {
+                    // 内容级 tag 过滤：modules.log 是所有 LSPosed 模块共享文件，
+                    // 不按 tag 过滤时其他模块的日志量可轻松达到每分钟数 MB
+                    content = filterByTag(content);
+                    if (content.trim().length() == 0) continue; // 本路径无本模块日志
+                    StringBuilder sb = new StringBuilder("# ---- ").append(path).append(" ----\n");
+                    sb.append(content);
+                    return sb.toString();
                 }
+            } catch (Throwable ignored) {
+                // su 不存在 / 路径不存在 / 读失败 → 试下一路径
             }
         }
         return null;
-    }
-
-    /* ==================== OS4 native 探针段 ==================== */
-
-    /**
-     * H4MNative 观察探针段（Route B PoC，native_init 日志 tag = H4MNative）：
-     *   - su logcat -s H4MNative 优先（logd 全局缓冲，含宿主/launcher 进程日志）；
-     *   - 无 su 降级本进程 logcat（UID 隔离下多半为空，注明局限）；
-     *   - 附宿主 APK 路径 + 宿主 versionName/versionCode（判 OS2/OS3/OS4 家族）；
-     *   - 段内容为导出文件正文，中文保持原样（反馈文件不随设备语言变化）。
-     */
-    private static String buildH4mSection(long startMs) {
-        StringBuilder sec = new StringBuilder();
-        sec.append("\n# ==== H4MNative 观察探针（OS4 native_init PoC）====\n");
-
-        // 宿主上下文：APK 路径 + 版本（versionCode ≥ 800_000_000 → OS4 家族）
-        String pmPath = runCommandCapture(
-                new String[]{"su", "-c", "pm path com.miui.home"}, startMs, 10_000);
-        if (pmPath != null && pmPath.trim().length() > 0) {
-            sec.append("# 宿主 APK   : ").append(pmPath.trim().replace('\n', ' ')).append('\n');
-            String ver = runCommandCapture(new String[]{"su", "-c",
-                    "dumpsys package com.miui.home | grep -m2 version"}, startMs, 10_000);
-            if (ver != null && ver.trim().length() > 0) {
-                sec.append("# 宿主版本   : ").append(ver.trim().replace("\n", " | ")).append('\n');
-            }
-        } else {
-            sec.append("# 宿主上下文 : 不可用（无 su 或 pm 查询失败）\n");
-        }
-
-        // logd main 缓冲扩容（launcher 冷启动日志量大，默认缓冲会被轮转吃掉
-        // 探针行；幂等，每次导出时顺手保底）
-        runCommandCapture(new String[]{"su", "-c", "logcat -G 4M"}, 0L, 10_000);
-
-        // logcat 采集：su 优先，无 su 降级本进程
-        String lc = runCommandCapture(new String[]{"su", "-c",
-                "logcat -d -v time -s H4MNative:V"}, startMs, 15_000);
-        String src;
-        if (lc != null) {
-            src = "root logcat（logd 全局缓冲，含宿主进程）";
-        } else {
-            lc = runCommandCapture(new String[]{"logcat", "-d",
-                    "-v", "time", "-s", "H4MNative:V"}, startMs, 15_000);
-            src = "无 root 本进程 logcat（UID 隔离，读不到宿主进程日志，可能为空）";
-        }
-        if (lc == null) lc = "";
-        if (lc.trim().length() == 0) {
-            sec.append("# 探针日志   : 本时间范围内无 H4MNative 输出 ——"
-                    + " OS4 宿主未加载探针 / 设备非 OS4 / LSPosed 未启用 native 入口\n");
-        } else {
-            sec.append("# 日志来源   : ").append(src).append('\n');
-            sec.append(lc);
-            if (!lc.endsWith("\n")) sec.append('\n');
-        }
-
-        // 持久化文件镜像：优先经 /proc/<pid>/root 读取（穿透 launcher 可能的
-        // mount namespace 隔离），直连路径兜底；尾部 64KB 封顶
-        String pid = runCommandCapture(new String[]{"su", "-c",
-                "pidof com.miui.home"}, 0L, 10_000);
-        String nsPrefix = "";
-        if (pid != null && pid.trim().matches("\\d+")) {
-            nsPrefix = "/proc/" + pid.trim() + "/root";
-        }
-        for (String p : new String[]{
-                nsPrefix + "/data/user_de/0/com.miui.home/cache/h4m_native.log",
-                "/data/user_de/0/com.miui.home/cache/h4m_native.log",
-                "/data/user/0/com.miui.home/cache/h4m_native.log",
-                "/data/data/com.miui.home/cache/h4m_native.log"}) {
-            if (p.startsWith("/data") == false && p.length() < 20) continue;
-            String file = runCommandCapture(new String[]{"su", "-c",
-                    "tail -c 65536 " + p + " 2>/dev/null"}, 0L, 10_000);
-            if (file != null && file.trim().length() > 0) {
-                sec.append("# -- native 文件镜像（").append(p)
-                        .append(" 尾部，不做时间过滤）--\n");
-                sec.append(file.trim()).append('\n');
-                break;
-            }
-        }
-        sec.append("# ========================================\n");
-        return sec.toString();
-    }
-
-    /* ==================== LSPosed 容器诊断段 ==================== */
-
-    /**
-     * 容器诊断段（定位 native_init 不触发用）：
-     *   ① /data/adb/modules/ 下的 Magisk 模块清单（LSPosed fork / 注入器类型与版本）；
-     *   ② 容器日志目录 listing（确认 fork 的日志布局）；
-     *   ③ 容器日志关键词行（homemode4miui / com.miui.home / hyos / spawner / native），
-     *      按时间范围过滤 + 续行跟随，限 400 行防灌爆。
-     */
-    private static String buildContainerSection(long startMs) {
-        StringBuilder sec = new StringBuilder();
-        sec.append("\n# ==== LSPosed 容器诊断 ====\n");
-
-        // ① Magisk 模块清单（name/version 行，识别 LSPosed fork 与注入器）
-        String mods = runCommandCapture(new String[]{"su", "-c",
-                "for d in /data/adb/modules/*/; do "
-                        + "echo \"-- $(basename $d)\"; "
-                        + "grep -E '^(name|version|versionCode)=' $d/module.prop 2>/dev/null; done"},
-                startMs, 10_000);
-        if (mods != null && mods.trim().length() > 0) {
-            sec.append("# -- Magisk 模块清单 --\n").append(mods.trim()).append('\n');
-        } else {
-            sec.append("# -- Magisk 模块清单 : 不可用（无 su）--\n");
-        }
-
-        // ② 容器日志目录 listing
-        for (String dir : LSP_LOG_DIRS) {
-            String ls = runCommandCapture(new String[]{"su", "-c",
-                    "ls -la " + dir + " 2>/dev/null"}, startMs, 10_000);
-            if (ls != null && ls.trim().length() > 0) {
-                sec.append("# -- 日志目录 ").append(dir).append(" --\n")
-                        .append(ls.trim()).append('\n');
-            }
-        }
-
-        // ③ 容器日志关键词行（逐文件探测，取第一个命中目录的全量文件；
-        //    不做时间过滤 —— 模块加载记录多在启动期，400 行保最新已限幅）
-        boolean captured = false;
-        for (String dir : LSP_LOG_DIRS) {
-            String ls = runCommandCapture(new String[]{"su", "-c",
-                    "ls " + dir + " 2>/dev/null"}, 0L, 10_000);
-            if (ls == null || ls.trim().length() == 0) continue;
-            for (String f : ls.trim().split("\n")) {
-                if (!f.endsWith(".log") && !f.endsWith(".txt")) continue;
-                String content = runCommandCapture(new String[]{"su", "-c",
-                        "cat " + dir + "/" + f}, 0L, 20_000);
-                if (content == null || content.trim().length() == 0) continue;
-                String filtered = filterByKeywords(content, 400);
-                if (filtered.trim().length() == 0) continue;
-                sec.append("# -- 容器日志 ").append(dir).append('/').append(f)
-                        .append("（关键词过滤，不做时间过滤，最多 400 行）--\n")
-                        .append(filtered);
-                captured = true;
-            }
-            if (captured) break; // 第一个有货的目录即可
-        }
-        if (!captured) {
-            sec.append("# -- 容器日志 : 各候选目录均未读到关键词行"
-                    + "（目录不存在 / 文件为空 / 无相关记录）--\n");
-        }
-        sec.append("# ========================================\n");
-        return sec.toString();
-    }
-
-    /**
-     * 关键词级过滤（容器日志专用，替代 tag 过滤）：
-     * 有时间戳的行按 CONTAINER_KEYWORD 判定；无时间戳续行跟随上一行；
-     * maxLines 截断保最新（从尾部回数）。
-     */
-    private static String filterByKeywords(String content, int maxLines) {
-        if (content == null || content.length() == 0) return "";
-        ArrayDeque<String> kept = new ArrayDeque<>();
-        boolean keep = false;
-        for (String line : content.split("\n", -1)) {
-            boolean hasTs = LSP_TIME.matcher(line).find()
-                    || LOGCAT_TIME.matcher(line).find();
-            if (hasTs) {
-                keep = CONTAINER_KEYWORD.matcher(line).find();
-            }
-            if (keep) {
-                kept.addLast(line);
-                if (kept.size() > maxLines) {
-                    kept.pollFirst();
-                }
-            }
-        }
-        StringBuilder out = new StringBuilder();
-        for (String l : kept) {
-            out.append(l).append('\n');
-        }
-        return out.toString();
     }
 
     /* ==================== tag 过滤 ==================== */

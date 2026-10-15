@@ -39,18 +39,14 @@ public final class HostCompat {
     public static final int FAMILY_UNKNOWN = 0;
     public static final int FAMILY_OS2 = 2;
     public static final int FAMILY_OS3 = 3;
-    public static final int FAMILY_OS4 = 4;
 
     private static final String LAUNCHER_CLS = "com.miui.home.launcher.Launcher";
     private static final String BASE_LAUNCHER_CLS = "com.miui.home.launcher.BaseLauncher";
     /** OS3 家族 versionCode 下界（OS2 5.39.40 = 53940xxxx，OS3 6.01.03 = 601031927） */
     private static final long OS3_MIN_VERSION_CODE = 600_000_000L;
-    /** OS4 家族 versionCode 下界（RELEASE-8.01.02.7748 = 801027748） */
-    private static final long OS4_MIN_VERSION_CODE = 800_000_000L;
 
     private static final String TAG = "HomeMode4Miui";
     private static volatile int sFamily = FAMILY_UNKNOWN;
-    private static volatile long sVersionCode = -1L;
     private static volatile boolean sDetected;
     /** 方法名 → 实际声明该方法的宿主类（进程内稳定，缓存避免反复扫描） */
     private static final Map<String, Class<?>> sDeclaringCache = new HashMap<>();
@@ -143,9 +139,7 @@ public final class HostCompat {
     /** 应用家族判定；返回是否改变了此前结论 */
     private static boolean applyFamily(long code, String name) {
         int newFamily;
-        if (code >= OS4_MIN_VERSION_CODE) {
-            newFamily = FAMILY_OS4; // OS4 家族（8.x）：无 dex，必须先于 OS3 阈值判定
-        } else if (code >= OS3_MIN_VERSION_CODE) {
+        if (code >= OS3_MIN_VERSION_CODE) {
             newFamily = FAMILY_OS3;
         } else if (code >= 0) {
             newFamily = FAMILY_OS2;
@@ -156,7 +150,6 @@ public final class HostCompat {
         }
         boolean changed = sFamily != newFamily;
         sFamily = newFamily;
-        sVersionCode = code;
         log("host family = " + label() + " (versionName=" + name + ", versionCode=" + code + ")");
         return changed && sDetected;
     }
@@ -165,20 +158,9 @@ public final class HostCompat {
         return sFamily == FAMILY_OS3;
     }
 
-    /** 运行时家族值（含 FAMILY_OS4），供 OS4 专属探针/路由判定 */
-    public static int family() {
-        return sFamily;
-    }
-
-    /** 最近一次探测到的宿主 versionCode（不可得时为 -1） */
-    public static long hostVersionCode() {
-        return sVersionCode;
-    }
-
-    /** 日志用版本标签："OS2(5.x)" / "OS3(6.x)" / "OS4(8.x)" / "UNKNOWN" */
+    /** 日志用版本标签："OS2(5.x)" / "OS3(6.x)" / "UNKNOWN" */
     public static String label() {
         switch (sFamily) {
-            case FAMILY_OS4: return "OS4(8.x)";
             case FAMILY_OS3: return "OS3(6.x)";
             case FAMILY_OS2: return "OS2(5.x)";
             default: return "UNKNOWN";
