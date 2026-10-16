@@ -595,3 +595,9 @@ DIFF vs 桩文件:
 - [x] **需求（装机反馈）**："我们的时钟不能自定义字体" —— 时钟样式面板选 Sacramento/Bokor 等 preset 布局时，字体选择入口被隐藏（allowsCustomFont=presetFont==null），且 normalized() 直接剥离 fontId、渲染端 presetFont 恒优先 —— 自定义字体对 preset 布局完全不可用。
 - [x] **修复（模块定制，偏离上游 v1.1.4 固定字体设计）**：allowsCustomFont 恒 true（所有布局可选字体）；ClockFace 渲染序改为 customFamily ?: presetFont ?: LauncherFontFamily —— fontId 为空时 preset 布局回落各自 preset 字体（上游默认观感不变），选中导入/preset 外字体即在任意布局生效。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.68-clock-font-override-101.apk，已 adb install 到 d6516f3a。
+
+### clock-font-upstream（v2.9.69-clock-font-upstream / versionCode 102，2026-10-17）—— 时钟字体还原上游语义（User 定案）
+
+- [x] **决策（User）**：v2.9.68 的"preset 布局放开自定义字体"偏离上游设计，还原为与上游 GraceLauncher 一致 —— `allowsCustomFont = presetFont == null`，preset 布局（Sacramento/Bokor/Plaster/Monoton/Lucky）锁死签名字体，自定义字体仅在 SingleLine/TwoLines/Week 三种素坯布局可用；ClockFace 渲染序还原 presetFont 恒优先。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.69-clock-font-upstream-102.apk，已 adb install 到 d6516f3a。
+- 备注：字体三分职责不变（时钟字体 clockStyle.fontId / 全局字体库首位 / 列表字体）；导入字体跨进程链（FontBridgePull）不受本次还原影响。

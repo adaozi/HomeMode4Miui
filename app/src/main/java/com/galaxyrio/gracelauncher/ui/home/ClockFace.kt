@@ -70,9 +70,7 @@ internal fun ClockFace(
     val customFamily by produceState<FontFamily?>(null, fonts, face.fontId, face.weight) {
         value = face.fontId?.let { fonts.typeface(it, face.weight) }?.let { FontFamily(it) }
     }
-    // 模块定制（v2.9.68）：自定义字体在所有布局（含 preset）优先生效；fontId 为空时
-    // preset 布局回落各自 preset 字体，非 preset 布局回落 Josefin（上游默认链）。
-    val family = customFamily ?: style.layout.presetFont?.family(context) ?: LauncherFontFamily
+    val family = style.layout.presetFont?.family(context) ?: customFamily ?: LauncherFontFamily
     val scale = fontScale.coerceIn(0.1f, 1f)
     ClockGlyphContent(
         value = time, semanticsText = clockFaceText(time, style), family = family, weight = FontWeight(face.weight),
