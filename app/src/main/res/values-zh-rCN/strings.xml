@@ -169,7 +169,6 @@
     <string name="popup_custom_widget">自定义小组件</string>
     <string name="popup_empty">从下方选择快捷方式、应用或小组件。</string>
     <string name="popup_item_unavailable">此项目不可用</string>
-    <string name="private_space_default_home">将 Grace 设为默认桌面以使用私密空间</string>
     <string name="private_space_display">显示方式</string>
     <string name="private_space_display_folder">文件夹</string>
     <string name="private_space_display_heading">显示</string>
@@ -224,7 +223,6 @@
     <string name="search_settings_summary">应用、联系人与搜索建议</string>
     <string name="search_suggestions">搜索建议</string>
     <string name="search_suggestions_summary">显示最近通过搜索打开的 5 个应用</string>
-    <string name="set_default_launcher">设置默认启动器</string>
     <string name="settings_about">关于</string>
     <string name="settings_about_app">应用</string>
     <string name="settings_about_description">使用 Kotlin 与 Jetpack Compose 构建的简洁列表式安卓启动器。</string>
@@ -485,7 +483,6 @@
     <string name="work_profile_no_apps">没有可用的工作应用，工作资料可能已暂停。</string>
     <string name="work_profile_setup">打开工作资料设置</string>
 
-    <string name="work_profile_default_home">将 Grace 设为默认启动器以访问工作应用</string>
     <string name="work_profile_edit">编辑</string>
     <string name="work_profile_empty">未找到 Android 工作资料。关闭分组后，工作应用仍会按普通应用显示。</string>
     <string name="work_profile_enable">启用工作资料分组</string>
@@ -515,6 +512,12 @@
     <string name="gate_hint">root 保活用于阻止 MIUI 省电策略解绑通知监听服务（媒体/通知行的\n前置）；通知权限丢失时桌面会自动回落原生，权限补齐后自动恢复，\n无需重新开关。通知内容仅内存桥接，从不落盘或上传。</string>
     <string name="gate_enable_switch">启用第四桌面</string>
     <string name="restore_native">恢复原生桌面（发广播关闭自定义模式）</string>
+    <string name="wipe_grace_data">清除第四桌面数据（设置、收藏、文件夹、图标）</string>
+    <string name="wipe_grace_confirm_title">清除第四桌面数据？</string>
+    <string name="wipe_grace_confirm_message">将以 root 清除桌面进程内全部第四桌面数据：\n• 设置与外观（时钟、列表、手势、主题）\n• 收藏与排序、文件夹、自定义图标、弹层配置\n• 导入字体的引用（字体文件保留）\n\n桌面进程将被强制停止并以全新默认数据重启，第四桌面保持开启。此操作不可撤销。</string>
+    <string name="wipe_grace_done">第四桌面数据已清除 —— 桌面将以默认数据重启</string>
+    <string name="wipe_grace_sent">清除指令已发送 —— 桌面即将重启</string>
+    <string name="wipe_grace_failed">清除失败 —— 请检查 root 授权（Magisk 弹窗）后重试</string>
 
     <!-- 开关/拒绝/回落 Toast -->
     <string name="toggle_rejected">桌面已拒绝开启第四桌面：宿主侧%1$s</string>

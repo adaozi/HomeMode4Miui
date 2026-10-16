@@ -543,3 +543,12 @@ DIFF vs 桩文件:
 - [x] **目标清单补缺**：+grace_launcher.db-journal（非 WAL 日志）、+files/item_icons（ItemIconStore 自定义图标位图目录，rm -rf）；files/clock_fonts 按协议保留。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.61-wipe-v3-94.apk。
 - 备注：工作树中 v2.9.56~v2.9.60 批次（gadget/字体跨进程/wipe v1~v2）尚未入库，本提交仅含 HostDataWipe.kt + 版本号 + 本记录。
+
+### wipe-v4（v2.9.62-wipe-v4 / versionCode 95，2026-10-16）—— 清除改走宿主数据层自清（User 思路定案）
+
+- [x] **装机取证（wipe-v3 无效后）**：设备 root 为 KernelSU（me.weishu.kernelsu，非 Magisk）；adb shell 无 su；logcat 无 HostDataWipe 打点 —— su 链路本身即最脆弱环节，root 删文件路线放弃。
+- [x] **方案（User 提出"写入方式清除"定案）**：主路改走设置桥 —— 宿主进程内自清数据层，同进程操作不存在 v3 的"force-stop 竞态 + SP 内存缓存复活"问题，且零 root 依赖：
+  - 协议：GraceSettingsBridge 增 Cmd.WIPE_DATA + ACTION_WIPE_DONE/EXTRA_OK 回执；
+  - 宿主：GraceSettingsHostEngine.wipeHostData() —— Room clearAllTables（活连接，IO 协程）+ 三 SP（grace_launcher_settings/grace_launcher_preferences/launcher_appearance）edit().clear().commit（内存缓存+磁盘同进程一致清）+ files/item_icons deleteRecursively；回执后 800ms Process.killProcess 自杀重启（HOME 自动拉起，ModePrefs/clock_fonts 保留）；
+  - 模块：按钮发桥命令，3s 无回执（第四桌面未挂载/桥断）回落 root 通道（HostDataWipe 保留为兜底）。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.62-wipe-v4-95.apk，已 adb install 到 d6516f3a 待实机验证。

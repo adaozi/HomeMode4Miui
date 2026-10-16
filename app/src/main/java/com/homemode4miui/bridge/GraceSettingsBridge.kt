@@ -60,24 +60,32 @@ object GraceSettingsBridge {
         const val SET_ITEM_ICON = "settings_set_icon"            // EXTRA_ARG1 = key, EXTRA_JSON = ItemIcon json / null
         const val DELETE_ICON_DESIGNS = "settings_del_icons"     // EXTRA_JSON = [key..]
         const val REMEMBER_SHORTCUT = "settings_remember_shortcut" // EXTRA_JSON = shortcut 字段
-        const val REORDER_FAVORITES = "settings_reorder_favs"    // EXTRA_JSON = [key..]
+        // 审计修缮（2026-10-16）：删除 REORDER_FAVORITES / CATEGORIZE 常量 —— 发送端
+        // （设置页 action 字段）零消费已删；收藏重排宿主 shim 面直走 VM，不经桥。
         const val SAVE_POPUP = "settings_save_popup"             // EXTRA_ARG1 = ownerKey, EXTRA_JSON = [key..]（widget 项宿主保序）
         const val TEXT_MODE = "settings_text_mode"               // EXTRA_ARG1 = mode name
-        const val THEMED_ICONS = "settings_themed_icons"         // EXTRA_ARG1 = "1"/"0"
+        const val THEMED_ICONS = "settings_themed_icons"         // EXTRA_ARG1 = "1"/"0"（桌面装饰链读 SP，协议保留）
         const val RENAME = "settings_rename"                     // EXTRA_ARG1 = key, EXTRA_ARG2 = label（空串清除）
-        const val CATEGORIZE = "settings_categorize"             // EXTRA_ARG1 = key, EXTRA_ARG2 = category
-        const val PS_REQUEST = "settings_ps_request"             // EXTRA_ARG1 = "1"/"0"（enable）
         const val PS_CLOSE = "settings_ps_close"
-        const val PS_SETTINGS = "settings_ps_settings"
-        const val PS_REORDER = "settings_ps_reorder"             // EXTRA_JSON = [key..]
-        const val PS_RESET_APPEARANCE = "settings_ps_reset"      // 回传快照 extra 带 ok 标志
+        // 审计修缮（2026-10-16）：删除 PS_REQUEST / PS_SETTINGS / PS_REORDER /
+        // PS_RESET_APPEARANCE —— 全仓零发送方（私密空间编辑/排序/外观重置实际走
+        // MUTATE_SETTINGS 增量与本地 mutate），接收端分支注释自认 no-op，属
+        // "接收端写好、发送端从未实现"的半截功能。v2 建档面（宿主 Activity 鉴权）
+        // 落地时随实现重新定义协议。
         const val MOVE_WIDGET = "settings_move_widget"           // UI 动作命令：桌面进入 widget 编辑模式（无参数，不回推快照）
         const val WEATHER_REFRESH = "settings_weather_refresh"   // UI 动作命令：宿主重读天气（新天气随下次快照回带）
         const val ADD_WIDGET = "settings_add_widget"             // UI 动作命令：桌面开 WidgetPicker（无参数，不回推快照）
         // folders 阶段（hotfix folders2）：
         const val ADD_POPUP_WIDGET = "settings_add_popup_widget" // UI 动作命令：EXTRA_ARG1 = ownerKey（桌面开 WidgetPicker 弹层模式）
         const val SHORTCUTS_QUERY = "settings_shortcuts_query"   // EXTRA_JSON = [appKey..]（宿主代查，回 ACTION_SHORTCUTS_RESULT）
+        // wipe-v4：清除第四桌面数据 —— 主路走桥（宿主进程内自清数据层，零 root 零文件竞态）。
+        // 宿主清完回 ACTION_WIPE_DONE 回执后自杀重启（HOME 自动拉起，ModePrefs 保留）。
+        const val WIPE_DATA = "settings_wipe_data"
     }
+
+    /** wipe 回执（宿主 → 模块）：EXTRA_OK = 数据层清除是否成功（进程随后自杀重启）。 */
+    const val ACTION_WIPE_DONE = "com.homemode4miui.ACTION_GRACE_WIPE_DONE"
+    const val EXTRA_OK = "ok"
 
     /** 快捷方式代查回包（宿主 → 模块）。activity 为 flattened ComponentName，可为 null。 */
     data class ShortcutWire(

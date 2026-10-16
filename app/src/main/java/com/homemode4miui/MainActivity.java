@@ -60,7 +60,6 @@ public class MainActivity extends Activity {
     private TextView mNotifStatus;
     private TextView mRootStatus;
     private TextView mAutoStartStatus;
-    private TextView mMediaStatusRef;
     private TextView bridgeDiag;
     /** 上次日志导出的落盘路径（常驻回显） */
     private TextView mExportPath;
@@ -91,9 +90,39 @@ public class MainActivity extends Activity {
                                         : autostart ? getString(R.string.toggle_rejected_autostart)
                                         : getString(R.string.toggle_rejected_root)),
                         Toast.LENGTH_LONG).show();
+                return;
+            }
+            // wipe-v4：宿主数据层清除完成回执（宿主随后自杀重启）
+            if (com.homemode4miui.bridge.GraceSettingsBridge.ACTION_WIPE_DONE.equals(action)) {
+                mWipeAcked = true;
+                mHandler.removeCallbacks(mWipeFallback);
+                Toast.makeText(MainActivity.this, getString(R.string.wipe_grace_done),
+                        Toast.LENGTH_LONG).show();
             }
         }
     };
+
+    /** wipe-v4：桥命令 3s 无宿主回执（第四桌面未挂载/桥断）→ 回落 root 通道。 */
+    private boolean mWipeAcked;
+    private final Runnable mWipeFallback = new Runnable() {
+        @Override public void run() {
+            if (mWipeAcked) return;
+            ModLog.i("MainActivity: wipe bridge no ack in 3s, fallback to root wipe");
+            fallbackRootWipe();
+        }
+    };
+
+    private void fallbackRootWipe() {
+        com.homemode4miui.bridge.HostDataWipe.INSTANCE.wipeJava(
+                new java.util.function.Consumer<Boolean>() {
+                    @Override
+                    public void accept(Boolean ok) {
+                        Toast.makeText(MainActivity.this,
+                                getString(ok ? R.string.wipe_grace_done : R.string.wipe_grace_failed),
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+    }
 
     private final Runnable mHookTimeout = new Runnable() {
         @Override public void run() {
@@ -318,6 +347,38 @@ public class MainActivity extends Activity {
         root.addView(restore, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        // ---- hotfix（首页运维批）：清除第四桌面数据（root 清宿主侧 Room/SP，桌面以默认数据重启）----
+        Button wipeData = new Button(this);
+        wipeData.setText(getString(R.string.wipe_grace_data));
+        wipeData.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle(getString(R.string.wipe_grace_confirm_title))
+                        .setMessage(getString(R.string.wipe_grace_confirm_message))
+                        .setPositiveButton(android.R.string.ok, (d, w) -> {
+                            // wipe-v4：主路 = 桥命令（宿主进程内自清，零 root 零文件竞态，
+                            // KernelSU 装机 su 链路不稳不再依赖）；3s 无回执回落 root 通道。
+                            mWipeAcked = false;
+                            try {
+                                sendBroadcast(com.homemode4miui.bridge.GraceSettingsBridge.INSTANCE
+                                        .command(com.homemode4miui.bridge.GraceSettingsBridge.Cmd.WIPE_DATA,
+                                                null, null, null));
+                                Toast.makeText(MainActivity.this,
+                                        getString(R.string.wipe_grace_sent), Toast.LENGTH_SHORT).show();
+                                mHandler.postDelayed(mWipeFallback, 3000);
+                            } catch (Throwable t) {
+                                ModLog.e("MainActivity send WIPE_DATA failed", t);
+                                fallbackRootWipe();
+                            }
+                        })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+            }
+        });
+        root.addView(wipeData, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
         // hotfix6：根布局套 ScrollView —— 竖屏小屏上内容超出首屏（自诊断区块被截断）
         android.widget.ScrollView scroller = new android.widget.ScrollView(this);
         scroller.addView(root);
@@ -331,6 +392,7 @@ public class MainActivity extends Activity {
         try {
             IntentFilter f = new IntentFilter(MainHook.ACTION_HOOK_LIVE);
             f.addAction(MainHook.ACTION_TOGGLE_REJECTED);
+            f.addAction(com.homemode4miui.bridge.GraceSettingsBridge.ACTION_WIPE_DONE);
             registerReceiver(mHookLiveReceiver, f, Context.RECEIVER_EXPORTED);
         } catch (Throwable t) {
             android.util.Log.e("HomeMode4Miui", "register hook-live receiver failed", t);
@@ -356,7 +418,8 @@ public class MainActivity extends Activity {
         if (mRootReady) sendRootReady(true);
         // 从设置页授权返回后回显最新状态
         refreshGateUi();
-        if (mMediaStatusRef != null) refreshMediaStatus(mMediaStatusRef);
+        // 审计修缮（2026-10-16）：删除 mMediaStatusRef/refreshMediaStatus 死 UI 环 ——
+        // onCreate 从未创建媒体状态 TextView，mMediaStatusRef 恒 null，此调用链不可达。
     }
 
     /** gate1/gate4：root 标志广播（探测成功 / onResume 补发共用） */
@@ -622,17 +685,6 @@ public class MainActivity extends Activity {
         Toast.makeText(this, ok ? getString(R.string.root_probe_ok_toast)
                         : getString(R.string.root_probe_fail_toast),
                 Toast.LENGTH_LONG).show();
-    }
-
-    private void refreshMediaStatus(TextView status) {
-        mMediaStatusRef = status;
-        boolean granted = com.galaxyrio.gracelauncher.data.media.MediaAccess.INSTANCE.isGranted(this);
-        status.setText(granted ? getString(R.string.media_status_ok)
-                : getString(R.string.media_status_missing));
-        status.setTextSize(14);
-        status.setTextColor(granted ? color(R.color.status_ok) : color(R.color.status_error));
-        status.setPadding(0, dp(8), 0, dp(8));
-        refreshBridgeDiag();
     }
 
     /** hotfix4：桥自诊断 —— 把系统授权记录与活动媒体会话直接显示出来。 */

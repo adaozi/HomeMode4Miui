@@ -36,7 +36,6 @@
 
     <!-- P4 弹层 / 小部件（移植自 GraceLauncher strings；沿用英文，本地化随 C 组设置页） -->
     <string name="shortcut_permission">Set this launcher as your default home app to see shortcuts provided by this app.</string>
-    <string name="set_default_launcher">Set default launcher</string>
     <string name="shortcut_error">Couldn’t load or open this shortcut</string>
     <string name="no_shortcuts">This app hasn’t provided any shortcuts.</string>
     <string name="retry">Try again</string>
@@ -317,7 +316,6 @@
     <string name="popup_custom_widget">Custom widget</string>
     <string name="popup_empty">Choose shortcuts, apps or widgets below.</string>
     <string name="popup_item_unavailable">Item unavailable</string>
-    <string name="private_space_default_home">Set Grace as your default launcher to use Private space</string>
     <string name="private_space_display">Display as</string>
     <string name="private_space_display_folder">Folder</string>
     <string name="private_space_display_heading">Display</string>
@@ -606,7 +604,6 @@
     <string name="work_profile_no_apps">No work apps available. Your work profile may be paused.</string>
     <string name="work_profile_setup">Open work profile settings</string>
 
-    <string name="work_profile_default_home">Set Grace as your default launcher to access work apps</string>
     <string name="work_profile_edit">Edit</string>
     <string name="work_profile_empty">No Android work profile found. Work apps remain available as normal apps when grouping is disabled.</string>
     <string name="work_profile_enable">Enable Work Profile grouping</string>
@@ -636,6 +633,12 @@
     <string name="gate_hint">root keep-alive prevents MIUI battery saver from unbinding the notification listener service (a\nprerequisite of the media/notification row); if notification access is lost the home screen falls back\nto native automatically and restores once access returns — no re-toggle needed. Notification content\nis bridged in memory only, never stored or uploaded.</string>
     <string name="gate_enable_switch">Enable fourth home</string>
     <string name="restore_native">Restore native home (broadcast to disable custom mode)</string>
+    <string name="wipe_grace_data">Clear fourth-home data (settings, favorites, folders, icons)</string>
+    <string name="wipe_grace_confirm_title">Clear fourth-home data?</string>
+    <string name="wipe_grace_confirm_message">This root-wipes ALL fourth-home data in the home process:\n• Settings &amp; appearance (clock, list, gestures, theme)\n• Favorites &amp; ordering, folders, custom icons, popups\n• Imported app fonts references (font files stay)\n\nThe home process is force-stopped and restarts with factory defaults; the fourth home stays enabled. This cannot be undone.</string>
+    <string name="wipe_grace_done">Fourth-home data cleared — desktop restarts with defaults</string>
+    <string name="wipe_grace_sent">Wipe command sent — launcher will restart shortly</string>
+    <string name="wipe_grace_failed">Clear failed — check root authorization (Magisk prompt) and retry</string>
 
     <!-- 开关/拒绝/回落 Toast -->
     <string name="toggle_rejected">Home rejected enabling the fourth home: host side %1$s</string>

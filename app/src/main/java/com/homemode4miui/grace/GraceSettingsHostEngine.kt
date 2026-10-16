@@ -39,8 +39,10 @@ import com.homemode4miui.bridge.GraceBridge
 import com.homemode4miui.bridge.GraceSettingsBridge
 import com.homemode4miui.util.ModLog
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -151,11 +153,9 @@ class GraceSettingsHostEngine(
                 ))
                 true
             }
-            GraceSettingsBridge.Cmd.REORDER_FAVORITES -> {
-                val requested = decodeKeys(json)
-                val current = favoritesStore.currentOrder().orEmpty()
-                favoritesStore.reorder(requested, (current + requested).distinct()); true
-            }
+            // 审计修缮（2026-10-16）：删除 REORDER_FAVORITES/CATEGORIZE/THEMED_ICONS
+            // 接收分支 —— 发送端（设置页同名 action 字段）零消费已删，协议随葬。
+            // 收藏重排在宿主 shim 面直走 GraceHomeViewModel.reorderFavorites。
             GraceSettingsBridge.Cmd.SAVE_POPUP -> {
                 val ownerKey = arg1 ?: return false
                 val keys = decodeKeys(json)
@@ -173,16 +173,13 @@ class GraceSettingsHostEngine(
                     WallpaperTextMode.entries.firstOrNull { it.name == mode }?.let { preferences.textMode(it) }
                 }; true
             }
-            GraceSettingsBridge.Cmd.THEMED_ICONS -> { preferences.themedIcons(arg1 == "1"); true }
+            GraceSettingsBridge.Cmd.THEMED_ICONS -> { preferences.themedIcons(arg1 == "1"); true } // 保留：桌面装饰链读 SP（协议仍在）
             GraceSettingsBridge.Cmd.RENAME -> { preferences.rename(arg1 ?: return false, arg2 ?: ""); true }
-            GraceSettingsBridge.Cmd.CATEGORIZE -> { preferences.categorize(arg1 ?: return false, arg2?.takeIf { it != "null" }); true }
-            GraceSettingsBridge.Cmd.PS_REQUEST -> { false } // 建档/删档需宿主 Activity 鉴权，v1 降级：设置页提示到桌面操作
+            // 审计修缮（2026-10-16）：CATEGORIZE 分支已删（发送端零消费）
+            // 审计修缮（2026-10-16）：删除 PS_REQUEST/PS_SETTINGS/PS_REORDER/PS_RESET_APPEARANCE
+            // 接收分支 —— 协议常量已随发送端缺位一并移除（见 GraceSettingsBridge.Cmd）。
+            // 私密空间「锁」侧（configure/close）与外观重置走既有 MUTATE_SETTINGS/PS_CLOSE。
             GraceSettingsBridge.Cmd.PS_CLOSE -> { privateSpace?.close(); true }
-            GraceSettingsBridge.Cmd.PS_SETTINGS -> { false } // openSettings 需 Activity 引用，降级
-            GraceSettingsBridge.Cmd.PS_REORDER -> { true }   // reorderPrivateApps 属 VM 侧内存序，快照闭环后无感
-            GraceSettingsBridge.Cmd.PS_RESET_APPEARANCE -> {
-                repo.mutateSettings { it.copy(privateSpace = it.privateSpace.copy(name = com.galaxyrio.gracelauncher.data.PrivateSpaceDefaultName)) }; true
-            }
             // hotfix2：设置页"移动小部件" → 桌面 editingHome（原版同进程直改 UI 状态，
             // 本仓跨进程只能发命令；返回 false = 纯 UI 动作，不触发快照回推/onMutated）
             GraceSettingsBridge.Cmd.MOVE_WIDGET -> { onMoveWidget(); false }
@@ -195,6 +192,13 @@ class GraceSettingsHostEngine(
             // B6.2：设置页「刷新天气」→ 宿主天气引擎重读；返回 false = 不立即回推，
             // 新天气在装载完成后由 VM 侧主动推快照回带
             GraceSettingsBridge.Cmd.WEATHER_REFRESH -> { onWeatherRefresh(); false }
+            // wipe-v4：清除第四桌面数据 —— 主路走桥。宿主进程内自清数据层：
+            // Room clearAllTables（活连接，无删文件竞态）+ 三个 grace SP clear
+            // （SharedPreferencesImpl 内存缓存与磁盘同进程一致清，v3 root 删文件的
+            // "SP 缓存复活"根因在本路径不存在）+ files/item_icons 位图目录。
+            // 清完回执模块 → 延迟自杀重启（HOME 被系统拉起，ModePrefs 保留）。
+            // 返回 false：本命令自建回执链，不走 pushSnapshot/onMutated。
+            GraceSettingsBridge.Cmd.WIPE_DATA -> { wipeHostData(); false }
             else -> { ModLog.i("GraceSettingsHostEngine: unknown cmd $cmd"); false }
         }
     }
@@ -234,6 +238,47 @@ class GraceSettingsHostEngine(
                 )
             }.onSuccess { sendSnapshot(it) }
                 .onFailure { ModLog.e("GraceSettingsHostEngine: snapshot build failed", it); sendSnapshot(GraceSettingsBridge.Snapshot(ok = false)) }
+        }
+    }
+
+    /**
+     * wipe-v4：数据层自清（IO 协程）→ 回执模块 → 800ms 后自杀重启。
+     * 刻意保留：files/clock_fonts（导入字体文件本体）、launcher_sharedpreference.xml
+     * （ModePrefs 模式开关/熔断状态，模式不关）。
+     */
+    private fun wipeHostData() {
+        scope.launch {
+            val detail = runCatching {
+                withContext(Dispatchers.IO) {
+                    // Room 全表清（库实例单例连接；null = DB 初始化失败降级 SP 场景，跳过）
+                    database?.clearAllTables()
+                    // 三个 grace SP 进程内一致清（内存缓存 + 磁盘同步清，commit 确认落盘）
+                    listOf(
+                        "grace_launcher_settings",   // GraceHomeSettingsStore
+                        "grace_launcher_preferences", // FavoritesStore 收藏/排序
+                        "launcher_appearance",        // LauncherPreferences renames/categories/textMode
+                    ).forEach { name ->
+                        context.getSharedPreferences(name, Context.MODE_PRIVATE)
+                            .edit().clear().commit()
+                    }
+                    // 自定义图标位图（DB/SP 只承载元数据）
+                    java.io.File(context.filesDir, "item_icons").deleteRecursively()
+                }
+                "db=${database != null}"
+            }.getOrElse { "failed: ${it::class.java.simpleName}: ${it.message}" }
+            val ok = !detail.startsWith("failed")
+            ModLog.i("GraceSettingsHostEngine: WIPE_DATA done ok=$ok ($detail)")
+            runCatching {
+                context.sendBroadcast(
+                    Intent(GraceSettingsBridge.ACTION_WIPE_DONE)
+                        .setPackage(GraceBridge.PACKAGE_MODULE)
+                        .putExtra(GraceSettingsBridge.EXTRA_OK, ok),
+                )
+            }
+            // 自杀重启：HOME 被系统自动拉起，以全新默认数据挂载第四桌面
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                runCatching { android.os.Process.killProcess(android.os.Process.myPid()) }
+            }, 800)
         }
     }
 
