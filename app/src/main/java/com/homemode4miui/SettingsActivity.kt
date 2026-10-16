@@ -48,6 +48,8 @@ object GraceSettingsTheme {
             amoledMode = state.settings.amoledMode,
             dynamicColor = state.settings.useDynamicColors,
             seedColor = Color(state.settings.themeColor),
+            // 上游同步 v1.1.9：调色板风格透传（与桌面同源）
+            paletteStyle = state.settings.paletteStyle,
             // 上游同步 v1.1.8 S5：全局字体 = 字体库 selected 链（appFontId 为 legacy 列）。
             fontLibrary = state.settings.fontLibrary,
             content = content,

@@ -95,6 +95,8 @@ fun GraceHomeRoot(
             amoledMode = settings.amoledMode,
             dynamicColor = settings.useDynamicColors,
             seedColor = Color(settings.themeColor),
+            // 上游同步 v1.1.9：调色板风格（TonalSpot/Vibrant/Expressive/…，动态色同样生效）
+            paletteStyle = settings.paletteStyle,
             // 上游同步 v1.1.8 S5：全局字体 = 字体库 selected 链（字体库管理页首位）。
             // appFontId 为 legacy 列，设置页从不写入 —— 接它永远不生效（装机实锤）。
             fontLibrary = settings.fontLibrary,

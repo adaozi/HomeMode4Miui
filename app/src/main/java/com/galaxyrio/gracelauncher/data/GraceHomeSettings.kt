@@ -21,6 +21,7 @@ package com.galaxyrio.gracelauncher.data
 
 import android.content.Context
 import androidx.core.content.edit
+import com.materialkolor.PaletteStyle
 
 data class GraceHomeSettings(
     val clockEnabled: Boolean = true,
@@ -88,6 +89,8 @@ data class GraceHomeSettings(
     val useDynamicColors: Boolean = true,
     /** 原版 themeColor：种子色 ARGB（useDynamicColors=false 时生效）。 */
     val themeColor: Int = LauncherSettings.DEFAULT_THEME_COLOR,
+    /** 上游同步 v1.1.9：调色板风格（TonalSpot/Vibrant/…，动态取色分支同样生效）。 */
+    val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
     /** 原版 darkMode：主题三态（System 跟随系统）。 */
     val darkMode: ThemeMode = ThemeMode.System,
     /** 原版 amoledMode：深色下纯黑表面。 */
@@ -123,6 +126,7 @@ data class GraceHomeSettings(
                    iconDesignJson: String? = null,
                    useDynamicColors: Boolean = true,
                    themeColor: Int = LauncherSettings.DEFAULT_THEME_COLOR,
+                   paletteStyleName: String? = null,
                    darkModeName: String? = null,
                    amoledMode: Boolean = false) = GraceHomeSettings(
             clockEnabled = clockEnabled,
@@ -158,6 +162,7 @@ data class GraceHomeSettings(
             iconDesign = iconDesignJson?.let(ItemIcon::decode),
             useDynamicColors = useDynamicColors,
             themeColor = themeColor,
+            paletteStyle = decodePaletteStyle(paletteStyleName.orEmpty()),
             darkMode = ThemeMode.entries.firstOrNull { it.name == darkModeName } ?: ThemeMode.System,
             amoledMode = amoledMode,
         )

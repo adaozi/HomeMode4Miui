@@ -139,6 +139,7 @@ object GraceSettingsBridge {
         .put("allowHapticFeedback", s.allowHapticFeedback)
         .put("useDynamicColors", s.useDynamicColors)
         .put("themeColor", s.themeColor)
+        .put("paletteStyle", s.paletteStyle.name)
         .put("darkMode", s.darkMode.name)
         .put("amoledMode", s.amoledMode)
         .put("iconPackPackage", s.iconPackPackage ?: JSONObject.NULL)
@@ -180,6 +181,7 @@ object GraceSettingsBridge {
         allowHapticFeedback = v.optBoolean("allowHapticFeedback", true),
         useDynamicColors = v.optBoolean("useDynamicColors", true),
         themeColor = v.optInt("themeColor", com.galaxyrio.gracelauncher.data.LauncherSettings.DEFAULT_THEME_COLOR),
+        paletteStyle = com.galaxyrio.gracelauncher.data.decodePaletteStyle(v.optString("paletteStyle")),
         darkMode = ThemeMode.entries.firstOrNull { it.name == v.optString("darkMode") } ?: ThemeMode.System,
         amoledMode = v.optBoolean("amoledMode", false),
         iconPackPackage = v.opt("iconPackPackage") as? String,
@@ -227,6 +229,7 @@ object GraceSettingsBridge {
         if (delta.has("allowHapticFeedback")) set { it.copy(allowHapticFeedback = delta.getBoolean("allowHapticFeedback")) }
         if (delta.has("useDynamicColors")) set { it.copy(useDynamicColors = delta.getBoolean("useDynamicColors")) }
         if (delta.has("themeColor")) set { it.copy(themeColor = delta.getInt("themeColor")) }
+        if (delta.has("paletteStyle")) set { it.copy(paletteStyle = com.galaxyrio.gracelauncher.data.decodePaletteStyle(delta.getString("paletteStyle"))) }
         if (delta.has("darkMode")) set { it.copy(darkMode = ThemeMode.entries.firstOrNull { m -> m.name == delta.getString("darkMode") } ?: ThemeMode.System) }
         if (delta.has("amoledMode")) set { it.copy(amoledMode = delta.getBoolean("amoledMode")) }
         if (delta.has("iconPackPackage")) set { it.copy(iconPackPackage = delta.opt("iconPackPackage") as? String) }

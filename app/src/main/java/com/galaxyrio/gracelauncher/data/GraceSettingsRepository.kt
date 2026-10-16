@@ -171,6 +171,7 @@ class GraceSettingsRepository(context: Context) {
         // hotfix（darkMode/amoledMode/themeColor 桌面接线）：外观四列种子
         useDynamicColors = settings.useDynamicColors,
         themeColor = settings.themeColor,
+        paletteStyle = settings.paletteStyle.name,
         darkMode = settings.darkMode.name,
         amoledMode = settings.amoledMode,
     )
@@ -212,6 +213,7 @@ class GraceSettingsRepository(context: Context) {
         // hotfix（darkMode/amoledMode/themeColor 桌面接线）：读出外观四列
         useDynamicColors = useDynamicColors,
         themeColor = themeColor,
+        paletteStyleName = paletteStyle,
         darkModeName = darkMode,
         amoledMode = amoledMode,
     )
