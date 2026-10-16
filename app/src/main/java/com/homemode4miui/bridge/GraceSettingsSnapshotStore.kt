@@ -23,10 +23,8 @@ object GraceSettingsSnapshotStore {
 
     private val _snapshot = MutableStateFlow<GraceSettingsBridge.Snapshot?>(null)
     val snapshot = _snapshot.asStateFlow()
-
-    /** 时钟样式等模块桥引擎消费面（weatherLocationId 等）的最后已知设置。 */
-    @Volatile var lastKnownSettings: com.galaxyrio.gracelauncher.data.LauncherSettings? = null
-        private set
+    // 审计修缮（2026-10-16）：删除 lastKnownSettings —— 只写不读（头注声称的
+    // "时钟样式等模块桥引擎消费面" 实际直读宿主 Room，模块进程内无任何消费方）。
 
     private var registered = false
     private var receiver: BroadcastReceiver? = null
@@ -46,7 +44,6 @@ object GraceSettingsSnapshotStore {
                 }
                 ModLog.i("GraceSettingsSnapshotStore: snapshot received (ok=${decoded.ok})")
                 _snapshot.value = decoded
-                lastKnownSettings = decoded.settings
             }
         }
         runCatching {
@@ -70,7 +67,6 @@ object GraceSettingsSnapshotStore {
         // 恒 false，桌面未挂载场景下显示陈旧数据且可编辑（写命令进黑洞无提示）。
         // 对齐 GraceShortcutsRelay.unregister 清 _results 的既有语义。
         _snapshot.value = null
-        lastKnownSettings = null
     }
 
     /** 快照请求（模块 → 宿主）。桌面未挂载时无回包：VM 侧超时置 settingsLoadFailed。 */

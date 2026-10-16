@@ -49,7 +49,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.galaxyrio.gracelauncher.data.AppRepository
 import com.galaxyrio.gracelauncher.data.CalendarRepository
-import com.galaxyrio.gracelauncher.data.ClockLayout
 import com.galaxyrio.gracelauncher.data.FavoritesStore
 import com.galaxyrio.gracelauncher.data.GraceHomeSettings
 import com.galaxyrio.gracelauncher.data.WorkProfileFolderId
@@ -94,6 +93,9 @@ data class GraceHomeUiState(
     /** 收藏顺序（LauncherApp.key）；favorites 列表由此派生，保证增删即时刷新。 */
     val favoriteOrder: List<String> = emptyList(),
     val settings: GraceHomeSettings = GraceHomeSettings(),
+    /** 审计修缮（2026-10-16）：宿主设置突变信号（onSettingsMutated 自增）。TEXT_MODE/
+     *  THEMED_ICONS 等仅落 SP 的桥命令不触发 Room 设置流，外观层读 SP 需以此驱动重组。 */
+    val settingsRevision: Int = 0,
     val isLoadingApps: Boolean = true,
     val appLoadFailed: Boolean = false,
     /** 同步揭示门控（装机反馈：时钟/文件夹先出、应用后跳的分层加载观感）——
@@ -277,6 +279,15 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val _returnHomeRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val returnHomeRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _returnHomeRequests
 
+    /**
+     * hotfix return-anim：HOME intent 透传流（返回动画恢复）。Intent 原样携带
+     * Quickstep 注入的 GestureNavContract extra（gesture_nav_contract_v1）；null =
+     * 已在桌面复位路径（onNewIntentWhenAlreadyOnHome，无合约）。路由层收集后转发
+     * LauncherAppTransitions.onHomeIntent —— 上游 MainActivity 同构接线。
+     */
+    private val _homeIntentRequests = MutableSharedFlow<Intent?>(extraBufferCapacity = 4)
+    val homeIntentRequests: kotlinx.coroutines.flow.SharedFlow<Intent?> = _homeIntentRequests
+
     // ---- P4：widget picker 状态 ----
     /** null = 加载中；空列表 = 无可用 provider。宿主进程单 profile（原版多 profile 过滤裁剪）。 */
     private val _widgetProviders = MutableStateFlow<List<AppWidgetProviderInfo>?>(null)
@@ -313,9 +324,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private var savedShortcutsJob: Job? = null
     /** P6：图标包开关变化 → 重刷应用列表（渲染装饰跟随包顺序）。 */
     private var lastIconPacks: List<String>? = null
-    /** P6：图标包渲染状态（刷新完成后 UI 可显示装饰中）。 */
-    private val _iconPacksDecorating = MutableStateFlow(false)
-    val iconPacksDecorating = _iconPacksDecorating.asStateFlow()
+    // 审计修缮（2026-10-16）：删除 iconPacksDecorating —— 全仓无置位（承诺的
+    // "刷新完成后置 true" 逻辑不存在）也无收集，上游装饰中提示的移植半成品。
 
     /** 与原版 packageReceiver 同构：包变化（安装/卸载/更新/变更）触发应用列表刷新。 */
     private val packageReceiver = object : BroadcastReceiver() {
@@ -855,20 +865,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** C 组（C3）：引擎落库回调 —— 设置行走 Room 观察流自动生效，这里补 SP 面（收藏序）。 */
     private fun onSettingsMutated() {
         val refreshed = favoritesStore.currentOrder().orEmpty()
-        _uiState.update { it.copy(favoriteOrder = refreshed) }
+        _uiState.update { it.copy(favoriteOrder = refreshed, settingsRevision = it.settingsRevision + 1) }
     }
 
 
-    /**
-     * P1 演示入口（时钟长按）：循环切换 ClockLayout。P3 起落 Room
-     * launcher_settings.clockStyleJson（mutateSettings 事务），与原版
-     * LauncherViewModel.applyClockStyle 保存路径对齐。每个 layout 的
-     * face 数据随 ClockStyle.copy 保留（原版 per-layout draft 语义）。
-     */
-    fun cycleClockLayout() {
-        val nextLayout = ClockLayout.entries[(_uiState.value.settings.clockStyle.layout.ordinal + 1) % ClockLayout.entries.size]
-        updateSettings { it.copy(clockStyle = it.clockStyle.copy(layout = nextLayout)) }
-    }
+    // 审计修缮（2026-10-16）：删除 cycleClockLayout —— P1 演示入口，唯一调用点
+    // （GracePopupActions.cycleClockStyle 死接线）已删；时钟样式走设置页 ClockStyle 面板。
 
     /** P3：写路径切 Room（GraceSettingsRepository.mutateSettings 事务；DB 故障内部降级 SP）。 */
     fun updateSettings(transform: (GraceHomeSettings) -> GraceHomeSettings) {
@@ -884,6 +886,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         // Home 键回桌面是唯一稳定的刷新点（面板开关行 summary 依赖此状态）
         refreshMediaAccess()
         _returnHomeRequests.tryEmit(Unit)
+    }
+
+    /** hotfix return-anim：复位 + HOME intent 透传（上游 MainActivity.onNewIntent 同构）。 */
+    fun onHomeIntent(intent: Intent?) {
+        requestReturnHome()
+        _homeIntentRequests.tryEmit(intent)
     }
 
     /** P2：搜索结果打开应用后记录最近使用（原版 LauncherViewModel.launchSearchApp 语义）。 */

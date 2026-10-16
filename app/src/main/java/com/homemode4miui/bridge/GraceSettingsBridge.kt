@@ -81,6 +81,10 @@ object GraceSettingsBridge {
         // wipe-v4：清除第四桌面数据 —— 主路走桥（宿主进程内自清数据层，零 root 零文件竞态）。
         // 宿主清完回 ACTION_WIPE_DONE 回执后自杀重启（HOME 自动拉起，ModePrefs 保留）。
         const val WIPE_DATA = "settings_wipe_data"
+        // appfont-bridge（v2.9.67）：导入字体零 root 跨进程 = FontBridgeProvider 按需拉取
+        // （宿主缺文件时 FontBridgePull 走 binder 流式传输；v2.9.66 的分片广播方案实测
+        // 被 MIUI 广播抑制吞掉 76 发 4 收，弃用）。此命令仅剩删除同步（单广播无风暴面）。
+        const val FONT_DELETE = "settings_font_delete"           // ARG1=id（宿主侧副本同步删除）
     }
 
     /** wipe 回执（宿主 → 模块）：EXTRA_OK = 数据层清除是否成功（进程随后自杀重启）。 */

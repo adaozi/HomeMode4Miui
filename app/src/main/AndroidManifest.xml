@@ -52,6 +52,15 @@
             android:label="@string/settings_title"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- appfont-bridge（v2.9.67）：导入字体跨进程只读 Provider —— 宿主解析缺文件时
+             FontBridgePull 按需拉取（零 root，普通 binder 不受 MIUI 广播抑制）。
+             exported 只读：openFile 强制 mode=r + id 严格校验（ClockFontStore.isValidId），
+             泄露面 = 用户导入的字体文件本身。 -->
+        <provider
+            android:name="com.homemode4miui.bridge.FontBridgeProvider"
+            android:authorities="com.homemode4miui.fontbridge"
+            android:exported="true" />
+
         <!-- P6（B6.1/B6.3）：通知监听服务。系统按 manifest 绑定到本模块 App 进程，
              媒体 token/controller 全在该进程内；快照经 GraceBridgeEngine 广播下发宿主。 -->
         <service

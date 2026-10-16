@@ -22,12 +22,41 @@ data class ClockFontFile(val id: String, val name: String)
 
 /** Shared by clock and app typography. Retain the original directory and ids for saved clocks. */
 class ClockFontStore(context: Context) {
-    private val context = context.applicationContext
+    // hotfix（appFont 跨进程）：createPackageContext 来的远端包 Context 其
+    // getApplicationContext() 在目标包未于本进程实例化 Application 时返回 null
+    // （装机实锤 2026-10-15：宿主进程持模块包 Context → getFilesDir() NPE）。
+    // 回退原 context：filesDir 语义仍指向"导入方进程私有目录"。
+    private val context = runCatching { context.applicationContext }.getOrNull() ?: context
     private val directory get() = File(context.filesDir, "clock_fonts")
+    /** appfont-bridge（v2.9.67）：宿主主目录被 root 时代污染时（root:root 700 / 标签错，
+     *  桥推送探测失败自动换此备用目录），读取端双目录兜底。 */
+    private val altDirectory get() = File(context.filesDir, "clock_fonts_h")
+    private fun resolveFile(id: String): File? {
+        candidates().map { File(it, id) }.firstOrNull { it.isFile }?.let { return it }
+        // appfont-bridge（v2.9.67）：宿主进程缺文件 → 从模块 FontBridgeProvider 按需拉取
+        // （零 root，普通 binder 不受 MIUI 广播抑制），落宿主自己目录常驻。
+        return com.homemode4miui.bridge.FontBridgePull.pull(context, id)
+    }
+    private fun candidates(): List<File> {
+        val dirs = mutableListOf(directory, altDirectory)
+        // appfont-bridge（v2.9.67）：补宿主自己的私有目录 —— 拉取落点（FontBridgePull 用
+        // createPackageContext 反取宿主 filesDir；主目录被 root 污染时落 clock_fonts_h）。
+        // 宿主进程内构造的 ClockFontStore 可能持模块 Context（app 字体链），其 filesDir
+        // 指向模块私有目录（宿主不可读写），必须补宿主视角目录才能读到拉取结果。
+        runCatching {
+            val hostCtx = if (com.homemode4miui.bridge.FontCrossProcess.isHostProcess(context)) context
+                else context.createPackageContext("com.miui.home", android.content.Context.CONTEXT_IGNORE_SECURITY)
+            dirs += File(hostCtx.filesDir, "clock_fonts")
+            dirs += File(hostCtx.filesDir, "clock_fonts_h")
+        }
+        return dirs.distinct()
+    }
 
     suspend fun list(): List<ClockFontFile> = withContext(Dispatchers.IO) {
-        directory.listFiles().orEmpty().filter { it.isFile && validId(it.name) }
-            .map { ClockFontFile(it.name, it.name.substringAfter('_').substringBeforeLast('.')) }
+        val files = candidates().flatMap { dir ->
+            dir.listFiles().orEmpty().filter { it.isFile && validId(it.name) }
+        }.distinctBy { it.name }
+        files.map { ClockFontFile(it.name, it.name.substringAfter('_').substringBeforeLast('.')) }
             .sortedBy { it.name.lowercase() }
     }
 
@@ -68,7 +97,10 @@ class ClockFontStore(context: Context) {
                 val paint = Paint().apply { typeface = face }
                 require("0123456789".all { paint.hasGlyph(it.toString()) }) { "Font does not include clock digits" }
             }
-            return ClockFontFile(target.name, label)
+            return ClockFontFile(target.name, label).also {
+                // appfont-bridge（v2.9.67）：宿主侧不再需要主动推送 —— 宿主解析缺文件时
+                // 从 FontBridgeProvider 按需拉取（FontBridgePull），零 root 零广播风暴。
+            }
         } catch (error: Exception) {
             target.delete() // Only the incomplete copy created by this import.
             throw error
@@ -77,8 +109,7 @@ class ClockFontStore(context: Context) {
 
     suspend fun typeface(id: String, weight: Int): Typeface? = withContext(Dispatchers.IO) {
         if (!validId(id)) return@withContext null
-        val file = File(directory, id)
-        if (!file.isFile) return@withContext null
+        val file = resolveFile(id) ?: return@withContext null
         val key = "${file.absolutePath}:$weight"
         synchronized(cache) { cache.get(key)?.typeface } ?: runCatching {
             Typeface.Builder(file).setFontVariationSettings("'wght' $weight")
@@ -87,12 +118,23 @@ class ClockFontStore(context: Context) {
         }.getOrNull()?.also { synchronized(cache) { cache.put(key, CachedTypeface(it, file.length().toInt().coerceAtLeast(1))) } }
     }
 
-    /** 上游同步 v1.1.8 S5：仅私有导入字体可解析为文件（bundled preset 永不落此目录）。 */
-    fun file(id: String): File? = if (validId(id)) File(directory, id).takeIf { it.isFile } else null
+    /** 上游同步 v1.1.8 S5：仅私有导入字体可解析为文件（bundled preset 永不落此目录）。
+     *  appfont-bridge（v2.9.66）：双目录解析（主目录被 root 时代污染时宿主落备用目录）。 */
+    fun file(id: String): File? = if (validId(id)) resolveFile(id) else null
 
-    /** 上游同步 v1.1.8 S5：删除导入字体并清空 typeface 缓存（FontSettings 管理页消费）。 */
+    /** 上游同步 v1.1.8 S5：删除导入字体并清空 typeface 缓存（FontSettings 管理页消费）。
+     *  appfont-bridge（v2.9.66）：双目录删除 + 桥命令同步清宿主侧副本（root 镜像弃用）。 */
     suspend fun delete(ids: Set<String>) = withContext(Dispatchers.IO) {
-        ids.forEach { id -> file(id)?.let { target -> check(target.delete()) { "Unable to delete imported font" } } }
+        val hostProcess = com.homemode4miui.bridge.FontCrossProcess.isHostProcess(context)
+        ids.forEach { id ->
+            candidates().forEach { dir -> File(dir, id).takeIf { it.isFile }?.delete() }
+            // 非宿主进程删除 → 单条桥命令同步删宿主侧副本（单广播，无风暴面）
+            if (!hostProcess) runCatching {
+                context.sendBroadcast(
+                    com.homemode4miui.bridge.GraceSettingsBridge.command(
+                        com.homemode4miui.bridge.GraceSettingsBridge.Cmd.FONT_DELETE, arg1 = id))
+            }
+        }
         synchronized(cache) { cache.evictAll() }
     }
 
@@ -106,5 +148,8 @@ class ClockFontStore(context: Context) {
         }
         private fun validId(id: String) = id.length <= 125 &&
             id.matches(Regex("[0-9a-f-]{36}_[\\p{L}\\p{N} _-]+\\.(ttf|otf|ttc)"))
+
+        /** appfont-bridge（v2.9.67）：FontBridgeProvider 的 id 校验入口（防路径穿越）。 */
+        fun isValidId(id: String) = validId(id)
     }
 }

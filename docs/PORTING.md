@@ -577,3 +577,15 @@ DIFF vs 桩文件:
 - [x] **验证（adb 自主复现）**：修复前 `id=sacramento resolve failed / ALL SOURCES FAILED`；
   修复后强停桌面重启 `SelectedTypeface resolved ids=[sacramento, system] families=1 w=500`。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.64-appfont-static-97.apk，已 adb install 到 d6516f3a。
+
+### appfont-provider（v2.9.67-appfont-provider / versionCode 100，2026-10-16）—— 导入字体零 root 按需拉取（User 定案）
+
+- [x] **需求（装机反馈）**：preset 字体修复后，导入的自定义字体桌面仍不生效。
+- [x] **排障（打点 + adb 实证）**：root 镜像通道在 KernelSU 装机上"mirror install ok（chown/chmod/chcon 全过）但宿主 list()=null / isFile=false"——DAC/SELinux MCS/命名空间三重怪癖，root 路线不可依赖；分片广播方案实测被 MIUI 吞掉（76 发 4 收）。
+- [x] **方案（User 提出弃用 root，定案）**：模块暴露只读 FontBridgeProvider（exported，openFile 强制 mode=r + id 严格校验防穿越），宿主解析缺文件时 FontBridgePull 按需拉取 —— 普通 binder 不受广播抑制，宿主用自己的 UID/SELinux 标签落自己的 filesDir。关键点：
+  - 落盘基准目录必须用 createPackageContext 反取【宿主】filesDir（context=模块 Context 时其 filesDir 宿主不可写，mkdirs failed 实锤）；
+  - 主目录 filesDir/clock_fonts 被 root 时代污染（root:root 700）→ 探测失败自动换 clock_fonts_h，ClockFontStore 双目录（模块侧 + 宿主侧）读取兜底；
+  - openInputStream 会把 SecurityException/FNFE 吞成 null —— 改 acquireContentProviderClient 显式取异常；
+  - FontCrossProcess root 镜像代码整体移除，FONT_DELETE 单广播保留（删除同步）。
+- [x] **验证（adb 自主复现）**：FontBridgePull pulled zpixx.ttf (4681088B) → SelectedTypeface resolved ids=[...zpixx.ttf] families=1；新导入字体同样即时解析。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.67-appfont-provider-100.apk，已 adb install 到 d6516f3a。

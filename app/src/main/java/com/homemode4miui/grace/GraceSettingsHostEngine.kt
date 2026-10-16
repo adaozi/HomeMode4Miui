@@ -199,6 +199,9 @@ class GraceSettingsHostEngine(
             // 清完回执模块 → 延迟自杀重启（HOME 被系统拉起，ModePrefs 保留）。
             // 返回 false：本命令自建回执链，不走 pushSnapshot/onMutated。
             GraceSettingsBridge.Cmd.WIPE_DATA -> { wipeHostData(); false }
+            // appfont-bridge（v2.9.67）：字体删除同步（拉取方向走 FontBridgeProvider，
+            // 无需推送协议）。返回 true 触发快照刷新。
+            GraceSettingsBridge.Cmd.FONT_DELETE -> { fontDelete(arg1); true }
             else -> { ModLog.i("GraceSettingsHostEngine: unknown cmd $cmd"); false }
         }
     }
@@ -279,6 +282,20 @@ class GraceSettingsHostEngine(
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 runCatching { android.os.Process.killProcess(android.os.Process.myPid()) }
             }, 800)
+        }
+    }
+
+    // ==================== appfont-bridge：字体删除同步（v2.9.67） ====================
+    // 推送方向已由 FontBridgeProvider 按需拉取替代（v2.9.66 分片广播被 MIUI 吞掉，弃用）。
+
+    private suspend fun fontDelete(id: String?) {
+        if (id.isNullOrBlank()) return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                listOf("clock_fonts", "clock_fonts_h").forEach { name ->
+                    java.io.File(context.filesDir, "$name/$id").delete()
+                }
+            }
         }
     }
 
