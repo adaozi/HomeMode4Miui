@@ -102,6 +102,10 @@ data class GraceHomeSettings(
     val enabledIconPackPackages: List<String>
         get() = normalizeIconPackOrder(iconPackPackages)
 
+    /** 上游同步 v1.1.9：共享图标显示设置内嵌 bulk design JSON（对齐 LauncherSettings.iconDisplay）。 */
+    val iconDisplay: IconDisplaySettings
+        get() = iconDesign?.display ?: IconDisplaySettings()
+
     companion object {
         fun decode(clockStyleJson: String?, clockEnabled: Boolean, hideFavoriteNames: Boolean,
                    searchSettingsJson: String? = null, homeLayoutJson: String? = null,

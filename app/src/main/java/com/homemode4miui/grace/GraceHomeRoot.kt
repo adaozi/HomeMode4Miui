@@ -114,6 +114,8 @@ fun GraceHomeRoot(
             val appearance = rememberLauncherAppearance(
                 textMode, themedIcons = true,
                 iconSize = settings.iconDesign?.design?.iconSize ?: 100,
+                // 上游同步 v1.1.9：共享图标显示（圆点/隐藏）进 appearance 链
+                iconDisplay = settings.iconDisplay,
             )
             CompositionLocalProvider(
                 LocalContext provides moduleContext,
