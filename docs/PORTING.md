@@ -601,3 +601,12 @@ DIFF vs 桩文件:
 - [x] **决策（User）**：v2.9.68 的"preset 布局放开自定义字体"偏离上游设计，还原为与上游 GraceLauncher 一致 —— `allowsCustomFont = presetFont == null`，preset 布局（Sacramento/Bokor/Plaster/Monoton/Lucky）锁死签名字体，自定义字体仅在 SingleLine/TwoLines/Week 三种素坯布局可用；ClockFace 渲染序还原 presetFont 恒优先。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.69-clock-font-upstream-102.apk，已 adb install 到 d6516f3a。
 - 备注：字体三分职责不变（时钟字体 clockStyle.fontId / 全局字体库首位 / 列表字体）；导入字体跨进程链（FontBridgePull）不受本次还原影响。
+
+### v1.1.9 同步战役（v2.9.88~v2.9.92 / versionCode 104~108，2026-10-17）—— 上游 GraceLauncher v1.1.9 五批次移植
+
+- [x] **S1（v2.9.88 / vc104）**：vendor 源码 bump v1.1.8→v1.1.9。6 新文件（GraceButtonLayout/IconDisplay/IconDominantColor/ColorAdjustment/IconAspectRatio/ThemePalette + GraceButtonPositionSettings）；DB v21→v22（launcher_settings.paletteStyle + folders.autoHideApps，Migration21To22 + schema 22.json）；LauncherApp 四新字段（iconDisplay/originalIconColor/isSystemApp/isAdaptiveIcon）；AppRepository 模块两段式装载适配——主色采样挂解码阶段（包图标命中路径不额外解码，null 走主题回退）；40 条上游 strings + ic_grace_solid；ShortcutRepository/FontSettings delta 挂不上（模块形态差异）零改动登记。三方合并教训：CRLF 噪音曾导致 43/48 误判深度改造，strip-trailing-cr 归一化后真实本地差异极小。
+- [x] **S2（v2.9.89 / vc105）**：GraceButton 可移动 + 分区可见性——GraceLauncherRoute 渲染点 layout.bounds 绝对定位（absoluteOffset）替代 BottomEnd 固定对齐；isVisible(drawerOpen) 分区可见性（Favorites/AppList/Both）。
+- [x] **S3（v2.9.90 / vc106）**：PaletteStyle 调色板风格——GraceHomeRoot/SettingsActivity 主题透传；GraceHomeSettings 字段 + decode 工厂；GraceSettingsRepository 双向映射；GraceSettingsBridge encodeRow/decode/delta 三处加列（typed 列编解码防丢字段）。
+- [x] **S4（v2.9.91 / vc107）**：图标圆点/隐藏 + 主色重着色——GraceHomeRoot appearance 链传 iconDisplay；GraceHomeSettings.iconDisplay 派生属性；抽屉/收藏行走 vendored LauncherAppRow/FolderRow effectiveDisplay 自动生效；ItemIconStore fromApp 主色 + HSB 调整随 S1 落地。
+- [x] **S5（v2.9.92 / vc108）**：文件夹 autoHideApps + 单应用隐藏——GraceHomeViewModel effectiveHiddenAppKeys 并集过滤；Room 行映射补字段；SettingsViewModel hideApp/setFolderAutoHide（SAVE_FOLDER 通道）+ encode/decodeFolder 补序列化。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.92-v119-s5-108.apk。上游应用图标换新（ic_launcher 系）不跟进（模块独立图标）。
