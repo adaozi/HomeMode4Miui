@@ -559,3 +559,21 @@ DIFF vs 桩文件:
 - [x] **根因**：上游 Theme.GraceLauncher.Settings 本就是壁纸窗口（windowShowWallpaper=true + 透明 windowBackground），Compose 层 LauncherSettingsScreen 已配套移植（NavHost 对 ListAppearance/Alphabet/ClockStyle/IconDesigner 画 Transparent，普通设置页画 surfaceContainer 不透明）；模块侧从未配窗口主题，默认不透明窗口把壁纸挡住。
 - [x] **修复**：新建 app/src/main/res/values/themes.xml —— Theme.HomeMode4Miui.Settings 逐项对齐上游（壁纸窗口 + 透明背景 + 透明系统栏 + NoActionBar）；AndroidManifest SettingsActivity 挂主题。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.63-settings-wallpaper-96.apk，已 adb install 到 d6516f3a 待实机验证。
+
+### appfont-static（v2.9.64-appfont-static / versionCode 97，2026-10-16）—— 桌面字体解析双根因修复
+
+- [x] **需求（装机反馈）**：设置字体后时钟生效，但字母条/应用名等桌面文本不生效。
+- [x] **排障（解析打点 instrumented build + adb 复现）**：新增 SelectedTypefaceApi29 逐 id/来源/失败原因去重打点，装机实锤两个根因：
+  ① **resolver context 错位**：AndroidFont 加载 context 来自 FontFamilyResolver（宿主
+  Composition 根构造，assets 无模块字体）→ preset 字体 fonts/sacramento.ttf
+  FileNotFoundException。此前 hotfix 给 rememberAppFontFamily 传的 fontContext 只当了
+  remember key，从未进加载链。修复：SelectedFont/LauncherFont 携带创建点捕获的
+  context（桌面 = moduleContext），loader 优先用之；Josefin 内置链同步改自带 context。
+  ② **静态字体 variation 崩点**：PlatformFont.Builder.setFontVariationSettings 对静态
+  （非可变）字体抛 IllegalArgumentException 被 runCatching 吞掉 → 全源失败静默回落；
+  时钟路径走 framework Typeface.Builder（静态字体忽略 variation）所以时钟生效、
+  应用名/字母条不生效——同一文件两条链行为分裂。修复：variation 被拒时降级重建
+  （保留 setWeight，framework 就近匹配/合成粗细）。
+- [x] **验证（adb 自主复现）**：修复前 `id=sacramento resolve failed / ALL SOURCES FAILED`；
+  修复后强停桌面重启 `SelectedTypeface resolved ids=[sacramento, system] families=1 w=500`。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.64-appfont-static-97.apk，已 adb install 到 d6516f3a。
