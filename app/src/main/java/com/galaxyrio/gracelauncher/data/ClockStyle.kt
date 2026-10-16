@@ -26,7 +26,10 @@ enum class ClockLayout(
     Lucky(presetFont = ClockPresetFont.LuckiestGuy),
     SacramentoWeek(week = true, presetFont = ClockPresetFont.Sacramento);
 
-    val allowsCustomFont: Boolean get() = presetFont == null
+    // 模块定制（v2.9.68-clock-font-override，装机反馈"时钟不能自定义字体"）：放开上游
+    // "preset 布局=固定字体设计"的约束 —— 所有布局都允许自定义字体；fontId 为空时
+    // preset 布局仍回落各自 preset 字体（上游默认观感不变）。
+    val allowsCustomFont: Boolean get() = true
 }
 
 data class ClockFaceStyle(

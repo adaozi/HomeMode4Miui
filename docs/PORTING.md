@@ -589,3 +589,9 @@ DIFF vs 桩文件:
   - FontCrossProcess root 镜像代码整体移除，FONT_DELETE 单广播保留（删除同步）。
 - [x] **验证（adb 自主复现）**：FontBridgePull pulled zpixx.ttf (4681088B) → SelectedTypeface resolved ids=[...zpixx.ttf] families=1；新导入字体同样即时解析。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.67-appfont-provider-100.apk，已 adb install 到 d6516f3a。
+
+### clock-font-override（v2.9.68-clock-font-override / versionCode 101，2026-10-16）—— preset 布局放开自定义字体
+
+- [x] **需求（装机反馈）**："我们的时钟不能自定义字体" —— 时钟样式面板选 Sacramento/Bokor 等 preset 布局时，字体选择入口被隐藏（allowsCustomFont=presetFont==null），且 normalized() 直接剥离 fontId、渲染端 presetFont 恒优先 —— 自定义字体对 preset 布局完全不可用。
+- [x] **修复（模块定制，偏离上游 v1.1.4 固定字体设计）**：allowsCustomFont 恒 true（所有布局可选字体）；ClockFace 渲染序改为 customFamily ?: presetFont ?: LauncherFontFamily —— fontId 为空时 preset 布局回落各自 preset 字体（上游默认观感不变），选中导入/preset 外字体即在任意布局生效。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.68-clock-font-override-101.apk，已 adb install 到 d6516f3a。
