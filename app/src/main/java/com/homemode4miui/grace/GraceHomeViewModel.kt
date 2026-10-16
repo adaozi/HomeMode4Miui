@@ -186,10 +186,17 @@ data class GraceHomeUiState(
      */
     val appListApps: List<LauncherApp>
         get() = if (appLoadFailed) emptyList()
-        else apps.filterNot { it.key in hiddenAppKeys }
+        // 上游同步 v1.1.9：手动隐藏表 + autoHideApps 文件夹成员派生集合求并集
+        else apps.filterNot { it.key in effectiveHiddenAppKeys }
             // 上游同步 v1.1.8 S8a：工作资料应用从主列表收编进独立文件夹（仅 managed profile，
             // MIUI 双开/clone 永不进入——见 AppRepository.workProfiles 严格过滤）
             .let { list -> if (workAppsOrganized) list.filterNot { it.isWorkProfile } else list }
+
+    /** 上游同步 v1.1.9：手动隐藏 ∪ autoHideApps 文件夹成员（LauncherStorageSnapshot 同构语义）。 */
+    val folderHiddenAppKeys: Set<String>
+        get() = com.galaxyrio.gracelauncher.data.hiddenAppsFromFolders(folders)
+    val effectiveHiddenAppKeys: Set<String>
+        get() = hiddenAppKeys + folderHiddenAppKeys
 
     /** 上游同步 v1.1.8 S8a：工作资料是否已组织为独立文件夹（enabled + 存在 managed profile + 非 NormalApp 展示）。 */
     val workAppsOrganized: Boolean
@@ -418,6 +425,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                             appKeys = contents["folder:${entry.id}"].orEmpty().filter { it.widget == null }.map { it.key },
                             placement = FolderPlacement.decode(entry.placement),
                             appListAtBottom = entry.appListAtBottom,
+                            // 上游同步 v1.1.9：文件夹成员派生隐藏
+                            autoHideApps = entry.autoHideApps,
                         )
                     }
                     Triple(folders, widgets, contents)

@@ -311,6 +311,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             _uiState.update { it.copy(hiddenAppKeys = keys) }
             send(GraceSettingsBridge.Cmd.SET_HIDDEN_APPS, json = JSONArray(keys.toList()).toString())
         },
+        // 上游同步 v1.1.9：单应用隐藏（AppDetails 弹层）＝ 并入手动隐藏表
+        hideApp = { app ->
+            val keys = _uiState.value.hiddenAppKeys + app.key
+            _uiState.update { it.copy(hiddenAppKeys = keys) }
+            send(GraceSettingsBridge.Cmd.SET_HIDDEN_APPS, json = JSONArray(keys.toList()).toString())
+        },
+        // 上游同步 v1.1.9：文件夹成员派生隐藏 —— 整 folder 走 SAVE_FOLDER 通道
+        setFolderAutoHide = { id, enabled ->
+            _uiState.value.folders.firstOrNull { it.id == id }?.let { folder ->
+                send(GraceSettingsBridge.Cmd.SAVE_FOLDER, json = encodeFolder(folder.copy(autoHideApps = enabled)))
+            }
+        },
         saveFolder = { folder -> send(GraceSettingsBridge.Cmd.SAVE_FOLDER, json = encodeFolder(folder)) },
         updateFolder = { id, name, placement, appListAtBottom ->
             val delta = JSONObject().put("id", id)
@@ -506,6 +518,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         .put("id", folder.id).put("name", folder.name)
         .put("placement", folder.placement.name)
         .put("appListAtBottom", folder.appListAtBottom)
+        .put("autoHideApps", folder.autoHideApps)
         .put("keys", JSONArray(folder.appKeys))
         .toString()
 

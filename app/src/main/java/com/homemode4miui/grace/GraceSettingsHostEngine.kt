@@ -317,6 +317,7 @@ class GraceSettingsHostEngine(
             appKeys = v.optJSONArray("keys")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf(String::isNotBlank) } } ?: emptyList(),
             placement = FolderPlacement.decode(v.optString("placement")),
             appListAtBottom = v.optBoolean("appListAtBottom", true),
+            autoHideApps = v.optBoolean("autoHideApps", false),
         )
     }.getOrNull()
 
