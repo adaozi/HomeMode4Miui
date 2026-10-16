@@ -44,6 +44,11 @@ public final class HostCompat {
     private static final String BASE_LAUNCHER_CLS = "com.miui.home.launcher.BaseLauncher";
     /** OS3 家族 versionCode 下界（OS2 5.39.40 = 53940xxxx，OS3 6.01.03 = 601031927） */
     private static final long OS3_MIN_VERSION_CODE = 600_000_000L;
+    /** 审计修缮（2026-10-16）：OS4（HyperOS4 / Launcher 8.x = Flutter+Rust 重写，无 Java
+     *  桌面，RE_HyperOS4_NATIVE_HOOK.md 归档）versionCode 下界。OS4 桌面（8xxxxxxx ≥ 8 亿）
+     *  此前会被误判 OS3 家族（label 错误）；判为 UNKNOWN 保持诚实 —— 其 Java hook 全部
+     *  注定失败，走 tryHook 可见降级 + gate1 criticalHookFailed 拦截。 */
+    private static final long OS4_MIN_VERSION_CODE = 800_000_000L;
 
     private static final String TAG = "HomeMode4Miui";
     private static volatile int sFamily = FAMILY_UNKNOWN;
@@ -139,7 +144,9 @@ public final class HostCompat {
     /** 应用家族判定；返回是否改变了此前结论 */
     private static boolean applyFamily(long code, String name) {
         int newFamily;
-        if (code >= OS3_MIN_VERSION_CODE) {
+        if (code >= OS4_MIN_VERSION_CODE) {
+            newFamily = FAMILY_UNKNOWN; // OS4 无 Java 桌面，不冒充 OS3（hook 走可见降级）
+        } else if (code >= OS3_MIN_VERSION_CODE) {
             newFamily = FAMILY_OS3;
         } else if (code >= 0) {
             newFamily = FAMILY_OS2;
@@ -193,6 +200,10 @@ public final class HostCompat {
                 ? XposedHelpers.findClass(BASE_LAUNCHER_CLS, cl)
                 : XposedHelpers.findClass(LAUNCHER_CLS, cl);
         while (c != null && c != Object.class) {
+            // 审计修缮（2026-10-16）：宿主包边界 —— 父类链漂出 com.miui.home（如未来
+            // 宿主版本不再 override 生命周期方法，walk 会走到 android.app.Activity）时
+            // hook 会静默装到框架类上变全局 hook。此处拒绝并显式失败（tryHook 降级可见）。
+            if (!c.getName().startsWith("com.miui.home")) break;
             if (declares(c, method, params)) {
                 sDeclaringCache.put(method, c);
                 log("launcherHookClass[" + method + "] -> " + c.getName()

@@ -24,9 +24,8 @@ internal object GraceRootActions {
         GraceButtonAction.QuickSettings to "cmd statusbar expand-settings",
     )
 
-    /** root 是否可能可用（探测结果仅缓存布尔，探测本身在 worker）。 */
-    @Volatile var lastRootResult: Boolean? = null
-        private set
+    // 审计修缮（2026-10-16）：删除 lastRootResult —— 只写不读的诊断残留，
+    // root 可用性由执行结果日志与 a11y 兜底承载。
 
     /**
      * fire-and-forget：恒返回 true（调用方无需等待，结果仅日志 + a11y 兜底）。
@@ -55,7 +54,6 @@ internal object GraceRootActions {
                         ModLog.i("GraceRootActions root timeout cmd=$cmd")
                         Int.MIN_VALUE
                     }
-                    lastRootResult = exit == 0
                     if (exit != 0) ModLog.i("GraceRootActions root exit=$exit cmd=$cmd")
                     exit == 0
                 } finally {
@@ -63,7 +61,6 @@ internal object GraceRootActions {
                 }
             } catch (t: Throwable) {
                 // IOException = 无 su（未 root 或 Magisk 未装）；SecurityException = 授权策略拒绝
-                lastRootResult = false
                 ModLog.i("GraceRootActions root unavailable, fallback to a11y: ${t.javaClass.simpleName}")
                 false
             }

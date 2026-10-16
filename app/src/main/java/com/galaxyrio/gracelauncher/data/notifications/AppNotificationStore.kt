@@ -65,8 +65,18 @@ internal class AppNotificationStore {
 
     fun ranking(ranking: (String) -> AppNotificationRanking) { classification = ranking; publish() }
 
-    fun disconnected() {
-        cancel = null; classification = { AppNotificationRanking() }; entries.clear(); _state.value = emptyMap()
+    /**
+     * hotfix（notif-churn）：解绑 ≠ 通知被清除。
+     *   - keepDisplay=false（授权被撤销 / 进程销毁）：清空并发布空快照（真正失效语义）；
+     *   - keepDisplay=true（授权仍在，MIUI 省电解绑，notif7 自愈链会重绑）：保留最后
+     *     已知快照且【不发布】—— StateFlow 值不变 → 引擎无空广播 → 桌面不清行。
+     *     重绑后 connected(seed) 用系统真值校正；若集合未变，引擎指纹去重直接拦截，
+     *     桌面零扰动 —— 消除"解绑↔重绑"循环造成的整批出现/整批消失抖动。
+     * 解绑期间新通知 posted 被 cancel==null 守卫挡住，重连 seed 全量兜底，无丢失。
+     */
+    fun disconnected(keepDisplay: Boolean = false) {
+        cancel = null; classification = { AppNotificationRanking() }
+        if (!keepDisplay) { entries.clear(); _state.value = emptyMap() }
     }
 
     fun dismiss(key: String, revision: Long): Boolean {

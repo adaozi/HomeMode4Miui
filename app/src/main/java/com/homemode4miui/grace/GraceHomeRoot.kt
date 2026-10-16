@@ -19,14 +19,17 @@
 package com.homemode4miui.grace
 
 import android.content.Context
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import com.galaxyrio.gracelauncher.data.WallpaperTextMode
+import com.galaxyrio.gracelauncher.data.ThemeMode
 import com.galaxyrio.gracelauncher.ui.theme.GraceLauncherTheme
 import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
 import com.galaxyrio.gracelauncher.ui.theme.rememberLauncherAppearance
@@ -65,21 +68,64 @@ fun GraceHomeRoot(
             .getOrDefault(hostContext)
     }
     // 宿主桌面窗口铺在壁纸之上，深色主题 + 壁纸动态取色是桌面默认语义
-    GraceLauncherTheme(darkTheme = true, dynamicColor = true, fontId = null) {
-        val appearance = rememberLauncherAppearance(WallpaperTextMode.Auto, themedIcons = true)
-        CompositionLocalProvider(
-            LocalContext provides moduleContext,
-            LocalHostContext provides hostContext,
-            LocalLauncherAppearance provides appearance,
-        ) {
-            // 心跳：等首帧真正绘制完成再上报（见函数注释）
-            LaunchedEffect(Unit) {
-                withFrameNanos { }
-                onComposeAlive?.invoke()
-            }
-            // P2：路由升级为两态（首页/抽屉/搜索），见 GraceLauncherRoute；
-            // P5：透传宿主 Activity（启动动画中枢构造用）
-            GraceLauncherRoute(viewModel, hostActivity = hostActivity)
-        }
+    //
+    // hotfix（appFont/iconSize 桌面接线，C 组登记"仅持久化、宿主渲染待接"补漏）：
+    // 设置页经桥把 appFontId / iconDesignJson（design.iconSize = 图标显示尺寸）
+    // 落 Room launcher_settings，宿主 VM observeSettings 流驱动本根组件重组。
+    // 三处硬编码根因：
+    //   ① fontId = null → 桌面 typography 永远 Josefin（设置页传了 appFontId 所以
+    //      设置里生效、桌面不生效）；
+    //   ② LocalFontLibrary 在 GraceLauncherRoute（主题内部）才提供 → 主题内
+    //      rememberAppFontFamily 解析回退链时读到空默认库，导入字体全部回落；
+    //   ③ rememberLauncherAppearance 未传 iconSize → LocalLauncherAppearance.iconSize
+    //      恒 100，设置页滑杆只影响设置页自己的预览（LauncherComponents 的
+    //      displaySize 消费端永远拿到 100）。
+    val uiState = viewModel.uiState.collectAsState().value
+    val settings = uiState.settings
+    // darkMode 三态 + amoledMode + 动态取色/种子色：对齐上游 LauncherAppTheme
+    // （桌面与设置页共用同一外观设置语义；seedColor 在 useDynamicColors=true 时
+    // 被 GraceLauncherTheme 的动态取色分支短路，传参语义与上游一致）。
+    val dark = when (settings.darkMode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
     }
+        GraceLauncherTheme(
+            darkTheme = dark,
+            amoledMode = settings.amoledMode,
+            dynamicColor = settings.useDynamicColors,
+            seedColor = Color(settings.themeColor),
+            // 上游同步 v1.1.8 S5：全局字体 = 字体库 selected 链（字体库管理页首位）。
+            // appFontId 为 legacy 列，设置页从不写入 —— 接它永远不生效（装机实锤）。
+            fontLibrary = settings.fontLibrary,
+            // hotfix（appFont 桌面接线补漏）：主题层字体解析必须用模块 Context ——
+            // 此处的 LocalContext 是 ModuleResourceBridge 包装的宿主 Context（宿主
+            // assets 无模块字体资产，宿主 filesDir 无导入字体），不传则字体恒回落。
+            fontContext = moduleContext,
+        ) {
+            // 审计修缮（2026-10-16）：壁纸文字颜色接宿主 SP —— 设置页 TEXT_MODE 桥命令
+            // 落 launcher_appearance.xml（此前硬编码 Auto，Light/Dark 档只在设置页预览生效）。
+            // SP 写入不触发 Room 设置流，以 settingsRevision（onSettingsMutated 自增）驱动重组。
+            val textMode = remember(uiState.settingsRevision) {
+                com.galaxyrio.gracelauncher.data.LauncherPreferences(hostContext).textMode
+            }
+            val appearance = rememberLauncherAppearance(
+                textMode, themedIcons = true,
+                iconSize = settings.iconDesign?.design?.iconSize ?: 100,
+            )
+            CompositionLocalProvider(
+                LocalContext provides moduleContext,
+                LocalHostContext provides hostContext,
+                LocalLauncherAppearance provides appearance,
+            ) {
+                // 心跳：等首帧真正绘制完成再上报（见函数注释）
+                LaunchedEffect(Unit) {
+                    withFrameNanos { }
+                    onComposeAlive?.invoke()
+                }
+                // P2：路由升级为两态（首页/抽屉/搜索），见 GraceLauncherRoute；
+                // P5：透传宿主 Activity（启动动画中枢构造用）
+                GraceLauncherRoute(viewModel, hostActivity = hostActivity)
+            }
+        }
 }

@@ -41,6 +41,12 @@ data class GraceHomeSettings(
     val mediaPlayer: Boolean = true,
     /** B6.1：无播放会话时常驻占位播放器（原版默认 false）。 */
     val mediaAlwaysVisible: Boolean = false,
+    /** B6.1：无播放会话时点击播放器打开的应用（launcher_settings.mediaAppKey 列；null = 桥默认行为）。 */
+    val mediaAppKey: String? = null,
+    /** 原版 clockAppKey：点击时钟打开的应用（launcher_settings.clockAppKey 列；null = 标准 SHOW_ALARMS）。 */
+    val clockAppKey: String? = null,
+    /** 原版 allowHapticFeedback：桌面触感反馈（行内拖拽/widget 把手等，宿主渲染接线）。 */
+    val allowHapticFeedback: Boolean = true,
     /** B6.2：天气（原版默认 false；实际显示还需模块 App 读到小米天气 provider 快照）。 */
     val weatherEnabled: Boolean = false,
     /** B6.2：Agenda 面板预报天数（原版默认 7，clamp 1..14）。 */
@@ -73,6 +79,19 @@ data class GraceHomeSettings(
     val graceButton: GraceButtonSettings = GraceButtonSettings(),
     /** 上游同步 v1.1.8 S5：字体库（JSON 列 fontLibraryJson；decode 兼容 appFontId 旧选择）。 */
     val fontLibrary: FontLibrary = FontLibrary(),
+    /** hotfix（appFont 桌面接线）：字体选择（launcher_settings.appFontId 列；设置页经桥落库）。 */
+    val appFontId: String? = null,
+    /** hotfix（iconSize 桌面接线）：全局图标设计（launcher_settings.iconDesignJson 列；design.iconSize = 图标显示尺寸 80..150）。 */
+    val iconDesign: ItemIcon? = null,
+    // ---- hotfix（darkMode/amoledMode/themeColor 桌面接线，C 组登记补漏尾批）----
+    /** 原版 useDynamicColors：true = 壁纸动态取色，false = 用 themeColor 种子色。 */
+    val useDynamicColors: Boolean = true,
+    /** 原版 themeColor：种子色 ARGB（useDynamicColors=false 时生效）。 */
+    val themeColor: Int = LauncherSettings.DEFAULT_THEME_COLOR,
+    /** 原版 darkMode：主题三态（System 跟随系统）。 */
+    val darkMode: ThemeMode = ThemeMode.System,
+    /** 原版 amoledMode：深色下纯黑表面。 */
+    val amoledMode: Boolean = false,
     /** 上游同步 v1.1.8 S8a：工作资料模型（JSON 列 workProfileJson；schema v19 已有列）。 */
     val workProfile: ProfileSettings = ProfileSettings.workDefaults(),
 ) {
@@ -85,7 +104,9 @@ data class GraceHomeSettings(
                    searchSettingsJson: String? = null, homeLayoutJson: String? = null,
                    calendarAgenda: Boolean = true, calendarAboveClock: Boolean = false,
                    showBatteryPercentage: Boolean = true, mediaPlayer: Boolean = true,
-                   mediaAlwaysVisible: Boolean = false, weatherEnabled: Boolean = false,
+                   mediaAlwaysVisible: Boolean = false, mediaAppKey: String? = null,
+                   clockAppKey: String? = null, allowHapticFeedback: Boolean = true,
+                   weatherEnabled: Boolean = false,
                    weatherForecastDays: Int = 7, iconPackPackagesJson: String? = null,
                    privateSpaceJson: String? = null,
                    hideStatusBar: Boolean = true,
@@ -97,7 +118,13 @@ data class GraceHomeSettings(
                    homeGesturesJson: String? = null,
                    graceButtonJson: String? = null,
                    fontLibraryJson: String? = null,
-                   workProfileJson: String? = null) = GraceHomeSettings(
+                   workProfileJson: String? = null,
+                   appFontId: String? = null,
+                   iconDesignJson: String? = null,
+                   useDynamicColors: Boolean = true,
+                   themeColor: Int = LauncherSettings.DEFAULT_THEME_COLOR,
+                   darkModeName: String? = null,
+                   amoledMode: Boolean = false) = GraceHomeSettings(
             clockEnabled = clockEnabled,
             clockStyle = ClockStyle.decode(clockStyleJson),
             hideFavoriteNames = hideFavoriteNames,
@@ -108,6 +135,9 @@ data class GraceHomeSettings(
             showBatteryPercentage = showBatteryPercentage,
             mediaPlayer = mediaPlayer,
             mediaAlwaysVisible = mediaAlwaysVisible,
+            mediaAppKey = mediaAppKey,
+            clockAppKey = clockAppKey,
+            allowHapticFeedback = allowHapticFeedback,
             weatherEnabled = weatherEnabled,
             weatherForecastDays = weatherForecastDays.coerceIn(1, 14),
             iconPackPackages = decodeStringList(iconPackPackagesJson),
@@ -124,6 +154,12 @@ data class GraceHomeSettings(
             graceButton = GraceButtonSettings.decode(graceButtonJson),
             fontLibrary = FontLibrary.decode(fontLibraryJson),
             workProfile = ProfileSettings.decode(workProfileJson, ProfileSettings.workDefaults()),
+            appFontId = appFontId,
+            iconDesign = iconDesignJson?.let(ItemIcon::decode),
+            useDynamicColors = useDynamicColors,
+            themeColor = themeColor,
+            darkMode = ThemeMode.entries.firstOrNull { it.name == darkModeName } ?: ThemeMode.System,
+            amoledMode = amoledMode,
         )
 
         /** 原版 LauncherSettingsRepository.settingsJson 同构：字符串列表 JSON。 */
@@ -153,6 +189,9 @@ class GraceHomeSettingsStore(context: Context) {
         showBatteryPercentage = preferences.getBoolean(KEY_SHOW_BATTERY, true),
         mediaPlayer = preferences.getBoolean(KEY_MEDIA_PLAYER, true),
         mediaAlwaysVisible = preferences.getBoolean(KEY_MEDIA_ALWAYS, false),
+        mediaAppKey = preferences.getString(KEY_MEDIA_APP, null),
+        clockAppKey = preferences.getString(KEY_CLOCK_APP, null),
+        allowHapticFeedback = preferences.getBoolean(KEY_ALLOW_HAPTIC, true),
         weatherEnabled = preferences.getBoolean(KEY_WEATHER_ENABLED, false),
         weatherForecastDays = preferences.getInt(KEY_WEATHER_DAYS, 7),
         iconPackPackagesJson = preferences.getString(KEY_ICON_PACKS, null),
@@ -169,6 +208,14 @@ class GraceHomeSettingsStore(context: Context) {
         graceButtonJson = preferences.getString(KEY_GRACE_BUTTON, null),
         fontLibraryJson = preferences.getString(KEY_FONT_LIBRARY, null),
         workProfileJson = preferences.getString(KEY_WORK_PROFILE, null),
+        // 审计修缮（2026-10-16）：补齐 SP 降级路径缺失的 6 个外观字段 —— 此前 DB
+        // 初始化失败降级 SP 时这 6 项静默回默认值。
+        appFontId = preferences.getString(KEY_APP_FONT_ID, null),
+        iconDesignJson = preferences.getString(KEY_ICON_DESIGN, null),
+        useDynamicColors = preferences.getBoolean(KEY_DYNAMIC_COLORS, true),
+        themeColor = preferences.getInt(KEY_THEME_COLOR, LauncherSettings.DEFAULT_THEME_COLOR),
+        darkModeName = preferences.getString(KEY_DARK_MODE, null),
+        amoledMode = preferences.getBoolean(KEY_AMOLED, false),
     )
 
     fun save(settings: GraceHomeSettings) = preferences.edit {
@@ -182,6 +229,10 @@ class GraceHomeSettingsStore(context: Context) {
         putBoolean(KEY_SHOW_BATTERY, settings.showBatteryPercentage)
         putBoolean(KEY_MEDIA_PLAYER, settings.mediaPlayer)
         putBoolean(KEY_MEDIA_ALWAYS, settings.mediaAlwaysVisible)
+        // putString(key, null) = 移除语义（读侧 getString 回 null = 默认行为）
+        putString(KEY_MEDIA_APP, settings.mediaAppKey)
+        putString(KEY_CLOCK_APP, settings.clockAppKey)
+        putBoolean(KEY_ALLOW_HAPTIC, settings.allowHapticFeedback)
         putBoolean(KEY_WEATHER_ENABLED, settings.weatherEnabled)
         putInt(KEY_WEATHER_DAYS, settings.weatherForecastDays)
         putString(KEY_ICON_PACKS, GraceHomeSettings.encodeStringList(settings.iconPackPackages))
@@ -198,6 +249,13 @@ class GraceHomeSettingsStore(context: Context) {
         putString(KEY_GRACE_BUTTON, settings.graceButton.encode())
         putString(KEY_FONT_LIBRARY, settings.fontLibrary.encode())
         putString(KEY_WORK_PROFILE, settings.workProfile.encode())
+        // 审计修缮（2026-10-16）：SP 降级路径补齐 6 个外观字段（与 load 对称）
+        putString(KEY_APP_FONT_ID, settings.appFontId)
+        putString(KEY_ICON_DESIGN, settings.iconDesign?.encode())
+        putBoolean(KEY_DYNAMIC_COLORS, settings.useDynamicColors)
+        putInt(KEY_THEME_COLOR, settings.themeColor)
+        putString(KEY_DARK_MODE, settings.darkMode.name)
+        putBoolean(KEY_AMOLED, settings.amoledMode)
     }
 
     private companion object {
@@ -212,6 +270,9 @@ class GraceHomeSettingsStore(context: Context) {
         const val KEY_SHOW_BATTERY = "show_battery_percentage"
         const val KEY_MEDIA_PLAYER = "media_player"
         const val KEY_MEDIA_ALWAYS = "media_always_visible"
+        const val KEY_MEDIA_APP = "media_app_key"
+        const val KEY_CLOCK_APP = "clock_app_key"
+        const val KEY_ALLOW_HAPTIC = "allow_haptic_feedback"
         const val KEY_WEATHER_ENABLED = "weather_enabled"
         const val KEY_WEATHER_DAYS = "weather_forecast_days"
         const val KEY_ICON_PACKS = "icon_pack_packages"
@@ -228,5 +289,11 @@ class GraceHomeSettingsStore(context: Context) {
         const val KEY_GRACE_BUTTON = "grace_button"
         const val KEY_FONT_LIBRARY = "font_library"
         const val KEY_WORK_PROFILE = "work_profile"
+        const val KEY_APP_FONT_ID = "app_font_id"
+        const val KEY_ICON_DESIGN = "icon_design_json"
+        const val KEY_DYNAMIC_COLORS = "use_dynamic_colors"
+        const val KEY_THEME_COLOR = "theme_color"
+        const val KEY_DARK_MODE = "dark_mode"
+        const val KEY_AMOLED = "amoled_mode"
     }
 }

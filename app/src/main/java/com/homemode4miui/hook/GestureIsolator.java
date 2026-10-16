@@ -49,6 +49,9 @@ public final class GestureIsolator {
     private static volatile Class<?> sFloatingCls;
     private static final java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Field> sFields =
             new java.util.concurrent.ConcurrentHashMap<>();
+    /** 负缓存集：已探测不存在的字段名（CHM 不允许 null value，独立集合承载缺失标记）。 */
+    private static final java.util.Set<String> sMissingFields =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private GestureIsolator() {
     }
@@ -94,19 +97,32 @@ public final class GestureIsolator {
         }
     }
 
-    /** 缓存版字段读取：null 值 = 已探测过的缺失（OS3 mActivity 上移 BaseDragLayer 等），
-     *  避免每事件重复抛 NoSuchFieldError 全父类链扫描。 */
+    /** 缓存版字段读取：缺失字段记入负缓存集（OS3 mActivity 上移 BaseDragLayer 等），
+     *  避免每事件重复抛 NoSuchFieldError 全父类链扫描。
+     *  审计修缮（2026-10-16）：原实现 ConcurrentHashMap.put(name, null) 必抛 NPE
+     *  （CHM 不允许 null value），负缓存从未生效 —— 改用独立缺失集承载。 */
     private static Object fieldOrNull(Object target, String name) {
+        java.lang.reflect.Field f = sFields.get(name);
+        if (f != null) {
+            return getFieldValue(f, target, name);
+        }
+        if (sMissingFields.contains(name)) return null; // 负缓存命中
         try {
-            java.lang.reflect.Field f = sFields.get(name);
-            if (f == null) {
-                if (sFields.containsKey(name)) return null; // 负缓存命中
-                f = XposedHelpers.findField(target.getClass(), name);
-                sFields.put(name, f);
-            }
+            f = XposedHelpers.findField(target.getClass(), name);
+            sFields.put(name, f);
             return f.get(target);
         } catch (Throwable t) {
-            sFields.put(name, null); // 负缓存
+            sMissingFields.add(name); // 负缓存：该字段在宿主类不存在
+            return null;
+        }
+    }
+
+    /** 反射读取独立兜底：get 抛出（类换实例/类型漂移）同样只降级为 null，不污染正缓存。 */
+    private static Object getFieldValue(java.lang.reflect.Field f, Object target, String name) {
+        try {
+            return f.get(target);
+        } catch (Throwable t) {
+            sFields.remove(name);
             return null;
         }
     }

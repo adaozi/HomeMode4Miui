@@ -29,6 +29,7 @@
 package com.homemode4miui.home
 
 import android.app.Activity
+import android.content.Intent
 import android.widget.FrameLayout
 import androidx.compose.runtime.Recomposer
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -122,18 +123,18 @@ class GraceHomeView(launcher: Activity) :
         contentInstalled = true
         heartbeatReceived = false
 
-        // ---- 持久化熔断检查（版本变更自动清零；连崩超阈值永久降级）----
-        // perf2：versionCode 走进程级缓存（同进程恒定），复用路径零 binder 开销
-        val versionCode = runCatching {
-            sHostVersionCode.takeIf { it > 0 } ?: run {
-                val info = launcher.packageManager.getPackageInfo(launcher.packageName, 0)
-                @Suppress("DEPRECATION")
-                val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
-                sHostVersionCode = code
-                code
-            }
-        }.getOrDefault(0)
-        val failures = ModePrefs.onGraceComposeMountAttempt(launcher, versionCode)
+        // ---- 持久化熔断检查（版本/安装时间变更自动清零；连崩超阈值永久降级）----
+        // hotfix（fuse-stamp）：清零键升级为 versionCode + lastUpdateTime 双键 ——
+        // 本块仅在首次装内容时执行（复用路径提前 return），多一次 getPackageInfo
+        // binder 查询无性能顾虑。
+        val (versionCode, installStamp) = runCatching {
+            val info = launcher.packageManager.getPackageInfo(launcher.packageName, 0)
+            @Suppress("DEPRECATION")
+            val code = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
+            sHostVersionCode = code
+            code to info.lastUpdateTime
+        }.getOrDefault(0 to 0L)
+        val failures = ModePrefs.onGraceComposeMountAttempt(launcher, versionCode, installStamp)
         if (ModePrefs.isGraceComposeDead(launcher) || failures > ModePrefs.GRACE_MAX_FAILURES) {
             ModLog.e("GraceHomeView degrade: compose mount failures=$failures"
                     + " -> permanent placeholder fallback (desktop safety first)", null)
@@ -310,10 +311,12 @@ class GraceHomeView(launcher: Activity) :
     /**
      * P2：Home 键回桌面（底座在 Launcher.onNewIntent 主意图时回调）——转发给
      * 路由层复位两态 UI（关抽屉/搜索），对齐原版 returnHomeRequests。
+     * hotfix return-anim：Intent 原样透传给 VM → 路由 → LauncherAppTransitions
+     * （返回动画需要 Quickstep 注入的 GestureNavContract extra；null = 已在桌面路径）。
      */
-    override fun onHomeIntent() {
+    override fun onHomeIntent(intent: Intent?) {
         try {
-            homeViewModel?.requestReturnHome()
+            homeViewModel?.onHomeIntent(intent)
         } catch (t: Throwable) {
             ModLog.e("GraceHomeView onHomeIntent failed", t)
         }

@@ -190,8 +190,20 @@ private object SelectedTypefaceApi29 {
                     ?: run {
                         val store = runCatching { ClockFontStore(context).file(id) }.getOrNull()
                         val mirror = com.homemode4miui.bridge.FontCrossProcess.mirroredFile(id)
+                        // 排障打点：宿主进程亲自枚举两个候选目录 —— mirror install "ok" 但
+                        // mirror=false（装机 23:00:19 实锤），需要看清 root cp 的落点与
+                        // 宿主进程视角的目录内容是否一致（/data/data 符号链接 / 双开命名空间）。
+                        val hostDirList = runCatching {
+                            java.io.File(com.homemode4miui.bridge.FontCrossProcess.HOST_DIR_PUBLIC)
+                                .list()?.joinToString(",")
+                        }.getOrNull()
+                        val user0DirList = runCatching {
+                            java.io.File("/data/user/0/com.miui.home/files/clock_fonts")
+                                .list()?.joinToString(",")
+                        }.getOrNull()
                         logOnce("src:$id", "id=$id store=${store != null} mirror=${mirror != null} " +
-                            "ctx=${context.javaClass.simpleName} filesDir=${runCatching { context.filesDir }.getOrNull()}")
+                            "ctx=${context.javaClass.simpleName} filesDir=${runCatching { context.filesDir }.getOrNull()} " +
+                            "hostDir=[$hostDirList] user0Dir=[$user0DirList]")
                         (store ?: mirror)?.let { PlatformFont.Builder(it).build() }
                     }
             }?.also { buffers.put(id, it) }

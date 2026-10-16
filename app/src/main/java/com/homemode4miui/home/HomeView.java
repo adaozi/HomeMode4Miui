@@ -1,6 +1,7 @@
 package com.homemode4miui.home;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.widget.FrameLayout;
 
 /**
@@ -51,5 +52,15 @@ public abstract class HomeView extends FrameLayout {
 
     /** Home 键回桌面（Launcher.onNewIntent 且为主意图）：两态 UI 在此复位回首页态 */
     public void onHomeIntent() {
+    }
+
+    /**
+     * Home 键回桌面（带 Intent 透传，hotfix return-anim）：返回动画需要 HOME intent
+     * 里的 GestureNavContract extra（Quickstep 注入的图标回位合约）。null = 无 contract
+     * 路径（OS3 onNewIntentWhenAlreadyOnHome / 已在桌面复位）。默认转调无参重载，
+     * 旧 UI 实现零感知。
+     */
+    public void onHomeIntent(Intent intent) {
+        onHomeIntent();
     }
 }

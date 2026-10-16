@@ -201,16 +201,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     // ================= 写路径（乐观更新 + 桥命令）=================
 
     val actions = LauncherActions(
-        requestDefaultHome = {},
         requestPrivateSpace = { _, onResult -> onResult() }, // 降级：v1 无建档面（见头注）
         closePrivateSpace = { send(GraceSettingsBridge.Cmd.PS_CLOSE) },
-        openPrivateSpaceSettings = {},
+        // 审计修缮（2026-10-16）：接上现成执行端（此前 no-op，私密空间「系统设置」点击无反应）
+        openPrivateSpaceSettings = {
+            com.galaxyrio.gracelauncher.platform.PrivateSpaceProbe.openSettings(getApplication())
+        },
         reorderPrivateApps = {},        // 降级：私人空间 app 序不跨桥（见头注）
         resetPrivateSpaceAppearance = sendAndTrue {
             mutateSettingsDirect { it.copy(privateSpace = it.privateSpace.copy(name = PrivateSpaceDefaultName)) }
         },
         appInfo = ::openAppDetails,
-        screenTime = ::openAppDetails,
         uninstall = { app -> runCatching {
             getApplication<Application>().startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${app.packageName}"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -241,8 +242,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             send(GraceSettingsBridge.Cmd.SET_ITEM_ICON, app.key, json = icon?.encode())
             true
         },
-        importItemIcon = { _, _ -> false }, // 降级：图片必须落宿主 filesDir（见头注）
-        showShortcutInAppList = { app, show -> viewModelScope.launch { rememberShortcut(app, show) } },
         rememberShortcut = { app -> rememberShortcut(app, null) },
         updatePopup = { owner, defaults, transform ->
             val next = transform(_uiState.value.popupItems(owner, defaults))
@@ -256,17 +255,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             send(GraceSettingsBridge.Cmd.ADD_POPUP_WIDGET, arg1 = owner.key)
             viewModelScope.launch { _closeRequests.emit(Unit) }
         },
-        categorize = { app, category -> send(GraceSettingsBridge.Cmd.CATEGORIZE, app.key, category) },
-        copyPackageName = { app -> copyToClipboard(app.packageName) },
-        storePage = { app -> runCatching {
-            getApplication<Application>().startActivity(Intent(Intent.ACTION_VIEW,
-                Uri.parse("market://details?id=${app.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } },
-        newEvent = {},                  // v1：日程打开走宿主（B6.2 语义），设置页无入口
-        openEvent = {},
-        refreshAgenda = {},
+        // 审计修缮（2026-10-16）：移除 categorize/copyPackageName/storePage/newEvent/
+        // openEvent/refreshAgenda/themedIcons 赋值 —— 对应 LauncherActions 字段零消费已删。
         textMode = { mode -> send(GraceSettingsBridge.Cmd.TEXT_MODE, mode.name); _uiState.update { it.copy(textMode = mode) } },
-        themedIcons = { enabled -> send(GraceSettingsBridge.Cmd.THEMED_ICONS, if (enabled) "1" else "0"); _uiState.update { it.copy(themedIcons = enabled) } },
         refreshIconPacks = ::refreshIconPacks,
         refreshApps = ::refreshApps,
         updateSettings = { transform ->
@@ -339,22 +330,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         // 合并为一次宿主批量查询（结果缓存到本次设置页会话；图标跨桥为空，登记降级）
         shortcuts = { app -> shortcutsViaBridge(app) },
         cachedShortcuts = { _ -> null },
-        prepareShortcuts = {},
-        reorderFavorites = { keys ->
-            _uiState.update { it.copy(favoriteOrder = keys) }
-            send(GraceSettingsBridge.Cmd.REORDER_FAVORITES, json = JSONArray(keys).toString())
-        },
-        launchAppAt = null,
-        launchSearchApp = null,
+        // 审计修缮（2026-10-16）：移除 prepareShortcuts/reorderFavorites/launchAppAt/
+        // launchSearchApp 赋值 —— 字段零消费已删（收藏重排在宿主 shim 面直走
+        // GraceHomeViewModel.reorderFavorites，不经桥）。
         launchShortcutAt = null,
         launchShortcut = {},
         requestMediaAccess = { openNotificationListenerSettings() },
-        controlMedia = { _, _ -> },     // 媒体控制命令面属宿主（P6），设置页无播放器
-        dismissMedia = { _, _ -> false },
-        dismissNotification = { _, _ -> false },
-        openNotification = { _, _ -> false },
         requestWeatherAccess = { refreshWeather() }, // provider permission 模块 manifest 自持
-        requestCalendarAccess = {},     // 降级：日历权限在宿主授予（B6.2），设置页只切开关
         // 上游同步补漏：原为 no-op 占位（"桌面 widget 编辑走宿主"），效率页
         // 「添加自定义小组件」点击无反应。对齐 moveWidget 跨进程模式：发命令 +
         // 关设置页，桌面 Route 收 ADD_WIDGET 开 WidgetPicker。

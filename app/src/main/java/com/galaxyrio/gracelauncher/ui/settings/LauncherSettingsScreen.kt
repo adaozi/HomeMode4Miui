@@ -197,7 +197,7 @@ fun LauncherSettingsScreen(
                 if (!storage.canEdit) {
                     SettingsScaffold(stringResource(R.string.settings_title), "settings_storage_blocked", back) { }
                 } else when (page) {
-                    SettingsPage.Root -> SettingsHome(uiState.isDefaultHome, actions.requestDefaultHome, back, navigate)
+                    SettingsPage.Root -> SettingsHome(back, navigate)
                     SettingsPage.Productivity -> ProductivitySettings(uiState, actions, back, navigate)
                     SettingsPage.Clock -> ClockSettings(uiState, actions, back)
                     SettingsPage.Search -> SearchSettingsScreen(uiState, actions, back)
@@ -348,12 +348,9 @@ fun LauncherSettingsScreen(
 
 @Composable
 private fun SettingsHome(
-    isDefaultHome: Boolean?,
-    onSetDefaultHome: () -> Unit,
     onBack: () -> Unit,
     navigate: (SettingsPage) -> Unit,
 ) {
-    val showDefaultHomeBanner = isDefaultHome == false
     val categories = listOf(
         SettingsPage.Productivity to LauncherSymbol.Star,
         SettingsPage.Themes to LauncherSymbol.Palette,
@@ -362,11 +359,7 @@ private fun SettingsHome(
     )
     SettingsScaffold(stringResource(R.string.settings_title), "settings_root", onBack) { padding ->
         SettingsList(padding) {
-            item(key = "settings_intro") { Spacer(Modifier.height(if (showDefaultHomeBanner) 32.dp else 24.dp)) }
-            if (showDefaultHomeBanner) {
-                item(key = "default_home_banner") { DefaultHomeBanner(onSetDefaultHome) }
-                item(key = "default_home_spacing") { Spacer(Modifier.height(32.dp)) }
-            }
+            item(key = "settings_intro") { Spacer(Modifier.height(24.dp)) }
             categories.forEachIndexed { index, (page, symbol) ->
                 item(key = page.name) {
                     val title = when (page) {
@@ -395,28 +388,6 @@ private fun SettingsHome(
                     ) { navigate(page) }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun DefaultHomeBanner(onClick: () -> Unit) {
-    // A separate highlighted action, not a checked switch or a fifth category.
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().testTag("settings_default_home"),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    ) {
-        Row(
-            Modifier.heightIn(min = 72.dp).padding(horizontal = 24.dp, vertical = 18.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LauncherIcon(LauncherSymbol.Home, Modifier.size(24.dp))
-            Text(stringResource(R.string.set_default_launcher), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            LauncherIcon(LauncherSymbol.Launch, Modifier.size(24.dp))
         }
     }
 }

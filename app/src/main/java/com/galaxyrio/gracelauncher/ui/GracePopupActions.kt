@@ -17,7 +17,6 @@ import com.galaxyrio.gracelauncher.data.ShortcutStatus
 data class GracePopupActions(
     val shortcuts: suspend (LauncherApp) -> ShortcutResult = { ShortcutResult(ShortcutStatus.DefaultLauncherRequired) },
     val cachedShortcuts: (LauncherApp) -> ShortcutResult? = { null },
-    val launchAppAt: ((LauncherApp, Rect) -> Unit)? = null,
     val launchShortcutAt: ((LauncherShortcut, Rect) -> Unit)? = null,
     val launchShortcut: (LauncherShortcut) -> Unit = {},
     // ---- P4 widget 管理入口（bind/configure 链路在宿主进程内完成）----
@@ -26,8 +25,8 @@ data class GracePopupActions(
     val configureWidget: () -> Unit = {},
     val removeWidget: () -> Unit = {},
     val moveWidget: () -> Unit = {},
-    /** 原版导航设置页 ClockStyle；本模块 P4 以循环切换承载（P1 演示入口迁入）。 */
-    val cycleClockStyle: () -> Unit = {},
+    // 审计修缮（2026-10-16）：删除 launchAppAt（恒默认 null 零消费）与 cycleClockStyle
+    //（Route 侧有接线但消费侧零引用，HomeSheets 时钟样式已改独立选择器）。
     // ---- P6（B6.4）：图标包选择面板入口 ----
     val openIconPacks: () -> Unit = {},
 )

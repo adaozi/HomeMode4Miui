@@ -5,9 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.provider.Settings
 
-/** Read the system's current choice; shortcut access and saved preferences are not HOME ownership. */
+/**
+ * Read the system's current choice; shortcut access and saved preferences are not HOME ownership.
+ * 模块 hook 宿主桌面 com.miui.home —— 宿主进程内恒为默认启动器，无需请求 HOME 角色，
+ * 故只保留 isDefault 探测（私密空间鉴权用），requestIntent 已随"设为默认"死 UI 一并移除。
+ */
 internal object DefaultHome {
     fun isDefault(context: Context): Boolean {
         if (Build.VERSION.SDK_INT >= 29) {
@@ -27,16 +30,5 @@ internal object DefaultHome {
             )
             home?.activityInfo?.packageName == context.packageName
         }.getOrDefault(false)
-    }
-
-    fun requestIntent(context: Context): Intent {
-        if (Build.VERSION.SDK_INT >= 29) {
-            runCatching {
-                context.getSystemService(RoleManager::class.java)
-                    ?.takeIf { it.isRoleAvailable(RoleManager.ROLE_HOME) && !it.isRoleHeld(RoleManager.ROLE_HOME) }
-                    ?.createRequestRoleIntent(RoleManager.ROLE_HOME)
-            }.getOrNull()?.let { return it }
-        }
-        return Intent(Settings.ACTION_HOME_SETTINGS)
     }
 }

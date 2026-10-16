@@ -129,19 +129,15 @@ fun ShortcutPopup(
         }
         LazyColumn(Modifier.heightIn(max = maxListHeight).testTag("shortcut_list")) {
             if (!hasAccess) item {
-                Column {
-                    Text(stringResource(R.string.shortcut_permission), Modifier.padding(horizontal = 12.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.set_default_launcher)) }
-                }
+                // 模块 hook 宿主桌面（本身即默认启动器），无访问时仅提示。
+                Text(stringResource(R.string.shortcut_permission), Modifier.padding(horizontal = 12.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyMedium)
             }
             else when (result.status) {
                 // Cold apps may need one binder query; keep the layout quiet.
                 ShortcutStatus.Loading -> item { Spacer(Modifier.height(56.dp)) }
                 ShortcutStatus.DefaultLauncherRequired -> item {
-                    Column {
+                    // 中继降级状态，无"设为默认"动作可给，只提示。
                     Text(stringResource(R.string.shortcut_permission), Modifier.padding(horizontal = 12.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.set_default_launcher)) }
-                    }
                 }
                 ShortcutStatus.Error -> item {
                     Column {

@@ -1,7 +1,6 @@
 package com.galaxyrio.gracelauncher.ui
 
 import androidx.compose.ui.geometry.Rect
-import android.net.Uri
 import com.galaxyrio.gracelauncher.data.ItemIcon
 import com.galaxyrio.gracelauncher.data.PopupItem
 import com.galaxyrio.gracelauncher.data.LauncherApp
@@ -10,15 +9,20 @@ import com.galaxyrio.gracelauncher.data.FolderPlacement
 import com.galaxyrio.gracelauncher.data.LauncherSettings
 import com.galaxyrio.gracelauncher.data.ClockStyle
 import com.galaxyrio.gracelauncher.data.LauncherShortcut
-import com.galaxyrio.gracelauncher.data.ScheduleEvent
 import com.galaxyrio.gracelauncher.data.ShortcutResult
 import com.galaxyrio.gracelauncher.data.ShortcutStatus
 import com.galaxyrio.gracelauncher.data.WallpaperTextMode
-import com.galaxyrio.gracelauncher.data.media.MediaCommand
 
-/** Platform actions are injected so all launcher surfaces can be previewed and tested. */
+/**
+ * Platform actions are injected so all launcher surfaces can be previewed and tested.
+ *
+ * 审计修缮（2026-10-16）：裁掉 19 个零消费字段（screenTime/importItemIcon/
+ * showShortcutInAppList/categorize/copyPackageName/storePage/newEvent/openEvent/
+ * refreshAgenda/themedIcons/reorderFavorites/launchAppAt/launchSearchApp/
+ * prepareShortcuts + controlMedia 系 5 个）——上游 70+ 字段聚合接口搬运残留，
+ * 经 `actions.\w+` 全量扫描核实零调用后删除；恢复入口见 docs/CODE_AUDIT_2026-10-16.md。
+ */
 data class LauncherActions(
-    val requestDefaultHome: () -> Unit = {},
     val requestPrivateSpace: (Boolean, () -> Unit) -> Unit = { _, _ -> },
     val closePrivateSpace: () -> Unit = {},
     val openPrivateSpaceSettings: () -> Unit = {},
@@ -28,23 +32,13 @@ data class LauncherActions(
     val resetWorkProfileAppearance: suspend () -> Boolean = { false },
     val openWorkProfileSettings: () -> Unit = {},
     val appInfo: (LauncherApp) -> Unit = {},
-    val screenTime: (LauncherApp) -> Unit = {},
     val uninstall: (LauncherApp) -> Unit = {},
     val rename: (LauncherApp, String) -> Unit = { _, _ -> },
     val setItemIcon: suspend (LauncherApp, ItemIcon?) -> Boolean = { _, _ -> false },
-    val importItemIcon: suspend (LauncherApp, Uri) -> Boolean = { _, _ -> false },
-    val showShortcutInAppList: (LauncherApp, Boolean) -> Unit = { _, _ -> },
     val rememberShortcut: suspend (LauncherApp) -> Boolean = { false },
     val updatePopup: (LauncherApp, List<LauncherApp>, (List<PopupItem>) -> List<PopupItem>) -> Unit = { _, _, _ -> },
     val addPopupWidget: (LauncherApp, List<LauncherApp>) -> Unit = { _, _ -> },
-    val categorize: (LauncherApp, String?) -> Unit = { _, _ -> },
-    val copyPackageName: (LauncherApp) -> Unit = {},
-    val storePage: (LauncherApp) -> Unit = {},
-    val newEvent: () -> Unit = {},
-    val openEvent: (ScheduleEvent) -> Unit = {},
-    val refreshAgenda: () -> Unit = {},
     val textMode: (WallpaperTextMode) -> Unit = {},
-    val themedIcons: (Boolean) -> Unit = {},
     val refreshIconPacks: () -> Unit = {},
     val refreshApps: () -> Unit = {},
     val updateSettings: ((LauncherSettings) -> LauncherSettings) -> Unit = {},
@@ -59,19 +53,10 @@ data class LauncherActions(
     val deleteFolder: (String) -> Unit = {},
     val shortcuts: suspend (LauncherApp) -> ShortcutResult = { ShortcutResult(ShortcutStatus.DefaultLauncherRequired) },
     val cachedShortcuts: (LauncherApp) -> ShortcutResult? = { null },
-    val prepareShortcuts: (LauncherApp) -> Unit = {},
-    val reorderFavorites: (List<String>) -> Unit = {},
-    val launchAppAt: ((LauncherApp, Rect) -> Unit)? = null,
-    val launchSearchApp: ((LauncherApp, Rect?) -> Unit)? = null,
     val launchShortcutAt: ((LauncherShortcut, Rect) -> Unit)? = null,
     val launchShortcut: (LauncherShortcut) -> Unit = {},
     val requestMediaAccess: () -> Unit = {},
-    val controlMedia: (String, MediaCommand) -> Unit = { _, _ -> },
-    val dismissMedia: (String, Long) -> Boolean = { _, _ -> false },
-    val dismissNotification: (String, Long) -> Boolean = { _, _ -> false },
-    val openNotification: (String, Long) -> Boolean = { _, _ -> false },
     val requestWeatherAccess: () -> Unit = {},
-    val requestCalendarAccess: () -> Unit = {},
     val addWidget: () -> Unit = {},
     val configureWidget: () -> Unit = {},
     val removeWidget: () -> Unit = {},

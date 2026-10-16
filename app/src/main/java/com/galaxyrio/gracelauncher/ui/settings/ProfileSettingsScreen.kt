@@ -69,11 +69,6 @@ internal fun ProfileSettingsScreen(uiState: LauncherUiState, actions: LauncherAc
             if (!supported) item {
                 Text(stringResource(R.string.private_space_unsupported), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (supported && uiState.isDefaultHome == false) item {
-                SettingsActionItem(stringResource(R.string.set_default_launcher), stringResource(if (work) R.string.work_profile_default_home else R.string.private_space_default_home),
-                    0, 1, "private_space_default_home", leading = { LauncherIcon(LauncherSymbol.Home) }, onClick = actions.requestDefaultHome)
-                Spacer(Modifier.height(12.dp))
-            }
             if (work && uiState.workProfiles.isEmpty() && !uiState.isLoadingApps) item {
                 Text(stringResource(R.string.work_profile_empty), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

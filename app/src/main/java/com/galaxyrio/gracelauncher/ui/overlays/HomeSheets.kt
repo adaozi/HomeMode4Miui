@@ -18,7 +18,8 @@
  *     重实现为【同窗口底部面板】（scrim + 圆角 Surface，视觉对齐原版 sheet），
  *     LocalContext 模块覆盖正常穿透，stringResource 可用。
  *   - 非 custom 菜单删 Calendar/Weather/Media/Battery（P6）与编辑收藏全屏页
- *     （ItemSelectionScreen 随 C 组落地）；时钟样式接 cycleClockStyle。
+ *     （ItemSelectionScreen 随 C 组落地）；时钟样式走独立选择器（C4，
+ *     cycleClockStyle 死接线已随审计修缮移除，2026-10-16）。
  */
 package com.galaxyrio.gracelauncher.ui.overlays
 

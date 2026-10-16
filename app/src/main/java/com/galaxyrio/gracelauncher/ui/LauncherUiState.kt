@@ -65,8 +65,6 @@ data class LauncherUiState(
     val isLoadingIconPacks: Boolean = false,
     val iconPacksLoadFailed: Boolean = false,
     val iconPackStatus: IconPackStatus = IconPackStatus.System,
-    // Unknown until the first system query, avoiding a banner flash for an existing default.
-    val isDefaultHome: Boolean? = null,
     val media: MediaSnapshot = MediaSnapshot(),
     val notifications: Map<String, List<AppNotification>> = emptyMap(),
     val favoriteOrder: List<String> = emptyList(),
@@ -130,9 +128,8 @@ data class LauncherUiState(
         .sortedWith(compareByDescending<LauncherApp> { it.firstInstallTime }.then(LauncherAppOrder))
         .distinctBy(LauncherApp::packageName).take(8).toList()
 
-    fun recentlyInstalledFolder(name: String) = LauncherFolder(
-        RecentlyInstalledFolderId, name, recentlyInstalledApps.map(LauncherApp::key), FolderPlacement.AppList,
-    )
+    // 审计修缮（2026-10-16）：删除 recentlyInstalledFolder() —— 全仓零调用
+    // （popupItems 只引用 RecentlyInstalledFolderId 常量；AppListModel 头注同登记）。
 
     fun folderItem(folder: LauncherFolder): LauncherApp = ((if (folder.id == PrivateSpaceFolderId) privateFolderApp
         else folderApps.firstOrNull { it.folderId == folder.id })

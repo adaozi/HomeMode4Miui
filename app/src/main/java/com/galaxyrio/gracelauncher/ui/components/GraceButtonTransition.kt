@@ -129,20 +129,8 @@ internal class GraceButtonTransition(val action: GraceButtonAction, val origin: 
     fun revealEdge(maximum: Float): Float = mix(maximum / 26f, maximum, smoothStep(0f, 0.25f, fraction))
 }
 
-/** Complementary masks keep the old and new pages in the same coordinate space. */
-@Composable
-internal fun Modifier.graceReveal(transition: GraceButtonTransition?, reveal: Boolean): Modifier {
-    if (transition == null) return this
-    var position by remember(transition) { mutableStateOf(Offset.Zero) }
-    return onGloballyPositioned { position = it.positionInRoot() }
-        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-        .drawWithContent {
-            drawContent()
-            val edge = transition.revealEdge(52.dp.toPx())
-            drawRect(revealBrush(transition.revealCenter() - position, transition.revealRadius(edge), edge),
-                blendMode = if (reveal) BlendMode.DstIn else BlendMode.DstOut)
-        }
-}
+// 审计修缮（2026-10-16）：删除 Modifier.graceReveal —— 全仓零调用（含定义文件内部），
+// 英雄过渡的实际呈现走 GraceButtonTransitionOverlay。
 
 /** Rendered above both pages; consumes input until the handoff (or screen-off) completes. */
 @Composable

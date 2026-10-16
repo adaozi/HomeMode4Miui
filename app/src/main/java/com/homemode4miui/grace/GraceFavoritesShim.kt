@@ -41,10 +41,8 @@ internal object GraceFavoritesShim {
      * （宿主 HOME 角色）；文件夹收藏开关直连宿主 Room。
      */
     fun actions(viewModel: GraceHomeViewModel): LauncherActions = LauncherActions(
-        reorderFavorites = viewModel::reorderFavorites,
         shortcuts = viewModel::loadShortcuts,
         cachedShortcuts = viewModel::cachedShortcuts,
-        prepareShortcuts = viewModel::prepareShortcuts,
         setFolderFavorites = viewModel::setFolderFavorites,
     )
 }

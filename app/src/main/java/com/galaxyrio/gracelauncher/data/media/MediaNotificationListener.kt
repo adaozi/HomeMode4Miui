@@ -115,7 +115,15 @@ class MediaNotificationListener : NotificationListenerService() {
         }
     }
     override fun onListenerDisconnected() {
-        mediaNotifications.disconnected(); appNotifications.disconnected()
+        // hotfix（notif-churn）：授权仍在的解绑 = MIUI 省电行为（notif7 自愈链重绑），
+        // 通知本体仍在系统状态栏 —— 应用通知保留最后已知快照，桌面不清行、不发空广播；
+        // 授权被撤销（用户在系统设置关掉）才真正清空。媒体行维持原清空语义
+        //（mediaNotifications.connected 是媒体链可用性门槛，解绑即隐藏，重绑即恢复）。
+        val keep = runCatching {
+            com.galaxyrio.gracelauncher.data.media.MediaAccess.isGranted(applicationContext)
+        }.getOrDefault(false)
+        mediaNotifications.disconnected()
+        appNotifications.disconnected(keepDisplay = keep)
         com.homemode4miui.bridge.GraceBridgeEngine.onListenerDisconnected()
     }
     override fun onDestroy() {

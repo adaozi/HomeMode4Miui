@@ -104,8 +104,10 @@ public final class HomeController {
                                     || !Intent.ACTION_MAIN.equals(((Intent) tag).getAction())) {
                                 return;
                             }
+                            // hotfix return-anim：Intent 原样透传 —— 返回动画需要
+                            // Quickstep 注入的 GestureNavContract extra（无则动画静默退场）
                             HomeView v = sView;
-                            if (v != null) v.onHomeIntent();
+                            if (v != null) v.onHomeIntent((Intent) tag);
                         } catch (Throwable t) {
                             log("home intent sync failed: " + t);
                         }
@@ -119,14 +121,15 @@ public final class HomeController {
             XposedHelpers.findAndHookMethod(HostCompat.launcherHookClass(cl,
                     "onNewIntentWhenAlreadyOnHome"), "onNewIntentWhenAlreadyOnHome", new XC_MethodHook() {
                         @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            try {
-                                HomeView v = sView;
-                                if (v != null) v.onHomeIntent();
-                            } catch (Throwable t) {
-                                log("home intent (already-on-home) sync failed: " + t);
-                            }
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            // 已在桌面回首页：无 intent（无 GestureNavContract），传 null 仅复位
+                            HomeView v = sView;
+                            if (v != null) v.onHomeIntent(null);
+                        } catch (Throwable t) {
+                            log("home intent (already-on-home) sync failed: " + t);
                         }
+                    }
                     });
             log("home intent sync installed (onNewIntentWhenAlreadyOnHome)");
         } catch (Throwable t) {
@@ -315,7 +318,9 @@ public final class HomeController {
         }
     }
 
+    // 审计修缮（2026-10-16）：改走 ModLog 双写（XposedBridge + logcat tag HomeMode4Miui）——
+    // 此前只走 XposedBridge.log，LogExporter 的 logcat 兜底来源看不到 sync/attached 系列宿主日志。
     private static void log(String msg) {
-        XposedBridge.log("[" + TAG + "] " + msg);
+        com.homemode4miui.util.ModLog.i(msg);
     }
 }

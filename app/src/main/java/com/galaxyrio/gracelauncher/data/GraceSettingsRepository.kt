@@ -111,6 +111,14 @@ class GraceSettingsRepository(context: Context) {
                     graceButtonJson = next.graceButton.encode(),
                     fontLibraryJson = next.fontLibrary.encode(),
                     workProfileJson = next.workProfile.encode(),
+                    // hotfix（appFont/iconSize 桌面接线）：宿主 mutate 同步承载两列
+                    appFontId = next.appFontId,
+                    iconDesignJson = next.iconDesign?.encode(),
+                    // hotfix（darkMode/amoledMode/themeColor 桌面接线）：外观四列同步承载
+                    useDynamicColors = next.useDynamicColors,
+                    themeColor = next.themeColor,
+                    darkMode = next.darkMode.name,
+                    amoledMode = next.amoledMode,
                 ))
                 next
             }
@@ -131,9 +139,6 @@ class GraceSettingsRepository(context: Context) {
         calendarAgenda = settings.calendarAgenda,
         showBatteryPercentage = settings.showBatteryPercentage,
         allowHapticFeedback = true,
-        useDynamicColors = true,
-        themeColor = com.galaxyrio.gracelauncher.data.LauncherSettings.DEFAULT_THEME_COLOR,
-        darkMode = "System",
         clockStyleJson = settings.clockStyle.encode(),
         hideFavoriteNames = settings.hideFavoriteNames,
         homeLayoutJson = settings.homeLayout.encode(),
@@ -160,6 +165,14 @@ class GraceSettingsRepository(context: Context) {
         graceButtonJson = settings.graceButton.encode(),
         fontLibraryJson = settings.fontLibrary.encode(),
         workProfileJson = settings.workProfile.encode(),
+        // hotfix（appFont/iconSize 桌面接线）：种子行同步两列
+        appFontId = settings.appFontId,
+        iconDesignJson = settings.iconDesign?.encode(),
+        // hotfix（darkMode/amoledMode/themeColor 桌面接线）：外观四列种子
+        useDynamicColors = settings.useDynamicColors,
+        themeColor = settings.themeColor,
+        darkMode = settings.darkMode.name,
+        amoledMode = settings.amoledMode,
     )
 
     private fun LauncherSettingsEntity.toGraceSettings() = GraceHomeSettings.decode(
@@ -173,6 +186,9 @@ class GraceSettingsRepository(context: Context) {
         showBatteryPercentage = showBatteryPercentage,
         mediaPlayer = mediaPlayer,
         mediaAlwaysVisible = mediaAlwaysVisible,
+        mediaAppKey = mediaAppKey,
+        clockAppKey = clockAppKey,
+        allowHapticFeedback = allowHapticFeedback,
         weatherEnabled = weatherEnabled,
         weatherForecastDays = weatherForecastDays,
         iconPackPackagesJson = iconPackPackagesJson,
@@ -190,5 +206,13 @@ class GraceSettingsRepository(context: Context) {
         graceButtonJson = graceButtonJson,
         fontLibraryJson = fontLibraryJson,
         workProfileJson = workProfileJson,
+        // hotfix（appFont/iconSize 桌面接线）：读出两列
+        appFontId = appFontId,
+        iconDesignJson = iconDesignJson,
+        // hotfix（darkMode/amoledMode/themeColor 桌面接线）：读出外观四列
+        useDynamicColors = useDynamicColors,
+        themeColor = themeColor,
+        darkModeName = darkMode,
+        amoledMode = amoledMode,
     )
 }

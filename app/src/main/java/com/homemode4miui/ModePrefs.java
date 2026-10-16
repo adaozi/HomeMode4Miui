@@ -39,6 +39,8 @@ public final class ModePrefs {
     public static final String KEY_GRACE_PENDING = "custom_grace_compose_pending";
     public static final String KEY_GRACE_DEAD = "custom_grace_compose_dead";
     public static final String KEY_GRACE_VERSION = "custom_grace_version_code";
+    /** hotfix（fuse-stamp）：APK 安装时间戳 —— 同 versionCode 重装（hotfix 迭代）也触发熔断清零。 */
+    public static final String KEY_GRACE_INSTALL_STAMP = "custom_grace_install_stamp";
     /** 连续挂载崩溃达到该次数后熔断降级 */
     public static final int GRACE_MAX_FAILURES = 2;
 
@@ -155,16 +157,22 @@ public final class ModePrefs {
     }
 
     /**
-     * 挂载尝试记账：APK 版本变更（新包修复）→ 熔断清零重新放开；
+     * 挂载尝试记账：APK 版本或安装时间变更（新包修复）→ 熔断清零重新放开；
      * 上次 pending 仍在（上次挂载后进程在心跳前死亡）→ 失败计数 +1。
      * 返回当前失败计数，调用方据此决定是否降级。
+     * hotfix（fuse-stamp）：清零键 = versionCode + lastUpdateTime 双键 —— 此前只认
+     * versionCode，同版本号 hotfix 迭代（装机实锤 2026-10-15：导入字体崩溃烧光 3 次
+     * 配额后，重装同 vc 修复包熔断永不解除，桌面永久占位）。
      */
-    public static int onGraceComposeMountAttempt(Context ctx, int versionCode) {
+    public static int onGraceComposeMountAttempt(Context ctx, int versionCode, long installStamp) {
         try {
             android.content.SharedPreferences sp = sp(ctx);
             android.content.SharedPreferences.Editor e = sp.edit();
-            if (sp.getInt(KEY_GRACE_VERSION, -1) != versionCode) {
+            int storedVersion = sp.getInt(KEY_GRACE_VERSION, -1);
+            long storedStamp = sp.getLong(KEY_GRACE_INSTALL_STAMP, -1L);
+            if (storedVersion != versionCode || storedStamp != installStamp) {
                 e.putInt(KEY_GRACE_VERSION, versionCode)
+                        .putLong(KEY_GRACE_INSTALL_STAMP, installStamp)
                         .putInt(KEY_GRACE_FAILURES, 0)
                         .putBoolean(KEY_GRACE_PENDING, false)
                         .putBoolean(KEY_GRACE_DEAD, false)

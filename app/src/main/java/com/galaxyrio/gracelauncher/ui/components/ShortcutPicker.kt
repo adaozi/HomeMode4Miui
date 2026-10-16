@@ -67,8 +67,9 @@ internal fun ShortcutPickerScreen(uiState: LauncherUiState, actions: LauncherAct
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                 when {
                     !uiState.hasShortcutAccess -> item {
+                        // 模块 hook 宿主桌面（本身即默认启动器），快捷方式访问随宿主快照；
+                        // 无访问时仅提示，无"设为默认"动作可给。
                         Text(stringResource(R.string.shortcut_permission), Modifier.padding(8.dp))
-                        TextButton(onClick = actions.requestDefaultHome) { Text(stringResource(R.string.set_default_launcher)) }
                     }
                     loading -> item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                     visible.isEmpty() && !loadFailed -> item { Text(stringResource(R.string.no_shortcuts), Modifier.padding(8.dp)) }

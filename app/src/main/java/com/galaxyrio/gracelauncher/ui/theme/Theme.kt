@@ -18,6 +18,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.galaxyrio.gracelauncher.data.FontLibrary
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
@@ -70,7 +71,10 @@ fun GraceLauncherTheme(
     darkTheme: Boolean = true,
     dynamicColor: Boolean = true,
     seedColor: Color? = null,
-    fontId: String? = null,
+    /** 上游同步 v1.1.8 S5：全局 UI 字体 = 字体库 selected 链首位（字体库管理页语义）。 */
+    fontLibrary: FontLibrary = FontLibrary(),
+    /** 模块架构定制（appFont 桌面接线）：字体资产/导入文件解析用 Context。桌面宿主进程必须传模块 Context（宿主 assets 无模块字体资产）。 */
+    fontContext: android.content.Context? = null,
     amoledMode: Boolean = false,
     content: @Composable () -> Unit,
 ) {
@@ -101,9 +105,12 @@ fun GraceLauncherTheme(
         surfaceContainer = Color.Black,
     ) else colorScheme
 
-    val family = rememberAppFontFamily(fontId)
+    // 上游同步 v1.1.8 S5：全局字体 = 字体库链（id=null 走 library.selected 首位优先）；
+    // 主题内部 provide LocalFontLibrary（上游同构，listLabelStyle 等库链消费方读取）。
+    val family = rememberAppFontFamily(null, fontLibrary, fontContext)
     val typography = remember(family) { launcherTypography(family) }
     CompositionLocalProvider(
+        LocalFontLibrary provides fontLibrary,
         LocalLauncherTypography provides typography,
         // Elevation tint must not turn the black sheets back into tinted gray.
         LocalTonalElevationEnabled provides (LocalTonalElevationEnabled.current && !trueBlack),

@@ -139,7 +139,7 @@ internal fun PopupEditorScreen(owner: LauncherApp, uiState: LauncherUiState, act
         apps = uiState.allApps.filterNot { it.key == owner.key }, enabled = ready,
         shortcuts = shortcuts.takeUnless { isFolder }, shortcutTitle = stringResource(R.string.popup_app_shortcuts, owner.label),
         header = header,
-        shortcutStatus = result.status, onRetry = { retry++ }, onRequestAccess = actions.requestDefaultHome,
+        shortcutStatus = result.status, onRetry = { retry++ },
         onAddWidget = { actions.addPopupWidget(owner, shortcuts) },
         onAddShortcut = { choosingShortcut = true },
         onToggle = { app -> actions.updatePopup(owner, shortcuts) { current ->
@@ -159,7 +159,7 @@ private fun ItemSelectionScreen(
     title: String, tag: String, selected: List<SelectionEntry>, apps: List<LauncherApp>, enabled: Boolean,
     onToggle: (LauncherApp) -> Unit, onRemove: (String) -> Unit, onReorder: (List<String>) -> Unit, onDone: () -> Unit,
     shortcuts: List<LauncherApp>? = null, shortcutTitle: String = "", shortcutStatus: ShortcutStatus = ShortcutStatus.Ready,
-    onRetry: () -> Unit = {}, onRequestAccess: () -> Unit = {}, onAddWidget: (() -> Unit)? = null,
+    onRetry: () -> Unit = {}, onAddWidget: (() -> Unit)? = null,
     onAddShortcut: (() -> Unit)? = null,
     onAddFolder: (() -> Unit)? = null,
     header: (@Composable () -> Unit)? = null,
@@ -252,8 +252,9 @@ private fun ItemSelectionScreen(
                 when (shortcutStatus) {
                     ShortcutStatus.Loading -> item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(8.dp)) }
                     ShortcutStatus.DefaultLauncherRequired -> item {
+                        // 模块 hook 宿主桌面（本身即默认启动器），此状态仅中继降级时出现；
+                        // 无"设为默认"动作可给，只提示。
                         Text(stringResource(R.string.shortcut_permission), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyMedium)
-                        TextButton(onClick = onRequestAccess) { Text(stringResource(R.string.set_default_launcher)) }
                     }
                     ShortcutStatus.Error -> item { TextButton(onClick = onRetry) { Text(stringResource(R.string.retry)) } }
                     ShortcutStatus.Ready -> if (shortcuts.isEmpty()) item {
