@@ -77,7 +77,6 @@ import com.galaxyrio.gracelauncher.data.LauncherShortcut
 import com.galaxyrio.gracelauncher.data.weather.WeatherStatus
 import com.galaxyrio.gracelauncher.platform.AppLaunchTransition
 import com.galaxyrio.gracelauncher.platform.LauncherAppTransitions
-import com.galaxyrio.gracelauncher.platform.PrivateSpaceProbe
 import com.galaxyrio.gracelauncher.ui.GracePopupActions
 import com.galaxyrio.gracelauncher.ui.components.AlphabetRail
 import com.galaxyrio.gracelauncher.ui.components.AppRowGestures
@@ -235,7 +234,6 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     val weatherReady = state.settings.weatherEnabled &&
         state.weather.status == WeatherStatus.Ready && state.weather.snapshot?.current != null
     // B6.5：私密空间探测（懒触发即可，纯本地调用）
-    val privateSpaceState = remember { PrivateSpaceProbe.probe(hostContext) }
 
     /**
      * hotfix3：通知监听授权引导 —— 打开【模块 App 主入口】（MainActivity），在模块
@@ -543,7 +541,6 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             configureWidget = viewModel::configureHomeWidget,
             removeWidget = viewModel::removeHomeWidget,
             moveWidget = { drawerOpen = false; selectedLetter = null; overlay = null; editingHome = true },
-            cycleClockStyle = viewModel::cycleClockLayout,
             openIconPacks = {
                 viewModel.loadIconPacks()
                 overlay = LauncherOverlay.IconPacks
