@@ -41,7 +41,7 @@ internal val ListAppearance.endPadding: Dp get() = (sidePadding + 12).dp
 internal fun listLabelStyle(onWallpaper: Boolean = true): TextStyle {
     val list = LocalListAppearance.current
     val wallpaper = LocalLauncherAppearance.current
-    val color = list.fontColor?.resolve(wallpaper.text.toArgb(), MaterialTheme.colorScheme.primary.toArgb())?.let(::Color)
+    val color = list.fontColor?.resolve(MaterialTheme.colorScheme.primary.toArgb())?.let(::Color)
         ?: if (onWallpaper) wallpaper.text else MaterialTheme.colorScheme.onSurface
     return MaterialTheme.typography.bodyLarge.copy(fontFamily = rememberAppFontFamily(list.fontId),
         fontSize = list.fontSize.sp, lineHeight = (list.fontSize * 1.5f).sp, fontWeight = FontWeight.Normal,

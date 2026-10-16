@@ -19,7 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun MediaPlayerSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit) {
+internal fun MediaPlayerSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit, onAppearance: () -> Unit = {}) {
     val context = LocalContext.current
     val settings = uiState.settings
     var requestAccess by rememberSaveable { mutableStateOf(false) }
@@ -35,6 +35,7 @@ internal fun MediaPlayerSettings(uiState: LauncherUiState, actions: LauncherActi
     }
     AppSelectionSettings(uiState, actions, onBack,
         title = stringResource(R.string.settings_media_player), tag = "media_player",
+        appBarActions = { SettingsAppearanceAction(onAppearance) },
         selectedKey = settings.mediaAppKey, showDefault = true, defaultLabel = stringResource(R.string.settings_none),
         apps = uiState.allApps.filter { it.packageName in musicPackages || it.key == settings.mediaAppKey },
         onSelect = { key -> actions.updateSettings { it.copy(mediaAppKey = key) } },

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1080">
+    <!-- From design/icon/logo-solid.svg; 1080px artboard maps to 108dp. -->
+    <!-- In-app glyph: original artwork proportions, without adaptive-icon compensation. -->
+    <group android:pivotX="540" android:pivotY="540"
+        android:scaleX="1" android:scaleY="1">
+        <path
+            android:fillColor="#FF000000"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="18"
+            android:strokeLineJoin="miter"
+            android:strokeMiterLimit="10"
+            android:pathData="M689.57,358.84c28.78-15.02,48.43-45.13,48.43-79.84h-198c-99.41,0-180,80.59-180,180s80.59,180,180,180,180-80.59,180-180c0-17.81-2.6-35.02-7.42-51.27-19.42,9.76-41.36,15.27-64.58,15.27h-25.5c4.82,11.03,7.5,23.2,7.5,36,0,49.71-40.29,90-90,90s-90-40.29-90-90,40.29-90,90-90h108c15,0,29.14-3.67,41.57-10.16Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="18"
+            android:strokeLineJoin="miter"
+            android:strokeMiterLimit="10"
+            android:pathData="M378,801c0-49.71,40.29-90,90-90,0,0,72,0,72,0,61.65,0,118.12-22.15,161.91-58.91.05,1.63.09,3.26.09,4.91,0,79.53-64.47,144-144,144,0,0-180,0-180,0Z" />
+    </group>
+</vector>

@@ -709,4 +709,47 @@
 
     <!-- 占位视图（宿主进程，经包上下文解析） -->
     <string name="placeholder_tip">Custom home mode base mounted\n\nHomeViewFactory.create() → swap in your home UI</string>
+
+    <!-- 上游同步 v1.1.9（S1）：GraceButton 位置/图标显示/调色板/文件夹自动隐藏 -->
+    <string name="grace_button_position_size">Position and size</string>
+    <string name="hidden_from_folder">Hidden by folder</string>
+    <string name="icon_color_from_app_summary">Uses each app’s original icon, without icon packs. Falls back to the theme when no suitable color is found.</string>
+    <string name="icon_color_relative_summary">0 keeps the source unchanged. Adjustments follow future color changes; saturation and brightness use percentage points.</string>
+    <string name="icon_color_source_app">From app</string>
+    <string name="icon_color_source_fixed">Fixed</string>
+    <string name="icon_color_source_theme">Theme</string>
+    <string name="icon_designer_brightness">Brightness</string>
+    <string name="icon_designer_saturation">Saturation</string>
+    <string name="icon_designer_square_aspect_ratio">Aspect ratio</string>
+    <string name="icon_display_dot">Dots</string>
+    <string name="icon_display_full">Full icons</string>
+    <string name="icon_display_hidden">Names only</string>
+    <string name="icon_display_section">Icon display</string>
+    <string name="icon_display_shared">shared setting</string>
+    <string name="icon_display_shared_caption">Using shared setting</string>
+    <string name="icon_dot_color">Dot color</string>
+    <string name="icon_dot_size">Dot size</string>
+    <string name="palette_content">Content</string>
+    <string name="palette_expressive">Expressive</string>
+    <string name="palette_fidelity">Fidelity</string>
+    <string name="palette_fruit_salad">Fruit salad</string>
+    <string name="palette_monochrome">Monochrome</string>
+    <string name="palette_neutral">Neutral</string>
+    <string name="palette_rainbow">Rainbow</string>
+    <string name="palette_tonal_spot">Tonal spot</string>
+    <string name="settings_folder_auto_hide">Automatically hide apps inside</string>
+    <string name="settings_folder_auto_hide_summary">Hide current and future members from the app list. Manual hides are kept when apps leave this folder.</string>
+    <string name="settings_palette_style">Palette style</string>
+
+    <string name="grace_button_alignment">Alignment</string>
+    <string name="grace_button_align_left">Left</string>
+    <string name="grace_button_align_center">Center</string>
+    <string name="grace_button_align_right">Right</string>
+    <string name="grace_button_show_on">Show on</string>
+    <string name="grace_button_show_both">Both</string>
+    <string name="grace_button_side_distance">Distance from side</string>
+    <string name="grace_button_bottom_distance">Distance from bottom</string>
+    <string name="grace_button_size">Button size</string>
+    <string name="grace_button_position_hint">Drag the button to change its position</string>
+    <string name="palette_vibrant">Vibrant</string>
 </resources>

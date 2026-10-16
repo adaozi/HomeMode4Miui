@@ -24,6 +24,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,15 +68,17 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 
+/** 上游 v1.1.9：草稿走类型化 Saver，拖拽帧不再全量序列化 presets。 */
+private val ClockStyleDraftSaver = Saver<ClockStyle, String>(save = { it.encode() }, restore = { ClockStyle.decode(it) })
+
 @Composable
 internal fun ClockStyleSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // A scalar saved-state draft survives recreation without changing the desktop.
-    var encoded by rememberSaveable { mutableStateOf(uiState.settings.clockStyle.encode()) }
-    val draft = remember(encoded) { ClockStyle.decode(encoded) }
+    // Preserve recreation support without serializing all presets on every drag frame.
+    var draft by rememberSaveable(stateSaver = ClockStyleDraftSaver) { mutableStateOf(uiState.settings.clockStyle) }
     val face = draft.face
-    fun changeFace(transform: (ClockFaceStyle) -> ClockFaceStyle) { encoded = draft.withFace(transform(face)).encode() }
+    fun changeFace(transform: (ClockFaceStyle) -> ClockFaceStyle) { draft = draft.withFace(transform(draft.face)) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
@@ -88,8 +91,8 @@ internal fun ClockStyleSettings(uiState: LauncherUiState, actions: LauncherActio
             try {
                 val font = store.import(uri)
                 // Read the current draft after IO; do not overwrite another style's edits.
-                val current = ClockStyle.decode(encoded)
-                encoded = current.withFace(current.face.copy(fontId = font.id)).encode()
+                val current = draft
+                draft = current.withFace(current.face.copy(fontId = font.id))
                 fontRevision++
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
@@ -151,7 +154,7 @@ internal fun ClockStyleSettings(uiState: LauncherUiState, actions: LauncherActio
                 ) {
                     clockSetting("layout") {
                         ClockLayoutSelector(draft, count, enabled = !saving && !importing) {
-                            encoded = draft.copy(layout = it).encode()
+                            draft = draft.copy(layout = it)
                         }
                     }
                     if (allowsFont) clockSetting("font") {

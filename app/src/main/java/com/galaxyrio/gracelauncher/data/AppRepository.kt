@@ -10,19 +10,27 @@
  * P6（B6.4）：恢复图标包装饰面 —— normalizeIconPackOrder + IconPackRepository.load +
  *   firstMatchingPackIcon(iconFor) 的 makeApp 流程对齐原版；包加载失败自动回退
  *   系统图标（原版 safely/firstMatchingPackIcon 语义），装饰面零阻塞主链路。
+ * 上游同步 v1.1.9（S1）：LauncherApp 增 originalIconColor/isSystemApp/isAdaptiveIcon。
+ *   模块适配：主色采样挂在【解码阶段】顺带完成 —— 包图标命中的应用不额外解码
+ *   系统图标（两段式装载的性能适配优先），originalIconColor 记 null 走主题回退
+ *   （与上游 "null = neutral/unavailable" 语义一致）；isAdaptiveIcon 同理解码时回填。
  */
 package com.galaxyrio.gracelauncher.data
 
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.graphics.Rect
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.os.Bundle
 import android.os.Process
 import android.os.UserManager
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
+import com.galaxyrio.gracelauncher.data.icons.IconDominantColor
 import com.galaxyrio.gracelauncher.data.icons.LoadedIconPack
 import com.galaxyrio.gracelauncher.data.icons.IconPackRepository
 import kotlinx.coroutines.Dispatchers
@@ -49,9 +57,16 @@ class AppRepository(
      * 枚举返回应用骨架（label/key/包图标就绪，系统图标延后解码）＋按 key 的惰性解码句柄；
      * 消费方先 `withIcons(收藏子集)` 立即出收藏区，再后台 `withIcons(全量)` 换入。
      */
+    /** 解码产物：系统图标 + 上游 v1.1.9 的 originalIconColor/isAdaptiveIcon 顺带采样。 */
+    internal class IconDecode(
+        val bitmap: androidx.compose.ui.graphics.ImageBitmap?,
+        val originalIconColor: Int?,
+        val isAdaptiveIcon: Boolean,
+    )
+
     class AppInventory internal constructor(
         val apps: List<LauncherApp>,
-        private val decoders: Map<String, suspend () -> androidx.compose.ui.graphics.ImageBitmap?>,
+        private val decoders: Map<String, suspend () -> IconDecode?>,
     ) {
         /** 并行解码指定 key 的系统图标并回填（icon 仍为空的项；有包图标的保持包图标）。 */
         @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -69,7 +84,9 @@ class AppRepository(
             if (decoded.isEmpty()) return apps
             return apps.map { app ->
                 val icon = decoded[app.key] ?: return@map app
-                if (app.icon != null || icon == null) app else app.copy(icon = icon)
+                if (app.icon != null || icon == null) app
+                else app.copy(icon = icon.bitmap, originalIconColor = icon.originalIconColor,
+                    isAdaptiveIcon = icon.isAdaptiveIcon)
             }
         }
     }
@@ -86,7 +103,7 @@ class AppRepository(
         val profiles = runCatching { launcher.profiles }.getOrNull() ?: listOf(myUser)
         // B6.4：图标包预载（解析失败 = 排除出 packs，应用回退系统图标）
         val packs = normalizeIconPackOrder(iconPackPackages).mapNotNull { iconPacks.load(it) }
-        class Entry(val app: LauncherApp, val decode: (suspend () -> androidx.compose.ui.graphics.ImageBitmap?)?)
+        class Entry(val app: LauncherApp, val decode: (suspend () -> IconDecode?)?)
         val entries = profiles.flatMap { profile ->
             // 单 profile 失败不拖垮整体（XSpace 受限/未就绪时 getActivityList 抛
             // SecurityException，降级为该 profile 无应用）
@@ -103,11 +120,18 @@ class AppRepository(
                 val label = info.label.toString().trim().ifBlank { return@mapNotNull null }
                 // getBadgedIcon 对非主 profile 自动叠加系统角标（双开/工作资料标识）——
                 // 两段式装载下延后到 withIcons 解码（角标语义不变，解码时同样走 getBadgedIcon）。
-                val base = makeApp(component, label, null, packs)
+                val base = makeApp(component, label, null, packs, info.applicationInfo.flags)
                 val app = if (serial == null) base else base.copy(user = profile, userSerial = serial)
-                // 包图标命中的应用不需要系统图标解码（原版语义包图标直接顶替系统图标）
+                // 包图标命中的应用不需要系统图标解码（原版语义包图标直接顶替系统图标）；
+                // originalIconColor/isAdaptiveIcon 在解码时顺带采样（v1.1.9，见类头注）。
                 Entry(app, if (app.icon == null) {
-                    { runCatching { info.getBadgedIcon(0)?.toBitmap()?.asImageBitmap() }.getOrNull() }
+                    {
+                        val drawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
+                        val bitmap = drawable?.toBitmap()?.asImageBitmap()
+                        IconDecode(bitmap,
+                            bitmap?.let { runCatching { IconDominantColor.of(it.asAndroidBitmap()) }.getOrNull() },
+                            drawable is AdaptiveIconDrawable)
+                    }
                 } else null)
             }
         }
@@ -120,8 +144,14 @@ class AppRepository(
                 val label = resolve.loadLabel(pm).toString().trim()
                 if (label.isBlank()) return@mapNotNull null
                 val component = ComponentName(activity.packageName, activity.name)
-                val app = makeApp(component, label, null, packs)
-                Entry(app) { runCatching { resolve.loadIcon(pm)?.toBitmap()?.asImageBitmap() }.getOrNull() }
+                val app = makeApp(component, label, null, packs, activity.applicationInfo.flags)
+                Entry(app) {
+                    val drawable = runCatching { resolve.loadIcon(pm) }.getOrNull()
+                    val bitmap = drawable?.toBitmap()?.asImageBitmap()
+                    IconDecode(bitmap,
+                        bitmap?.let { runCatching { IconDominantColor.of(it.asAndroidBitmap()) }.getOrNull() },
+                        drawable is AdaptiveIconDrawable)
+                }
             }
         }
         AppInventory(
@@ -141,13 +171,18 @@ class AppRepository(
         label: String,
         icon: androidx.compose.ui.graphics.ImageBitmap?,
         packs: List<LoadedIconPack>,
+        flags: Int = 0,
     ): LauncherApp {
+        // v1.1.9：isSystemApp 从 ApplicationInfo.flags 直取；originalIconColor/isAdaptiveIcon
+        // 由解码阶段回填（包图标命中路径保持 null/false，不额外解码）。
         val match = firstMatchingPackIcon(packs) { it.iconFor(component, null) }
-        if (match == null) return LauncherApp(componentName = component, label = label, icon = icon)
+        if (match == null) return LauncherApp(componentName = component, label = label, icon = icon,
+            isSystemApp = flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0)
         return LauncherApp(
             componentName = component, label = label, icon = match.second.bitmap,
             monochromeIcon = match.second.monochrome, monochromeScale = match.second.monochromeScale,
             iconPackPackage = match.first.packageName,
+            isSystemApp = flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0,
         )
     }
 
@@ -182,9 +217,14 @@ class AppRepository(
                         kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         val component = info.componentName ?: return@mapNotNull null
                         val label = info.label.toString().trim().ifBlank { return@mapNotNull null }
-                        val icon = runCatching { info.getBadgedIcon(0)?.toBitmap()?.asImageBitmap() }.getOrNull()
-                        makeApp(component, label, icon, packs)
-                            .copy(user = profile.user, userSerial = profile.serial, isWorkProfile = true)
+                        val drawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
+                        val icon = drawable?.toBitmap()?.asImageBitmap()
+                        makeApp(component, label, icon, packs, info.applicationInfo.flags)
+                            .copy(user = profile.user, userSerial = profile.serial, isWorkProfile = true,
+                                originalIconColor = icon?.let {
+                                    runCatching { IconDominantColor.of(it.asAndroidBitmap()) }.getOrNull()
+                                },
+                                isAdaptiveIcon = drawable is AdaptiveIconDrawable)
                     }
                 } catch (error: SecurityException) {
                     emptyList()

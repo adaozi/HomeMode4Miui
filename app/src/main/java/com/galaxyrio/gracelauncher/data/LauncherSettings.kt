@@ -1,5 +1,7 @@
 package com.galaxyrio.gracelauncher.data
 
+import com.materialkolor.PaletteStyle
+
 enum class ThemeMode { System, Light, Dark }
 
 // C 组搬运注记：原版此处的 AppFont 枚举未随搬（本仓 data/AppFont.kt 已承载，P1 字体链路）。
@@ -12,6 +14,7 @@ data class LauncherSettings(
     val allowHapticFeedback: Boolean = true,
     val useDynamicColors: Boolean = true,
     val themeColor: Int = DEFAULT_THEME_COLOR,
+    val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
     val darkMode: ThemeMode = ThemeMode.System,
     val amoledMode: Boolean = false,
     /** Retained for installations that used the original single-pack setting. */
@@ -52,6 +55,10 @@ data class LauncherSettings(
     val enabledIconPackPackages: List<String>
         get() = normalizeIconPackOrder(iconPackPackages.ifEmpty { listOfNotNull(iconPackPackage) })
 
+    /** Shared icon display lives inside the bulk design, same shape as per-app overrides. */
+    val iconDisplay: IconDisplaySettings
+        get() = iconDesign?.display ?: IconDisplaySettings()
+
     fun withIconPacks(packages: List<String>): LauncherSettings = copy(
         iconPackPackage = null,
         iconPackPackages = normalizeIconPackOrder(packages),
@@ -91,6 +98,8 @@ data class LauncherFolder(
     val placement: FolderPlacement,
     /** Only affects the app list; favorites always use their shared manual order. */
     val appListAtBottom: Boolean = true,
+    /** Membership-derived hiding never changes the explicit hidden-app table. */
+    val autoHideApps: Boolean = false,
 ) {
     val key: String get() = "folder:$id"
 
@@ -106,4 +115,16 @@ data class LauncherStorageSnapshot(
     val settings: LauncherSettings = LauncherSettings(),
     val hiddenAppKeys: Set<String> = emptySet(),
     val folders: List<LauncherFolder> = emptyList(),
-)
+) {
+    /** Explicit, manually hidden keys only. */
+    val folderHiddenAppKeys: Set<String> get() = hiddenAppsFromFolders(folders)
+    val effectiveHiddenAppKeys: Set<String> get() = hiddenAppKeys + folderHiddenAppKeys
+}
+
+/** Derive this union from current membership, including folders not shown on any surface. */
+internal fun hiddenAppsFromFolders(folders: List<LauncherFolder>): Set<String> =
+    folders.asSequence().filter { it.autoHideApps }.flatMap { it.appKeys.asSequence() }
+        .filter(String::isNotBlank).toSet()
+
+internal fun decodePaletteStyle(value: String): PaletteStyle =
+    PaletteStyle.entries.firstOrNull { it.name == value } ?: PaletteStyle.TonalSpot

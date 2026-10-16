@@ -3,9 +3,6 @@
 package com.galaxyrio.gracelauncher.ui.settings
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -43,6 +40,7 @@ import com.galaxyrio.gracelauncher.ui.components.LauncherIcon
 import com.galaxyrio.gracelauncher.ui.components.LauncherSearchBar
 import com.galaxyrio.gracelauncher.ui.components.LauncherSymbol
 import com.galaxyrio.gracelauncher.ui.overlays.FavoritesReorderState
+import com.galaxyrio.gracelauncher.ui.overlays.rememberReorderTranslation
 import kotlinx.coroutines.isActive
 
 @Composable
@@ -108,8 +106,7 @@ internal fun IconPackSettings(uiState: LauncherUiState, actions: LauncherActions
             items(reorder.keys, key = { FavoritesReorderState.itemKey(it) }, contentType = { "selected" }) { packageName ->
                 val pack = installed[packageName]
                 val dragging = reorder.draggingKey == packageName
-                val offset by animateFloatAsState(if (dragging) reorder.translation else 0f,
-                    animationSpec = if (dragging) snap() else spring(), label = "iconPackDrop")
+                val offset by rememberReorderTranslation(reorder, packageName)
                 val background by animateColorAsState(
                     if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceBright,
                     label = "iconPackLift",
@@ -124,8 +121,8 @@ internal fun IconPackSettings(uiState: LauncherUiState, actions: LauncherActions
                         stringResource(R.string.icon_pack_missing, label) else null,
                     onToggle = { toggle(packageName) },
                     modifier = Modifier.then(if (dragging) Modifier else Modifier.animateItem())
-                        .zIndex(if (dragging || offset != 0f) 1f else 0f)
-                        .graphicsLayer { translationY = if (dragging) reorder.translation else offset }
+                        .zIndex(if (dragging || reorder.drop?.key == packageName) 1f else 0f)
+                        .graphicsLayer { translationY = offset }
                         .semantics {
                             customActions = buildList {
                                 if (index > 0) add(CustomAccessibilityAction(moveUp) { reorder.moveBy(packageName, -1) })

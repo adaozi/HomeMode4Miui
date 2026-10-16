@@ -37,24 +37,17 @@ import com.galaxyrio.gracelauncher.ui.components.labelRes
 
 @Composable
 internal fun GraceButtonSettingsScreen(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit,
-    home: Boolean = false, onEditIcon: () -> Unit = {}, onChooseGesture: (GraceButtonGesture) -> Unit) {
+    home: Boolean = false, onAppearance: () -> Unit = {}, onChooseGesture: (GraceButtonGesture) -> Unit) {
     val settings = uiState.settings.gestureSettings(home)
     val gestures = if (home) listOf(GraceButtonGesture.SwipeUp, GraceButtonGesture.SwipeDown, GraceButtonGesture.DoubleTap) else GraceButtonGesture.entries
     SettingsScaffold(stringResource(if (home) R.string.settings_gestures else R.string.settings_grace_button),
-        if (home) "settings_home_gestures" else "settings_grace_button_page", onBack) { padding ->
+        if (home) "settings_home_gestures" else "settings_grace_button_page", onBack,
+        actions = { if (!home) SettingsAppearanceAction(onAppearance) }) { padding ->
         SettingsList(padding) {
             item { SettingsFeatureBanner(stringResource(if (home) R.string.home_gestures_enable else R.string.grace_button_enable), settings.enabled, "gestures_enabled") { value ->
                 actions.updateSettings { it.withGestureSettings(home) { settings -> settings.copy(enabled = value) } }
             } }
-            if (!home) {
-                item {
-                    // 文案消歧：此处编辑的是 Grace 按钮自身图标，不用通用 edit_icon
-                    //（该串仍被 ProductivitySettings/ProfileSettings/PrivateSpaceSettings 复用）。
-                    SettingsActionItem(stringResource(R.string.grace_button_edit_icon), null, 0, 1,
-                        "grace_button_icon", onClick = onEditIcon)
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
+            // 上游 v1.1.9：编辑图标入口自本页移除（改走 onAppearance 工具栏动作）。
             gestures.forEachIndexed { index, gesture ->
                 item {
                     val target = settings.target(gesture)

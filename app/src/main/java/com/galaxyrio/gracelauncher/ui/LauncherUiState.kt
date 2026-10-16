@@ -88,6 +88,10 @@ data class LauncherUiState(
     // （Suggestion 行/圆形锁定/iconSize=100），从未命中时按钮设计页退化为普通应用面。
     val graceButtonApp: LauncherApp? = null,
 ) {
+    // 上游同步 v1.1.9：文件夹成员派生隐藏（autoHideApps），与手动隐藏表求并集。
+    val folderHiddenAppKeys: Set<String> get() = com.galaxyrio.gracelauncher.data.hiddenAppsFromFolders(folders)
+    val effectiveHiddenAppKeys: Set<String> get() = hiddenAppKeys + folderHiddenAppKeys
+
     // 上游同步 v1.1.8（LauncherViewModel.notificationsFor 逐字语义，落到本仓 UiState）：
     // 通知预览按 ShortcutsFoldersSettings 的静默/普通显示策略过滤；快捷方式/文件夹/
     // 其他 profile 行不显示预览。

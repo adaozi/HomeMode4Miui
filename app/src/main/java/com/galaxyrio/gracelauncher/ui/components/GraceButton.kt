@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.homemode4miui.R
 import com.galaxyrio.gracelauncher.data.GraceButtonGesture
 import com.galaxyrio.gracelauncher.data.GraceButtonSettings
@@ -69,7 +70,8 @@ import kotlin.math.abs
 internal fun GraceButton(settings: GraceButtonSettings, editing: Boolean, enabled: Boolean,
     onGesture: (GraceButtonGesture, GraceButtonOrigin) -> Unit, onFinishEditing: () -> Unit,
     modifier: Modifier = Modifier, hidden: Boolean = false, heldOrigin: GraceButtonOrigin? = null,
-    artwork: ImageBitmap? = null, design: IconDesign = GraceButtonIcon.defaults) {
+    artwork: ImageBitmap? = null, design: IconDesign = GraceButtonIcon.defaults,
+    size: Dp = settings.layout.normalized().size.dp) {
     val latestSettings by rememberUpdatedState(settings)
     val perform by rememberUpdatedState(onGesture)
     val haptics = LocalHapticFeedback.current
@@ -96,12 +98,6 @@ internal fun GraceButton(settings: GraceButtonSettings, editing: Boolean, enable
     val visualCenter = bounds.center + movement
     val halfSize = Offset(bounds.width * scaleX / 2f, bounds.height * scaleY / 2f)
     val origin by rememberUpdatedState(GraceButtonOrigin(Rect(visualCenter - halfSize, visualCenter + halfSize), artwork = artwork))
-    val shape = remember(design.shape, design.cookieSides, design.pebbleRoundness, design.squareCornerRadius) {
-        if (design.shape == IconShape.None) RectangleShape else GenericShape { size, _ ->
-            addPath(iconShapePath(design.shape, design.cookieSides, size.minDimension,
-                design.pebbleRoundness, design.squareCornerRadius).asComposePath())
-        }
-    }
     fun activate(gesture: GraceButtonGesture) { perform(gesture, origin.copy(velocity = releaseVelocity)) }
     val activateLatest by rememberUpdatedState(::activate)
     val description = stringResource(if (editing) R.string.done else R.string.settings_grace_button)
@@ -115,7 +111,7 @@ internal fun GraceButton(settings: GraceButtonSettings, editing: Boolean, enable
         .filter { it != GraceButtonGesture.Tap && it != GraceButtonGesture.LongPress && settings.target(it).active }
         .map { gesture -> CustomAccessibilityAction(stringResource(gesture.labelRes)) { activate(gesture); true } }
 
-    Box(modifier.size(54.dp).testTag("launcher_fab")
+    Box(modifier.size(size).testTag("launcher_fab")
         .onGloballyPositioned { bounds = it.boundsInRoot() }
         // Observe the initial pass without consuming: feedback starts at touch-down
         // and follows every movement, before tap/drag recognition has completed.
@@ -186,22 +182,34 @@ internal fun GraceButton(settings: GraceButtonSettings, editing: Boolean, enable
             // Keep ordinary taps immediate when double-tap has not been enabled.
             onDoubleClick = if (editing || !settings.doubleTap.active) null else ({ activate(GraceButtonGesture.DoubleTap) }),
         ).semantics { contentDescription = description; customActions = extraActions }, contentAlignment = Alignment.Center) {
-        Surface(Modifier.fillMaxSize().testTag("launcher_fab_surface").graphicsLayer {
+        GraceButtonArtwork(artwork, design, size, editing, Modifier.fillMaxSize().testTag("launcher_fab_surface").graphicsLayer {
             alpha = if (hidden) 0f else 1f
             translationX = heldOrigin?.let { it.bounds.center.x - bounds.center.x } ?: movement.x
             translationY = heldOrigin?.let { it.bounds.center.y - bounds.center.y } ?: movement.y
             this.scaleX = heldOrigin?.let { it.bounds.width / bounds.width.coerceAtLeast(1f) } ?: scaleX
             this.scaleY = heldOrigin?.let { it.bounds.height / bounds.height.coerceAtLeast(1f) } ?: scaleY
-        }, shape = if (editing) CircleShape else shape,
-            color = if (editing || artwork == null) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            // With no imposed shape, a rectangular shadow would expose the artwork's transparent bounds.
-            shadowElevation = if (!editing && design.shape == IconShape.None) 0.dp else 6.dp) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (!editing && artwork != null) Image(artwork, null, Modifier.fillMaxSize())
-                else Icon(painterResource(if (editing) R.drawable.ms_check else R.drawable.ic_launcher_foreground), null,
-                    Modifier.size(if (editing) 26.dp else 48.dp))
-            }
+        })
+    }
+}
+
+/** A single visual for the desktop and position preview, without gesture handlers. */
+@Composable
+internal fun GraceButtonArtwork(artwork: ImageBitmap?, design: IconDesign, size: Dp,
+    editing: Boolean = false, modifier: Modifier = Modifier) {
+    val shape = remember(design.shape, design.cookieSides, design.pebbleRoundness, design.squareCornerRadius, design.squareAspectRatio) {
+        if (design.shape == IconShape.None) RectangleShape else GenericShape { bounds, _ ->
+            addPath(iconShapePath(design.shape, design.cookieSides, bounds.minDimension,
+                design.pebbleRoundness, design.squareCornerRadius, design.squareAspectRatio).asComposePath())
+        }
+    }
+    Surface(modifier.size(size), shape = if (editing) CircleShape else shape,
+        color = if (editing || artwork == null) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shadowElevation = if (!editing && design.shape == IconShape.None) 0.dp else 6.dp * (size / 54.dp)) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (!editing && artwork != null) Image(artwork, null, Modifier.fillMaxSize())
+            else Icon(painterResource(if (editing) R.drawable.ms_check else R.drawable.ic_grace_solid), null,
+                Modifier.size(size * (if (editing) 26f else 40f) / 54f))
         }
     }
 }

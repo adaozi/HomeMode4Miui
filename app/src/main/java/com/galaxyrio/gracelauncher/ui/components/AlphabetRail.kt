@@ -101,7 +101,7 @@ fun AlphabetRail(
     if (letters.isEmpty()) return
     val appearance = LocalLauncherAppearance.current
     val defaultTextColor = if (onWallpaper) appearance.text else MaterialTheme.colorScheme.onSurface
-    val textColor = alphabet?.fontColor?.resolve(defaultTextColor.toArgb(), MaterialTheme.colorScheme.primary.toArgb())
+    val textColor = alphabet?.fontColor?.resolve(MaterialTheme.colorScheme.primary.toArgb())
         ?.let(::Color) ?: defaultTextColor
     val fontSize = (alphabet?.fontSize ?: 14).sp
     val fontFamily = if (alphabet != null) rememberAppFontFamily(alphabet.fontId) else MaterialTheme.typography.bodyLarge.fontFamily

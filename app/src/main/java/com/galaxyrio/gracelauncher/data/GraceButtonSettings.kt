@@ -38,7 +38,10 @@ data class GraceButtonSettings(
     val swipeSensitivity: Int = 100,
     /** null follows the system double-tap timeout. */
     val doubleTapIntervalMs: Int? = null,
+    val layout: GraceButtonLayout = GraceButtonLayout(),
 ) {
+    fun isVisible(appList: Boolean): Boolean = enabled && layout.showOn.includes(appList)
+
     fun target(gesture: GraceButtonGesture): GraceButtonTarget = when (gesture) {
         GraceButtonGesture.Tap -> tap
         GraceButtonGesture.LongPress -> longPress
@@ -73,6 +76,10 @@ data class GraceButtonSettings(
         put("appListAnimationDurationMs", appListAnimationDurationMs.coerceIn(100, 1500))
         put("swipeSensitivity", swipeSensitivity.coerceIn(50, 200))
         put("doubleTapIntervalMs", doubleTapIntervalMs?.coerceIn(150, 700))
+        val placement = layout.normalized()
+        put("layout", JSONObject().put("alignment", placement.alignment.name)
+            .put("sideMargin", placement.sideMargin).put("bottomMargin", placement.bottomMargin).put("size", placement.size)
+            .put("showOn", placement.showOn.name))
         GraceButtonGesture.entries.forEach { gesture ->
             val target = target(gesture)
             put(gesture.storageKey, JSONObject().put("action", target.action.name).put("key", target.itemKey)
@@ -90,6 +97,7 @@ data class GraceButtonSettings(
 
         fun decode(json: String?, defaults: GraceButtonSettings = GraceButtonSettings()): GraceButtonSettings = runCatching {
             val data = JSONObject(json ?: "{}")
+            val layout = data.optJSONObject("layout")
             var settings = defaults.copy(
                 enabled = data.optBoolean("enabled", defaults.enabled),
                 animationsEnabled = data.optBoolean("animationsEnabled", defaults.animationsEnabled),
@@ -98,6 +106,13 @@ data class GraceButtonSettings(
                 swipeSensitivity = data.optInt("swipeSensitivity", defaults.swipeSensitivity).coerceIn(50, 200),
                 doubleTapIntervalMs = if (data.has("doubleTapIntervalMs") && !data.isNull("doubleTapIntervalMs"))
                     data.optInt("doubleTapIntervalMs", 300).coerceIn(150, 700) else defaults.doubleTapIntervalMs,
+                layout = if (layout == null) defaults.layout else GraceButtonLayout(
+                    alignment = GraceButtonAlignment.entries.firstOrNull { it.name == layout.optString("alignment") } ?: defaults.layout.alignment,
+                    sideMargin = layout.optDouble("sideMargin", defaults.layout.sideMargin.toDouble()).toFloat(),
+                    bottomMargin = layout.optDouble("bottomMargin", defaults.layout.bottomMargin.toDouble()).toFloat(),
+                    size = layout.optDouble("size", defaults.layout.size.toDouble()).toFloat(),
+                    showOn = GraceButtonVisibility.entries.firstOrNull { it.name == layout.optString("showOn") } ?: defaults.layout.showOn,
+                ).normalized(),
             )
             GraceButtonGesture.entries.forEach { gesture ->
                 val saved = data.optJSONObject(gesture.storageKey) ?: return@forEach

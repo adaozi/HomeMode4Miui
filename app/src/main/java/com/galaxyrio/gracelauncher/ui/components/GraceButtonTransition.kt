@@ -138,7 +138,7 @@ internal fun GraceButtonTransitionOverlay(transition: GraceButtonTransition) {
     val buttonColor = MaterialTheme.colorScheme.primaryContainer
     val buttonInk = MaterialTheme.colorScheme.onPrimaryContainer
     val fieldColor = SearchBarDefaults.colors().containerColor
-    val glyph = painterResource(R.drawable.ic_launcher_foreground)
+    val glyph = painterResource(R.drawable.ic_grace_solid)
     val artwork = remember(transition.origin.artwork) { transition.origin.artwork?.let { BitmapPainter(it) } }
     Canvas(Modifier.fillMaxSize().onGloballyPositioned { transition.viewport = it.boundsInRoot() }
         .clearAndSetSemantics {}
@@ -174,7 +174,7 @@ internal fun GraceButtonTransitionOverlay(transition: GraceButtonTransition) {
                         cornerRadius = CornerRadius(mix(width / 2f, height / 2f, morph), height / 2f))
                     if (artwork != null) drawGlyph(artwork, center, Size(width, height), null, 1f - appearanceFade)
                 }
-                if (artwork == null) drawGlyph(glyph, center, source.size * (48f / 54f), buttonInk, 1f - smoothStep(0.02f, 0.26f, p))
+                if (artwork == null) drawGlyph(glyph, center, source.size * (40f / 54f), buttonInk, 1f - smoothStep(0.02f, 0.26f, p))
             }
             GraceButtonAction.AppList -> {
                 val edge = transition.revealEdge(52.dp.toPx())
@@ -186,7 +186,7 @@ internal fun GraceButtonTransitionOverlay(transition: GraceButtonTransition) {
                 drawRect(revealBrush(center, radius, edge, buttonColor),
                     alpha = remainingFill * remainingFill * remainingFill)
                 if (artwork != null) drawGlyph(artwork, center, transition.origin.bounds.size, null, 1f - smoothStep(0f, 0.14f, p))
-                else drawGlyph(glyph, center, transition.origin.bounds.size * (48f / 54f), buttonInk,
+                else drawGlyph(glyph, center, transition.origin.bounds.size * (40f / 54f), buttonInk,
                     1f - smoothStep(0f, 0.14f, p))
             }
             GraceButtonAction.LockScreen -> {

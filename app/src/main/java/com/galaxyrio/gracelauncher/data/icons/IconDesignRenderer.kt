@@ -20,6 +20,7 @@ import androidx.core.graphics.createBitmap
 import androidx.graphics.shapes.toPath
 import com.galaxyrio.gracelauncher.data.IconDesign
 import com.galaxyrio.gracelauncher.data.IconShape
+import com.galaxyrio.gracelauncher.data.squareIconDimensions
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
@@ -87,20 +88,36 @@ internal fun iconLayers(drawable: Drawable, size: Int, themed: Boolean = false):
 }
 
 internal fun renderDesignedIcon(layers: IconLayers, design: IconDesign, dynamicBackground: Int, dynamicForeground: Int,
-    themeBackground: Int = dynamicBackground, themeForeground: Int = dynamicForeground): Bitmap {
+    themeBackground: Int = dynamicBackground, themeForeground: Int = dynamicForeground, appColors: Pair<Int, Int>? = null): Bitmap {
     val style = design.normalized()
     if (style == IconDesign()) return layers.original
     val side = layers.original.width
     val output = createBitmap(side, side)
-    val canvas = Canvas(output)
+    drawDesignedIcon(Canvas(output), layers, style, dynamicBackground, dynamicForeground, themeBackground, themeForeground, appColors)
+    return output
+}
+
+/** Draw the same layers directly for previews; moving a symbol must not allocate a bitmap every frame. */
+internal fun drawDesignedIcon(canvas: Canvas, layers: IconLayers, design: IconDesign, dynamicBackground: Int, dynamicForeground: Int,
+    themeBackground: Int = dynamicBackground, themeForeground: Int = dynamicForeground, appColors: Pair<Int, Int>? = null) {
+    val style = design.normalized()
+    val side = layers.original.width
     val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    val checkpoint = canvas.save()
+    // A bitmap canvas used to supply these bounds implicitly. Hardware previews need them too.
+    canvas.clipRect(0f, 0f, side.toFloat(), side.toFloat())
+    if (style == IconDesign()) {
+        canvas.drawBitmap(layers.original, 0f, 0f, paint)
+        canvas.restoreToCount(checkpoint)
+        return
+    }
     val mask = if (style.shape == IconShape.None) layers.originalMask ?: if (style.addTray)
         iconShapePath(IconShape.Circle, size = side.toFloat()) else null
-        else iconShapePath(style.shape, style.cookieSides, side.toFloat(), style.pebbleRoundness, style.squareCornerRadius)
+        else iconShapePath(style.shape, style.cookieSides, side.toFloat(), style.pebbleRoundness, style.squareCornerRadius, style.squareAspectRatio)
     mask?.let(canvas::clipPath)
     val canTheme = style.themeIcons && (layers.monochrome != null || style.themeUnsupportedIcons)
-    val background = style.background?.resolve(dynamicBackground, themeBackground)
-    val foreground = style.foreground?.resolve(dynamicForeground, themeForeground)?.takeIf { canTheme }
+    val background = style.background?.resolve(themeBackground, appColors?.first)
+    val foreground = style.foreground?.resolve(themeForeground, appColors?.second)?.takeIf { canTheme }
     if (layers.layered) {
         if (canTheme && background != null) canvas.drawColor(background)
         else layers.background?.let { canvas.drawBitmap(it, 0f, 0f, paint) }
@@ -115,12 +132,10 @@ internal fun renderDesignedIcon(layers: IconLayers, design: IconDesign, dynamicB
     val centerX = side * (0.5f + style.x / 100f)
     val centerY = side * (0.5f + style.y / 100f)
     val half = side * scale / 2f
-    canvas.save()
     canvas.rotate(style.rotation, centerX, centerY)
     canvas.drawBitmap(layers.symbol(foreground, style.themeUnsupportedIcons, style.invertBackgroundDetection), null,
         RectF(centerX - half, centerY - half, centerX + half, centerY + half), paint)
-    canvas.restore()
-    return output
+    canvas.restoreToCount(checkpoint)
 }
 
 private fun hasVisibleSymbol(bitmap: Bitmap): Boolean {
@@ -170,7 +185,7 @@ internal fun pebbleShapePower(roundness: Int): Double = 2.0 / (6.0 - roundness.c
 
 /** One parameterized mask for rendered icons, picker swatches and the Grace button surface. */
 internal fun iconShapePath(shape: IconShape, sides: Int = 4, size: Float = 1f,
-    pebbleRoundness: Int = IconDesign.DefaultPebbleRoundness, squareCornerRadius: Int = 0): Path {
+    pebbleRoundness: Int = IconDesign.DefaultPebbleRoundness, squareCornerRadius: Int = 0, squareAspectRatio: Float = 1f): Path {
     val path = when (shape) {
         IconShape.Gem -> MaterialShapes.Gem.toPath()
         IconShape.Cookie -> when (sides) {
@@ -190,8 +205,11 @@ internal fun iconShapePath(shape: IconShape, sides: Int = 4, size: Float = 1f,
             close()
         }
         IconShape.Square -> Path().apply {
-            val radius = squareCornerRadius.coerceIn(0, 100) / 200f
-            addRoundRect(0f, 0f, 1f, 1f, radius, radius, Path.Direction.CW)
+            val (width, height) = squareIconDimensions(squareAspectRatio)
+            val left = (1f - width) / 2f
+            val top = (1f - height) / 2f
+            val radius = minOf(width, height) * squareCornerRadius.coerceIn(0, 100) / 200f
+            addRoundRect(left, top, left + width, top + height, radius, radius, Path.Direction.CW)
         }
         IconShape.None, IconShape.Circle -> Path().apply { addCircle(.5f, .5f, .5f, Path.Direction.CW) }
     }

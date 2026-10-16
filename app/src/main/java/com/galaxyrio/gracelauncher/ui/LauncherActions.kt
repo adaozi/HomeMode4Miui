@@ -47,6 +47,8 @@ data class LauncherActions(
     val applyIconDesign: suspend (ItemIcon) -> Boolean = { false },
     val deleteIconDesigns: suspend (Set<String>) -> Boolean = { false },
     val setHiddenApps: (Set<String>) -> Unit = {},
+    val hideApp: (LauncherApp) -> Unit = {},
+    val setFolderAutoHide: (String, Boolean) -> Unit = { _, _ -> },
     val saveFolder: (LauncherFolder) -> Unit = {},
     val updateFolder: (String, String?, FolderPlacement?, Boolean?) -> Unit = { _, _, _, _ -> },
     val setFolderFavorites: suspend (Map<String, Boolean>) -> Boolean = { false },

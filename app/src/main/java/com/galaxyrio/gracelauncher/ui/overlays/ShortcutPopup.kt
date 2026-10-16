@@ -47,6 +47,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.contentDescription
 import com.galaxyrio.gracelauncher.ui.components.LocalListAppearance
 import com.galaxyrio.gracelauncher.ui.components.listLabelStyle
+import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
+import com.galaxyrio.gracelauncher.ui.theme.effectiveDisplay
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.paneTitle
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import com.homemode4miui.R // P4：模块 namespace，R 类随之（原版为 com.galaxyrio.gracelauncher.R）
+import com.galaxyrio.gracelauncher.data.IconDisplayStyle
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.ShortcutResult
 import com.galaxyrio.gracelauncher.data.ShortcutStatus
@@ -153,6 +156,9 @@ fun ShortcutPopup(
             }
             items(shortcuts, key = { "shortcut:${it.key}" }) { itemApp ->
                     var iconBounds by remember { mutableStateOf(Rect.Zero) }
+                    // 上游 v1.1.9：行图标支持圆点/隐藏显示（effectiveDisplay 链）
+                    val itemDisplay = itemApp.effectiveDisplay(LocalLauncherAppearance.current)
+                    val hiddenIcon = itemDisplay.style == IconDisplayStyle.Hidden
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("shortcut:${itemApp.shortcut?.id ?: itemApp.key}")
                             .clip(RoundedCornerShape(16.dp))
@@ -163,13 +169,19 @@ fun ShortcutPopup(
                                 onDismiss()
                             }).padding(horizontal = 12.dp, vertical = (listAppearance.appSpacing / 2f).dp)
                             // 上游同步 v1.1.8 S8b：名字隐藏时进无障碍描述
-                            .semantics { if (!showNames) contentDescription = itemApp.label },
+                            .semantics { if (!showNames && !hiddenIcon) contentDescription = itemApp.label },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        AppIcon(itemApp, Modifier.onGloballyPositioned { iconBounds = it.boundsInWindow() }, size = 36.dp)
-                        if (showNames) {
-                            Spacer(Modifier.width(listAppearance.iconNameGap.dp))
-                            Text(itemApp.label, style = labelStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (hiddenIcon) {
+                            Text(itemApp.label, Modifier.onGloballyPositioned { iconBounds = it.boundsInWindow() },
+                                style = labelStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        } else {
+                            AppIcon(itemApp, Modifier.onGloballyPositioned { iconBounds = it.boundsInWindow() },
+                                size = 36.dp, display = itemDisplay)
+                            if (showNames) {
+                                Spacer(Modifier.width(listAppearance.iconNameGap.dp))
+                                Text(itemApp.label, style = labelStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
             }

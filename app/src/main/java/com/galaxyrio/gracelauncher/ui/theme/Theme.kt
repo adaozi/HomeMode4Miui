@@ -10,18 +10,17 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.LocalTonalElevationEnabled
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import com.galaxyrio.gracelauncher.data.FontLibrary
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalResources
 import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamiccolor.ColorSpec
-import com.materialkolor.rememberDynamicColorScheme
+import com.galaxyrio.gracelauncher.data.FontLibrary
+import com.galaxyrio.gracelauncher.data.launcherThemeSeed
+import com.galaxyrio.gracelauncher.data.launcherColorScheme
 
 val Ink = Color(0xFF071A19)
 val DeepTeal = Color(0xFF123B37)
@@ -76,22 +75,13 @@ fun GraceLauncherTheme(
     /** 模块架构定制（appFont 桌面接线）：字体资产/导入文件解析用 Context。桌面宿主进程必须传模块 Context（宿主 assets 无模块字体资产）。 */
     fontContext: android.content.Context? = null,
     amoledMode: Boolean = false,
+    paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        seedColor != null -> rememberDynamicColorScheme(
-            seedColor = seedColor,
-            isDark = darkTheme,
-            style = PaletteStyle.TonalSpot,
-            specVersion = ColorSpec.SpecVersion.SPEC_2025,
-        )
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
+    val colorScheme = if (seedColor != null || (dynamicColor && Build.VERSION.SDK_INT >= 31)) {
+        val seed = launcherThemeSeed(LocalResources.current, dynamicColor, seedColor?.toArgb() ?: 0xFF6750A4.toInt())
+        remember(seed, darkTheme, paletteStyle) { launcherColorScheme(seed, darkTheme, paletteStyle) }
+    } else if (darkTheme) DarkColorScheme else LightColorScheme
 
     val trueBlack = darkTheme && amoledMode
     // Keep raised cards and accent colors distinct while making page and sheet

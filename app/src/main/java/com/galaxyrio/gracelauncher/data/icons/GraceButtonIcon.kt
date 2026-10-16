@@ -26,7 +26,7 @@ internal object GraceButtonIcon {
 
     /** Use stable names in storage, not resource IDs which may change in a new build. */
     enum class Suggestion(val id: String, val drawable: Int, val label: Int) {
-        Default("default", R.drawable.ic_launcher_foreground, R.string.icon_edit_default),
+        Default("default", R.drawable.ic_grace_solid, R.string.icon_edit_default),
         Search("search", R.drawable.ms_search, R.string.settings_search),
         List("format_list_bulleted", R.drawable.ms_format_list_bulleted, R.string.icon_suggestion_list),
         Power("power_settings_new", R.drawable.ms_power_settings_new, R.string.icon_suggestion_power),
@@ -37,10 +37,10 @@ internal object GraceButtonIcon {
 
     fun layers(context: Context, choice: ItemIcon, size: Int, colors: Pair<Int, Int>): IconLayers {
         val suggestion = Suggestion.entries.firstOrNull { choice.kind == "symbol" && it.id == choice.name }
-        val glyph = requireNotNull(ContextCompat.getDrawable(context, suggestion?.drawable ?: R.drawable.ic_launcher_foreground)).mutate()
+        val glyph = requireNotNull(ContextCompat.getDrawable(context, suggestion?.drawable ?: R.drawable.ic_grace_solid)).mutate()
         glyph.setTint(colors.second)
-        // Match the existing 48dp G in a 54dp button; Material symbols use a 26dp viewport.
-        val fraction = if (suggestion == null || suggestion == Suggestion.Default) 48f / 54f else 26f / 54f
+        // Match the 40dp solid layer in the 54dp FAB; Material symbols use a 26dp viewport.
+        val fraction = if (suggestion == null || suggestion == Suggestion.Default) 40f / 54f else 26f / 54f
         val inset = (size * (1f - fraction) / 2f).toInt()
         val foreground = createBitmap(size, size).also {
             glyph.setBounds(inset, inset, size - inset, size - inset)

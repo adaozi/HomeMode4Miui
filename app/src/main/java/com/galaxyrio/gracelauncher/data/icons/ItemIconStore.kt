@@ -17,10 +17,6 @@ import android.util.LruCache
 import android.util.Log
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import com.galaxyrio.gracelauncher.data.ItemIcon
 import com.galaxyrio.gracelauncher.data.IconDesign
 import com.galaxyrio.gracelauncher.data.LauncherApp
@@ -28,9 +24,9 @@ import com.galaxyrio.gracelauncher.data.PrivateSpaceFolderId
 import com.galaxyrio.gracelauncher.data.LauncherSettings
 import com.galaxyrio.gracelauncher.data.ThemeMode
 import com.galaxyrio.gracelauncher.data.icons.isGraceButton
+import com.galaxyrio.gracelauncher.data.launcherIconColors
+import com.galaxyrio.gracelauncher.data.launcherThemeSeed
 import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamicColorScheme
-import com.materialkolor.dynamiccolor.ColorSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
@@ -41,7 +37,8 @@ import java.util.UUID
 class ItemIconStore(private val context: Context, private val packs: IconPackRepository) {
     private val directory get() = File(context.filesDir, "item_icons")
     private val images = LruCache<String, Bitmap>(12)
-    private val themePalettes = LruCache<Pair<Int, Boolean>, Pair<Int, Int>>(4)
+    private val themePalettes = LruCache<Triple<Int, Boolean, PaletteStyle>, Pair<Int, Int>>(8)
+    private val appPalettes = LruCache<Triple<Int, Boolean, PaletteStyle>, Pair<Int, Int>>(256)
 
     private fun imageBitmap(name: String, size: Int): Bitmap? = runCatching {
         val key = "$name:$size"
@@ -74,25 +71,25 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
     }
 
     internal fun themeColors(settings: LauncherSettings): Pair<Int, Int> {
-        if (settings.useDynamicColors && Build.VERSION.SDK_INT >= 31) return dynamicColors(settings)
-        return seedColors(settings)
+        val seed = launcherThemeSeed(context.resources, settings.useDynamicColors, settings.themeColor)
+        return paletteColors(seed, isDark(settings), settings.paletteStyle)
     }
 
-    private fun seedColors(settings: LauncherSettings): Pair<Int, Int> {
-        val key = settings.themeColor to isDark(settings)
-        return themePalettes[key] ?: dynamicColorScheme(seedColor = Color(key.first), isDark = key.second,
-            style = PaletteStyle.TonalSpot, specVersion = ColorSpec.SpecVersion.SPEC_2025).let {
-            it.primaryContainer.toArgb() to it.onPrimaryContainer.toArgb()
-        }.also { themePalettes.put(key, it) }
+    private fun paletteColors(seed: Int, dark: Boolean, style: PaletteStyle): Pair<Int, Int> {
+        val key = Triple(seed, dark, style)
+        return themePalettes[key] ?: launcherIconColors(seed, dark, style).also { themePalettes.put(key, it) }
+    }
+
+    /** Cache base roles only: moving HSB sliders must not regenerate a scheme. */
+    internal fun appColors(seed: Int?, settings: LauncherSettings): Pair<Int, Int>? {
+        if (seed == null) return null
+        val key = Triple(seed, isDark(settings), settings.paletteStyle)
+        return appPalettes[key] ?: launcherIconColors(key.first, key.second, key.third).also { appPalettes.put(key, it) }
     }
 
     internal fun dynamicColors(settings: LauncherSettings): Pair<Int, Int> {
-        val dark = isDark(settings)
-        if (Build.VERSION.SDK_INT >= 31) {
-            val scheme = if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            return scheme.primaryContainer.toArgb() to scheme.onPrimaryContainer.toArgb()
-        }
-        return seedColors(settings)
+        val seed = launcherThemeSeed(context.resources, true, settings.themeColor)
+        return paletteColors(seed, isDark(settings), settings.paletteStyle)
     }
 
     internal suspend fun layers(app: LauncherApp, choice: ItemIcon, settings: LauncherSettings, size: Int = 384): IconLayers? = safelyRender(app, null) {
@@ -134,13 +131,16 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
 
     suspend fun apply(app: LauncherApp, choice: ItemIcon?, settings: LauncherSettings = LauncherSettings()): LauncherApp = withContext(Dispatchers.IO) {
         safelyRender(app, app) {
-            if (choice == null) return@withContext app
+            if (choice == null) return@safelyRender app
             choice.design?.let { design ->
                 // 上游同步 v1.1.8 S8b（ItemIconStore.kt:137）：按钮位图 256px（54dp FAB 高密度）。
-                val original = layers(app, choice, settings, if (app.isGraceButton) 256 else 144) ?: return@withContext app
+                val original = layers(app, choice, settings, if (app.isGraceButton) 256 else 144) ?: return@safelyRender app
                 val colors = dynamicColors(settings)
                 val theme = themeColors(settings)
-                return@withContext app.copy(icon = renderDesignedIcon(original, design, colors.first, colors.second, theme.first, theme.second).asImageBitmap(),
+                val fromApp = if (design.background?.fromApp == true || design.foreground?.fromApp == true)
+                    appColors(app.originalIconColor, settings) else null
+                return@safelyRender app.copy(icon = renderDesignedIcon(original, design, colors.first, colors.second,
+                    theme.first, theme.second, fromApp).asImageBitmap(),
                     monochromeIcon = null, iconPackPackage = when (choice.kind) {
                         "theme" -> app.themeIconPackPackage
                         "pack" -> choice.source
@@ -151,7 +151,7 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
                 "pack" -> packs.selectedIcon(choice)
                 "image" -> imageBitmap(choice.source, 144)?.let { PackIcon(it.asImageBitmap()) }
                 "system" -> if (app.folderId != null) null else if (app.shortcut != null) app.shortcut.icon?.let { PackIcon(it) } else runCatching {
-                    val drawable = systemDrawable(app) ?: return@withContext app
+                    val drawable = systemDrawable(app) ?: return@safelyRender app
                     val mono = if (Build.VERSION.SDK_INT >= 33) (drawable as? AdaptiveIconDrawable)?.monochrome else null
                     PackIcon(renderIcon(drawable).asImageBitmap(), mono?.let { renderIcon(it).asImageBitmap() })
                 }.getOrNull()
@@ -159,7 +159,7 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
             }
             if (icon == null) app else app.copy(icon = icon.bitmap, monochromeIcon = icon.monochrome,
                 monochromeScale = icon.monochromeScale, iconPackPackage = choice.source.takeIf { choice.kind == "pack" })
-        }
+        }.copy(iconDisplay = choice?.display)
     }
 
     /** One invalid third-party drawable must not abort the launcher or the live preview. */

@@ -113,10 +113,10 @@ internal fun ProductivitySettings(
             item {
                 SettingsActionItem(stringResource(R.string.settings_grace_button), null,
                     5, 8, "settings_grace_button", leading = {
-                        // Remove the adaptive icon's transparent safe-zone inset;
-                        // keep the same 24dp leading slot as Material Symbols.
-                        Icon(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null,
-                            modifier = Modifier.size(24.dp).graphicsLayer { scaleX = 2.25f; scaleY = 2.25f })
+                        // Render the artwork at 20dp inside the 24dp slot,
+                        // leaving 2dp above and below the logo.
+                        Icon(painterResource(R.drawable.ic_grace_solid), contentDescription = null,
+                            modifier = Modifier.size(24.dp).graphicsLayer { scaleX = 5f / 3f; scaleY = 5f / 3f })
                     }) { navigate(SettingsPage.GraceButton) }
             }
             item {
@@ -135,7 +135,7 @@ internal fun ProductivitySettings(
             item { SettingsHeading(stringResource(R.string.settings_app_organization)) }
             item {
                 SettingsActionItem(
-                    stringResource(R.string.settings_hide_apps), pluralStringResource(R.plurals.settings_hidden_count, uiState.hiddenAppKeys.size, uiState.hiddenAppKeys.size),
+                    stringResource(R.string.settings_hide_apps), pluralStringResource(R.plurals.settings_hidden_count, uiState.effectiveHiddenAppKeys.size, uiState.effectiveHiddenAppKeys.size),
                     0, 4, "settings_open_hidden_apps",
                     leading = { LauncherIcon(LauncherSymbol.VisibilityOff) },
                 ) { navigate(SettingsPage.HiddenApps) }
@@ -175,7 +175,14 @@ internal fun ProductivitySettings(
 
 @Composable
 internal fun HiddenAppsSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit) {
-    var selectedKeys by rememberSaveable { mutableStateOf<List<String>>(uiState.hiddenAppKeys.toList()) }
+    // Store edits, not a snapshot of a possibly still-loading manual hidden set.
+    // Folder-derived keys are never copied into manual storage by the Save action.
+    var selection by rememberSaveable { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    val selectedKeys = uiState.hiddenAppKeys.toMutableSet().apply {
+        selection.forEach { (key, hidden) -> if (hidden) add(key) else remove(key) }
+    }
+    val folderHidden = uiState.folderHiddenAppKeys
+    val checkedKeys = selectedKeys.toSet() + folderHidden
     val queryState = rememberTextFieldState()
     val enabled = LocalSettingsStorageState.current.canEdit
     SettingsScaffold(
@@ -190,16 +197,17 @@ internal fun HiddenAppsSettings(uiState: LauncherUiState, actions: LauncherActio
         },
     ) { padding ->
         AppSelectionList(
-            apps = uiState.allApps, selectedKeys = selectedKeys.toSet(), query = queryState,
-            onSelect = { app -> selectedKeys = toggledKeys(selectedKeys, app.key) },
+            apps = uiState.allApps, selectedKeys = checkedKeys, query = queryState,
+            onSelect = { app -> if (app.key !in folderHidden) selection = selection + (app.key to (app.key !in selectedKeys)) },
             modifier = Modifier.padding(padding).consumeWindowInsets(padding).imePadding(),
             enabled = enabled, itemTagPrefix = "hidden_app",
+            lockedKeys = folderHidden, lockedLabel = stringResource(R.string.hidden_from_folder),
         ) {
             item {
                 Text(stringResource(R.string.settings_hide_apps_description), Modifier.padding(horizontal = 8.dp, vertical = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             item {
-                Text(pluralStringResource(R.plurals.settings_select_count, selectedKeys.size, selectedKeys.size),
+                Text(pluralStringResource(R.plurals.settings_select_count, checkedKeys.size, checkedKeys.size),
                     Modifier.padding(horizontal = 8.dp, vertical = 16.dp),
                     style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -340,11 +348,14 @@ internal fun FolderEditorSettings(folderId: String?, uiState: LauncherUiState, a
     var confirmDelete by rememberSaveable(folder.id) { mutableStateOf(false) }
     PopupEditorScreen(app, uiState, actions, onBack, header = {
         Column(Modifier.padding(top = 16.dp)) {
-            SettingsActionItem(folder.name, stringResource(R.string.settings_folder_name), 0, 2, "folder_name",
+            SettingsActionItem(folder.name, stringResource(R.string.settings_folder_name), 0, 3, "folder_name",
                 leading = { AppIcon(app, Modifier.clickable(onClickLabel = stringResource(R.string.icon_designer_title)) { onEditIcon(app) }, size = 36.dp) }) { rename = true }
             Spacer(Modifier.height(ListItemDefaults.SegmentedGap))
-            SettingsActionItem(stringResource(R.string.settings_folder_placement), folder.placement.label(), 1, 2, "folder_placement",
+            SettingsActionItem(stringResource(R.string.settings_folder_placement), folder.placement.label(), 1, 3, "folder_placement",
                 leading = { LauncherIcon(LauncherSymbol.Folder) }) { placement = true }
+            Spacer(Modifier.height(ListItemDefaults.SegmentedGap))
+            SettingsToggleItem(stringResource(R.string.settings_folder_auto_hide), stringResource(R.string.settings_folder_auto_hide_summary),
+                folder.autoHideApps, 2, 3, "folder_auto_hide") { actions.setFolderAutoHide(folder.id, it) }
             TextButton(onClick = { confirmDelete = true }, enabled = LocalSettingsStorageState.current.canEdit, modifier = Modifier.testTag("folder_delete")) {
                 Text(stringResource(R.string.settings_folder_delete), color = MaterialTheme.colorScheme.error)
             }
@@ -370,6 +381,3 @@ private fun FolderPlacement.label(): String = stringResource(
         FolderPlacement.None -> R.string.settings_folder_nowhere
     },
 )
-
-private fun toggledKeys(keys: List<String>, key: String): List<String> =
-    if (key in keys) keys.filterNot { it == key } else keys + key

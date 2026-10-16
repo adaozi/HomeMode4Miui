@@ -1,5 +1,11 @@
 package com.galaxyrio.gracelauncher.ui.overlays
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Stable
@@ -22,8 +28,12 @@ internal class FavoritesReorderState(
         private set
     var draggingKey by mutableStateOf<String?>(null)
         private set
+    var drop by mutableStateOf<ReorderDrop?>(null)
+        private set
     private var originalKeys = initialKeys
     private var top by mutableFloatStateOf(0f)
+    // Rebuild only when items actually change order, not on each pointer move.
+    private val indices by derivedStateOf { keys.mapIndexed { index, value -> itemKey(value) to index }.toMap() }
 
     private val draggedItem
         get() = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey(draggingKey) }
@@ -34,6 +44,7 @@ internal class FavoritesReorderState(
     fun synchronize(updated: List<String>) {
         if (updated != originalKeys) {
             draggingKey = null
+            drop = null
             keys = updated
             originalKeys = updated
         }
@@ -42,6 +53,7 @@ internal class FavoritesReorderState(
     fun start(key: String) {
         val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey(key) } ?: return
         originalKeys = keys
+        drop = null
         draggingKey = key
         top = item.offset.toFloat()
         feedback()
@@ -54,7 +66,8 @@ internal class FavoritesReorderState(
     }
 
     fun finish(cancelled: Boolean) {
-        if (draggingKey == null) return
+        val key = draggingKey ?: return
+        drop = ReorderDrop(key, translation)
         draggingKey = null
         if (cancelled) keys = originalKeys
         else if (keys != originalKeys) {
@@ -62,6 +75,8 @@ internal class FavoritesReorderState(
             commit(keys)
         }
     }
+
+    fun settled(value: ReorderDrop) { if (drop === value) drop = null }
 
     fun moveBy(key: String, delta: Int): Boolean {
         if (draggingKey != null) return false
@@ -100,8 +115,8 @@ internal class FavoritesReorderState(
         val item = draggedItem ?: return
         val center = top + item.size / 2f
         val from = keys.indexOf(key)
-        val indices = keys.mapIndexed { index, value -> itemKey(value) to index }.toMap()
-        val target = list.layoutInfo.visibleItemsInfo
+        val indices = indices
+        val target = list.layoutInfo.visibleItemsInfo.asSequence()
             .filter { it.key in indices && canMove(key, keys[indices.getValue(it.key as String)]) }
             .minByOrNull { abs(center - (it.offset + it.size / 2f)) } ?: return
         val to = indices[target.key as? String ?: return] ?: return
@@ -121,5 +136,24 @@ internal class FavoritesReorderState(
 
     companion object {
         fun itemKey(key: String?) = "selected:$key"
+    }
+}
+
+internal class ReorderDrop(val key: String, val translation: Float)
+
+/** Read the live position in graphicsLayer. Only a drop starts a spring; do not
+ * recompose the row and send a new snap-animation target for every pointer move. */
+@Composable
+internal fun rememberReorderTranslation(reorder: FavoritesReorderState, key: String): State<Float> {
+    val drop = reorder.drop?.takeIf { it.key == key }
+    val settling = remember(drop) { Animatable(drop?.translation ?: 0f) }
+    LaunchedEffect(drop) {
+        if (drop != null) {
+            settling.animateTo(0f)
+            reorder.settled(drop)
+        }
+    }
+    return remember(reorder, key, settling) {
+        derivedStateOf { if (reorder.draggingKey == key) reorder.translation else settling.value }
     }
 }

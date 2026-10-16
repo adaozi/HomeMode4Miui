@@ -2,9 +2,6 @@ package com.galaxyrio.gracelauncher.ui.overlays
 
 import android.appwidget.AppWidgetManager
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -78,10 +75,21 @@ internal fun ProfileEditorScreen(owner: LauncherApp, uiState: LauncherUiState, a
 }
 
 @Composable
-internal fun FavoritesScreen(uiState: LauncherUiState, actions: LauncherActions, onToggle: (LauncherApp) -> Unit, onReorder: (List<String>) -> Unit, onDone: () -> Unit,
+internal fun FavoritesScreen(uiState: LauncherUiState, actions: LauncherActions, onToggle: (LauncherApp) -> Unit, onReorder: (List<String>) -> Unit,
+    initialAppKey: String? = null, onDone: () -> Unit,
     // hotfix8（宿主 shim 适配）：false = 隐藏收藏文件夹入口（宿主 folders 渲染载体随 folders
     // 阶段，空实现会让"新建文件夹"静默失败）。默认 true 与原版行为一致。
     foldersEnabled: Boolean = true) {
+    // 上游 v1.1.9：带 initialAppKey 打开时自动把该应用选入收藏（列表长按"编辑收藏"直达）。
+    var initialSelectionApplied by rememberSaveable(initialAppKey) { mutableStateOf(false) }
+    LaunchedEffect(initialAppKey, uiState.isLoadingApps, uiState.isLoadingSettings, uiState.settingsLoadFailed) {
+        if (!initialSelectionApplied && initialAppKey != null && !uiState.isLoadingApps &&
+            !uiState.isLoadingSettings && !uiState.settingsLoadFailed) {
+            val app = uiState.findItem(initialAppKey) ?: return@LaunchedEffect
+            initialSelectionApplied = true
+            if (initialAppKey !in uiState.favoriteKeys) onToggle(app)
+        }
+    }
     var choosingShortcut by rememberSaveable { mutableStateOf(false) }
     var choosingFolders by rememberSaveable { mutableStateOf(false) }
     if (choosingFolders) {
@@ -208,16 +216,15 @@ private fun ItemSelectionScreen(
             }
             items(reorder.keys.mapNotNull(selectedEntries::get), key = { FavoritesReorderState.itemKey(it.key) }, contentType = { if (it.widget == null) "selected" else "widget" }) { entry ->
                 val dragging = reorder.draggingKey == entry.key
-                val offset by animateFloatAsState(if (dragging) reorder.translation else 0f,
-                    animationSpec = if (dragging) snap() else spring(), label = "selectionDrop")
+                val offset by rememberReorderTranslation(reorder, entry.key)
                 val background by animateColorAsState(if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer,
                     label = "selectionLift")
                 val index = reorder.keys.indexOf(entry.key)
                 val moveUp = stringResource(R.string.favorites_move_up)
                 val moveDown = stringResource(R.string.favorites_move_down)
                 Column(Modifier.then(if (dragging) Modifier else Modifier.animateItem())
-                    .zIndex(if (dragging || offset != 0f) 1f else 0f)
-                    .graphicsLayer { translationY = if (dragging) reorder.translation else offset }
+                    .zIndex(if (dragging || reorder.drop?.key == entry.key) 1f else 0f)
+                    .graphicsLayer { translationY = offset }
                     .clip(RoundedCornerShape(16.dp)).background(background)
                     .semantics {
                         customActions = buildList {

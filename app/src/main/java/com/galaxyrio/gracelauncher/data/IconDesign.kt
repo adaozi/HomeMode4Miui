@@ -4,17 +4,51 @@ import org.json.JSONObject
 
 enum class IconShape { None, Circle, Pebble, Square, Gem, Cookie }
 
-/** Dynamic colors remain dynamic after saving, including wallpaper changes. */
-data class IconColor(val argb: Int, val dynamic: Boolean = false, val theme: Boolean = false) {
-    internal fun json() = JSONObject().put("argb", argb).put("dynamic", dynamic).put("theme", theme)
-    fun resolve(dynamicColor: Int, themeColor: Int): Int = when {
-        theme -> themeColor
-        dynamic -> dynamicColor
+enum class IconColorSource { Theme, FromApp, Fixed }
+
+/** Store a source, not a snapshot, for theme and original-app colors. */
+data class IconColor(
+    val argb: Int,
+    val theme: Boolean = false,
+    val fromApp: Boolean = false,
+    /** Relative HSB offsets: degrees for hue, percentage points for S/B. */
+    val hueShift: Int = 0,
+    val saturationShift: Int = 0,
+    val brightnessShift: Int = 0,
+) {
+    val source: IconColorSource get() = when {
+        theme -> IconColorSource.Theme
+        fromApp -> IconColorSource.FromApp
+        else -> IconColorSource.Fixed
+    }
+    fun normalized(): IconColor = copy(
+        hueShift = if (source == IconColorSource.Fixed) 0 else hueShift.coerceIn(-180, 180),
+        saturationShift = if (source == IconColorSource.Fixed) 0 else saturationShift.coerceIn(-100, 100),
+        brightnessShift = if (source == IconColorSource.Fixed) 0 else brightnessShift.coerceIn(-100, 100),
+    )
+    internal fun json() = normalized().let {
+        JSONObject().put("argb", it.argb).put("theme", it.theme).put("fromApp", it.fromApp)
+            .put("hueShift", it.hueShift).put("saturationShift", it.saturationShift).put("brightnessShift", it.brightnessShift)
+    }
+    fun resolve(themeColor: Int, appColor: Int? = null): Int = when {
+        theme -> adjustHsb(themeColor, hueShift, saturationShift, brightnessShift)
+        fromApp -> adjustHsb(appColor ?: themeColor, hueShift, saturationShift, brightnessShift)
         else -> argb
     }
     companion object {
         val Theme = IconColor(0, theme = true)
-        internal fun decode(value: JSONObject?) = value?.let { IconColor(it.optInt("argb"), it.optBoolean("dynamic"), it.optBoolean("theme")) }
+        val FromApp = IconColor(0, fromApp = true)
+        internal fun fromStored(argb: Int, theme: Boolean = false, dynamic: Boolean = false, fromApp: Boolean = false,
+            hueShift: Int = 0, saturationShift: Int = 0, brightnessShift: Int = 0): IconColor = (when {
+            // Retire the old dynamic preset without requiring a database migration.
+            theme || dynamic -> Theme
+            fromApp -> FromApp
+            else -> IconColor(argb)
+        }).copy(hueShift = hueShift, saturationShift = saturationShift, brightnessShift = brightnessShift).normalized()
+        internal fun decode(value: JSONObject?) = value?.let {
+            fromStored(it.optInt("argb"), it.optBoolean("theme"), it.optBoolean("dynamic"), it.optBoolean("fromApp"),
+                it.optInt("hueShift"), it.optInt("saturationShift"), it.optInt("brightnessShift"))
+        }
     }
 }
 
@@ -24,8 +58,10 @@ data class IconDesign(
     val cookieSides: Int = 4,
     /** 0 is a boxier superellipse; 100 approaches a circle. */
     val pebbleRoundness: Int = DefaultPebbleRoundness,
-    /** Radius as a percentage of half the icon width; 0 keeps sharp corners. */
+    /** Radius as a percentage of half the rectangle's shorter side; 0 keeps sharp corners. */
     val squareCornerRadius: Int = 0,
+    /** Width / height, fitted inside the existing square icon slot without stretching the symbol. */
+    val squareAspectRatio: Float = 1f,
     val background: IconColor? = null,
     val foreground: IconColor? = null,
     val addTray: Boolean = false,
@@ -56,6 +92,7 @@ data class IconDesign(
         cookieSides = cookieSides.takeIf { it in CookieSides } ?: 4,
         pebbleRoundness = pebbleRoundness.coerceIn(0, 100),
         squareCornerRadius = squareCornerRadius.coerceIn(0, 100),
+        squareAspectRatio = normalizeSquareAspectRatio(squareAspectRatio),
         x = x.takeIf { it.isFinite() }?.coerceIn(-50f, 50f) ?: 0f,
         y = y.takeIf { it.isFinite() }?.coerceIn(-50f, 50f) ?: 0f,
         size = size.coerceIn(25, 200),
@@ -65,6 +102,7 @@ data class IconDesign(
     internal fun json(): JSONObject = normalized().let { value ->
         JSONObject().put("shape", value.shape.name).put("cookieSides", value.cookieSides)
             .put("pebbleRoundness", value.pebbleRoundness).put("squareCornerRadius", value.squareCornerRadius)
+            .put("squareAspectRatio", value.squareAspectRatio)
             .put("x", value.x).put("y", value.y).put("size", value.size).put("addTray", value.addTray)
             .put("rotation", value.rotation)
             .put("iconSize", value.iconSize).put("themeIcons", value.themeIcons)
@@ -87,6 +125,7 @@ data class IconDesign(
                 cookieSides = it.optInt("cookieSides", 4),
                 pebbleRoundness = it.optInt("pebbleRoundness", DefaultPebbleRoundness),
                 squareCornerRadius = it.optInt("squareCornerRadius", 0),
+                squareAspectRatio = it.optDouble("squareAspectRatio", 1.0).toFloat(),
                 background = IconColor.decode(if (it.optBoolean("addTray") && it.has("trayColor"))
                     it.optJSONObject("trayColor") else it.optJSONObject("background")),
                 foreground = IconColor.decode(it.optJSONObject("foreground")),

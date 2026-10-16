@@ -79,7 +79,7 @@ private fun AboutAppIcon() {
     Box(Modifier.size(containerSize).testTag("about_logo_container").clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
         LoadingIndicator(color = MaterialTheme.colorScheme.primaryContainer, polygons = shapes, modifier = Modifier.fillMaxSize())
         Icon(
-            painterResource(R.drawable.ic_launcher_foreground), contentDescription = null,
+            painterResource(R.drawable.ic_grace_solid), contentDescription = null,
             tint = MaterialTheme.colorScheme.onPrimaryContainer,
             modifier = Modifier.size(size * 0.72f).testTag("about_logo_g"),
         )

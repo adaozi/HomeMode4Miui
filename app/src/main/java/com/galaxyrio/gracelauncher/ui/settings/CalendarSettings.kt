@@ -7,8 +7,9 @@ import com.galaxyrio.gracelauncher.ui.LauncherActions
 import com.galaxyrio.gracelauncher.ui.LauncherUiState
 
 @Composable
-internal fun CalendarSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit) {
-    SettingsScaffold(stringResource(R.string.widget_calendar), "settings_calendar", onBack) { padding ->
+internal fun CalendarSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit, onAppearance: () -> Unit = {}) {
+    SettingsScaffold(stringResource(R.string.widget_calendar), "settings_calendar", onBack,
+        actions = { SettingsAppearanceAction(onAppearance) }) { padding ->
         SettingsList(padding) {
             item {
                 SettingsFeatureBanner(stringResource(R.string.calendar_enable), uiState.settings.calendarAgenda, "calendar_agenda") { enabled ->

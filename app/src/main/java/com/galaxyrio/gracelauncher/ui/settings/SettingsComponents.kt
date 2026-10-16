@@ -63,6 +63,13 @@ internal val LocalSettingsStorageState = staticCompositionLocalOf { SettingsStor
 internal val LocalSettingsBottomInset = staticCompositionLocalOf { 0.dp }
 
 @Composable
+internal fun SettingsAppearanceAction(onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.testTag("settings_appearance")) {
+        Icon(painterResource(R.drawable.ms_palette), stringResource(R.string.settings_themes))
+    }
+}
+
+@Composable
 internal fun SettingsScaffold(
     title: String,
     tag: String,

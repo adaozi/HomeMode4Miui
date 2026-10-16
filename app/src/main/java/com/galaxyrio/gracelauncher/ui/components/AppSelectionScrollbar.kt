@@ -80,16 +80,19 @@ internal fun SelectionScrollbar(
     tag: String,
     keyPrefix: String = "all:",
 ) {
-    val metrics by remember(state, labels.size, keyPrefix) { derivedStateOf { state.appScrollMetrics(labels.size, keyPrefix) } }
-    val currentMetrics by rememberUpdatedState(metrics)
+    val metrics = remember(state, labels.size, keyPrefix) { derivedStateOf { state.appScrollMetrics(labels.size, keyPrefix) } }
+    val ready by remember(metrics) { derivedStateOf { metrics.value?.ready == true } }
     var dragProgress by remember(labels) { mutableStateOf<Float?>(null) }
+    val dragging by remember(labels) { derivedStateOf { dragProgress != null } }
     var dragLetter by remember(labels) { mutableStateOf("") }
     var trackHeight by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val minThumb = with(density) { 36.dp.toPx() }
     val bubbleSize = with(density) { 48.dp.toPx() }
-    val thumbHeight = (trackHeight * (metrics?.visibleFraction ?: 1f)).coerceIn(minThumb.coerceAtMost(trackHeight.toFloat()), trackHeight.toFloat())
-    val thumbTop = (trackHeight - thumbHeight) * (dragProgress ?: metrics?.progress ?: 0f)
+    // These high-frequency reads belong to drawing/placement, not composition.
+    fun thumbHeight(): Float = (trackHeight * (metrics.value?.visibleFraction ?: 1f))
+        .coerceIn(minThumb.coerceAtMost(trackHeight.toFloat()), trackHeight.toFloat())
+    fun thumbTop(height: Float): Float = (trackHeight - height) * (dragProgress ?: metrics.value?.progress ?: 0f)
     val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     val thumbColor = MaterialTheme.colorScheme.primary
     val description = stringResource(R.string.app_selection_fast_scroll)
@@ -104,7 +107,7 @@ internal fun SelectionScrollbar(
     }
 
     AnimatedVisibility(
-        visible = enabled && metrics?.ready == true,
+        visible = enabled && ready,
         modifier = modifier.fillMaxHeight(),
         enter = fadeIn() + slideInHorizontally { it },
         exit = fadeOut() + slideOutHorizontally { it },
@@ -115,16 +118,16 @@ internal fun SelectionScrollbar(
                 .testTag(tag)
                 .semantics {
                     contentDescription = description
-                    progressBarRangeInfo = ProgressBarRangeInfo(dragProgress ?: metrics?.progress ?: 0f, 0f..1f)
+                    progressBarRangeInfo = ProgressBarRangeInfo(dragProgress ?: metrics.value?.progress ?: 0f, 0f..1f)
                     setProgress { value ->
-                        val range = currentMetrics
+                        val range = metrics.value
                         if (range == null || !range.ready) false else { scrollTo(value, range); true }
                     }
                 }
-                .pointerInput(labels, state) {
+                .pointerInput(labels, state, metrics, minThumb) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        val range = currentMetrics ?: return@awaitEachGesture
+                        val range = metrics.value ?: return@awaitEachGesture
                         val height = size.height.toFloat()
                         val thumb = (height * range.visibleFraction).coerceIn(minThumb.coerceAtMost(height), height)
                         val travel = height - thumb
@@ -155,14 +158,16 @@ internal fun SelectionScrollbar(
                     }
                 }) {
                 Canvas(Modifier.fillMaxSize()) {
+                    val thumbHeight = thumbHeight()
                     drawRoundRect(trackColor, Offset(center.x - 2.dp.toPx(), 0f), Size(4.dp.toPx(), size.height), CornerRadius(2.dp.toPx()))
-                    drawRoundRect(thumbColor, Offset(center.x - 3.dp.toPx(), thumbTop), Size(6.dp.toPx(), thumbHeight), CornerRadius(3.dp.toPx()))
+                    drawRoundRect(thumbColor, Offset(center.x - 3.dp.toPx(), thumbTop(thumbHeight)), Size(6.dp.toPx(), thumbHeight), CornerRadius(3.dp.toPx()))
                 }
             }
             AnimatedVisibility(
-                visible = dragProgress != null,
+                visible = dragging,
                 modifier = Modifier.align(Alignment.TopStart).offset {
-                    IntOffset(0, (thumbTop + (thumbHeight - bubbleSize) / 2f).roundToInt().coerceIn(0, (trackHeight - bubbleSize).roundToInt().coerceAtLeast(0)))
+                    val thumbHeight = thumbHeight()
+                    IntOffset(0, (thumbTop(thumbHeight) + (thumbHeight - bubbleSize) / 2f).roundToInt().coerceIn(0, (trackHeight - bubbleSize).roundToInt().coerceAtLeast(0)))
                 },
                 enter = fadeIn(), exit = fadeOut(),
             ) {

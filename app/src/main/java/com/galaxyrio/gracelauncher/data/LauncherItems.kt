@@ -28,16 +28,22 @@ import org.json.JSONObject
  * Overrides precede the enabled pack order. Resource names survive pack updates.
  * （C 组 P6 计划位：P3 裁剪，随图标设计器搬运补回）
  */
-data class ItemIcon(val kind: String, val source: String = "", val name: String = "", val design: IconDesign? = null) {
+data class ItemIcon(val kind: String, val source: String = "", val name: String = "", val design: IconDesign? = null,
+    /** Per-item icon-display override, null inherits the shared setting. */
+    val display: IconDisplaySettings? = null) {
     fun encode(): String = JSONObject().put("kind", kind).put("source", source).put("name", name)
-        .apply { design?.let { put("design", it.json()) } }.toString()
+        .apply {
+            design?.let { put("design", it.json()) }
+            display?.let { put("display", it.json()) }
+        }.toString()
     companion object {
         val System = ItemIcon("system")
         val Theme = ItemIcon("theme")
         fun decode(json: String): ItemIcon? = runCatching {
             val value = JSONObject(json)
             ItemIcon(value.getString("kind"), value.optString("source"), value.optString("name"),
-                IconDesign.decode(value.optJSONObject("design")))
+                IconDesign.decode(value.optJSONObject("design")),
+                value.optJSONObject("display")?.let { IconDisplaySettings.decode(it.toString()) })
                 .takeIf { it.kind in setOf("system", "theme", "pack", "image", "symbol") }
         }.getOrNull()
     }
@@ -121,6 +127,7 @@ class LauncherItemsRepository(private val database: LauncherDatabase) {
         }
     }
 
+    /** Full icon reset — intentionally clears display overrides too. */
     suspend fun resetIcons(keys: Set<String>): List<ItemIcon> = database.withTransaction {
         val previous = dao.readIcons().filter { it.itemKey in keys }.mapNotNull { ItemIcon.decode(it.iconJson) }
         keys.toList().chunked(900).forEach { dao.resetIcons(it) }

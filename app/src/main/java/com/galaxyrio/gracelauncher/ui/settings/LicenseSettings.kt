@@ -145,7 +145,7 @@ private fun AppNoticesCard(navigate: (SettingsPage) -> Unit) {
                     modifier = Modifier.size(52.dp), shape = CircleShape,
                     color = MaterialTheme.colorScheme.onPrimaryContainer, contentColor = MaterialTheme.colorScheme.primaryContainer,
                 ) {
-                    Icon(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.padding(4.dp))
+                    Icon(painterResource(R.drawable.ic_grace_solid), null, Modifier.padding(4.dp))
                 }
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)

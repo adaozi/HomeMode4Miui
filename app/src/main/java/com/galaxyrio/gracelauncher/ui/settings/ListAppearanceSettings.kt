@@ -111,7 +111,7 @@ internal fun ListAppearanceSettings(uiState: LauncherUiState, actions: LauncherA
                             val dim = activeColor == "dim_color"
                             val fallback = if (dim) automaticDimTint else wallpaper.text
                             IconDesignerColorPicker(stringResource(if (dim) R.string.settings_wallpaper_dim_color else R.string.list_font_color),
-                                if (dim) draft.wallpaperDimColor else draft.fontColor, fallback.toArgb(), primary.toArgb(), null,
+                                if (dim) draft.wallpaperDimColor else draft.fontColor, primary.toArgb(), null,
                                 onChange = { if (enabled && activeColor == colorPage) {
                                     draft = if (dim) draft.copy(wallpaperDimColor = it) else draft.copy(fontColor = it)
                                 } }, onClose = { if (activeColor == colorPage) closeColor() },
@@ -148,7 +148,7 @@ internal fun ListAppearanceSettings(uiState: LauncherUiState, actions: LauncherA
                                     if (draft.fontColor == null) stringResource(R.string.list_color_default) else null,
                                     6, 9, "list_font_color", modifier = colorModifier("font_color"), trailing = {
                                         Surface(Modifier.size(24.dp), shape = MaterialTheme.shapes.small,
-                                            color = draft.fontColor?.resolve(wallpaper.text.toArgb(), MaterialTheme.colorScheme.primary.toArgb())?.let(::Color) ?: wallpaper.text) {}
+                                            color = draft.fontColor?.resolve(MaterialTheme.colorScheme.primary.toArgb())?.let(::Color) ?: wallpaper.text) {}
                                     }, onClick = { dialog = "font_color" })
                             }
                             item("names") { SettingsActionItem(stringResource(R.string.list_show_names), draft.names.label(), 7, 9,
@@ -173,7 +173,7 @@ internal fun ListAppearanceSettings(uiState: LauncherUiState, actions: LauncherA
                                         if (draft.wallpaperDimColor == null) stringResource(R.string.settings_wallpaper_dim_color_auto) else null,
                                         0, 1, "settings_dim_wallpaper_color", modifier = colorModifier("dim_color"), trailing = {
                                             Surface(Modifier.size(24.dp), shape = MaterialTheme.shapes.small,
-                                                color = draft.wallpaperDimColor?.resolve(automaticDimTint.toArgb(), primary.toArgb())?.let(::Color) ?: automaticDimTint) {}
+                                                color = draft.wallpaperDimColor?.resolve(primary.toArgb())?.let(::Color) ?: automaticDimTint) {}
                                         }, onClick = { dialog = "dim_color" })
                                 }
                             }

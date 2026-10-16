@@ -81,6 +81,8 @@ internal enum class SettingsPage {
     // 上游同步 v1.1.8（S3）：手势目标编辑 + Lab；旧 GraceTap*/GraceLong* 四页被
     // GraceAction/{gesture}?home={home} 参数化路由取代
     GraceAction, GraceApp, GraceShortcut, GraceFolder, Gestures, LabGraceButton, LabGesture,
+    // 上游同步 v1.1.9：外观编辑页（Grace 按钮外观/位置 + 日历/天气/媒体播放器外观占位）
+    GraceButtonAppearance, GraceButtonPosition, CalendarAppearance, WeatherAppearance, MediaPlayerAppearance,
 }
 
 /** Navigation owns each page's saved state and seekable predictive-back transition. */
@@ -157,7 +159,8 @@ fun LauncherSettingsScreen(
         modifier = modifier.fillMaxSize().testTag("settings_navigation").graphicsLayer {
             alpha = 1f - rootExit.value
             translationX = distance * direction * rootExit.value
-        }.background(if (currentEntry?.destination?.route in listOf(SettingsPage.ClockStyle.name, SettingsPage.IconDesigner.name, SettingsPage.ListAppearance.name, SettingsPage.Alphabet.name))
+        }.background(if (currentEntry?.destination?.route in listOf(SettingsPage.ClockStyle.name, SettingsPage.IconDesigner.name,
+            SettingsPage.ListAppearance.name, SettingsPage.Alphabet.name, SettingsPage.GraceButtonAppearance.name, SettingsPage.GraceButtonPosition.name))
             Color.Transparent else MaterialTheme.colorScheme.surfaceContainer),
         enterTransition = { settingsEnter(distance) },
         exitTransition = { settingsExit(distance) },
@@ -199,19 +202,14 @@ fun LauncherSettingsScreen(
                 } else when (page) {
                     SettingsPage.Root -> SettingsHome(back, navigate)
                     SettingsPage.Productivity -> ProductivitySettings(uiState, actions, back, navigate)
-                    SettingsPage.Clock -> ClockSettings(uiState, actions, back)
+                    SettingsPage.Clock -> ClockSettings(uiState, actions, back) { navigate(SettingsPage.ClockStyle) }
                     SettingsPage.Search -> SearchSettingsScreen(uiState, actions, back)
-                    SettingsPage.MediaPlayer -> MediaPlayerSettings(uiState, actions, back)
+                    SettingsPage.MediaPlayer -> MediaPlayerSettings(uiState, actions, back) { navigate(SettingsPage.MediaPlayerAppearance) }
                     SettingsPage.GraceButton, SettingsPage.Gestures -> GraceButtonSettingsScreen(uiState, actions, back,
-                        // 上游同步 v1.1.8 S3：home = 手势面（homeGestures 模型）；按钮图标设计随 IconDesigner
+                        // 上游同步 v1.1.8 S3：home = 手势面（homeGestures 模型）；
+                        // v1.1.9：图标编辑入口移除，改走外观页（GraceButtonAppearance）
                         home = page == SettingsPage.Gestures,
-                        onEditIcon = {
-                            if (isCurrent()) {
-                                navController.navigate(SettingsPage.IconDesigner.name)
-                                navController.currentBackStackEntry?.savedStateHandle?.set("icon_designer_app",
-                                    com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key)
-                            }
-                        }) { gesture ->
+                        onAppearance = { navigate(SettingsPage.GraceButtonAppearance) }) { gesture ->
                         if (isCurrent()) navController.navigate(
                             "${SettingsPage.GraceAction.name}/${gesture.name}?home=${page == SettingsPage.Gestures}") { launchSingleTop = true }
                     }
@@ -274,7 +272,7 @@ fun LauncherSettingsScreen(
                                 }
                             })
                     }
-                    SettingsPage.Weather -> WeatherSettings(uiState, actions, back)
+                    SettingsPage.Weather -> WeatherSettings(uiState, actions, back) { navigate(SettingsPage.WeatherAppearance) }
                     SettingsPage.Fonts -> FontSettings(uiState, actions, back)
                     SettingsPage.LabGraceButton -> LabGraceButtonSettings(uiState, actions, back)
                     SettingsPage.LabGesture -> LabGestureSettings(uiState, actions, back)
@@ -284,7 +282,16 @@ fun LauncherSettingsScreen(
                     SettingsPage.Themes -> ThemeSettings(uiState, actions, back,
                         onClockStyle = { navigate(SettingsPage.ClockStyle) }, onIconPacks = { navigate(SettingsPage.IconPacks) },
                         onFonts = { navigate(SettingsPage.Fonts) }, onListAppearance = { navigate(SettingsPage.ListAppearance) },
-                        onAlphabet = { navigate(SettingsPage.Alphabet) })
+                        onAlphabet = { navigate(SettingsPage.Alphabet) }, onGraceButton = { navigate(SettingsPage.GraceButtonAppearance) },
+                        onCalendar = { navigate(SettingsPage.CalendarAppearance) }, onWeather = { navigate(SettingsPage.WeatherAppearance) },
+                        onMediaPlayer = { navigate(SettingsPage.MediaPlayerAppearance) })
+                    SettingsPage.GraceButtonAppearance -> IconDesignerSettings(uiState, actions,
+                        com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key, back,
+                        onChooseApp = {}, onSelectApp = {}, onPositionAndSize = { navigate(SettingsPage.GraceButtonPosition) })
+                    SettingsPage.GraceButtonPosition -> GraceButtonPositionSettings(uiState, actions, back)
+                    SettingsPage.CalendarAppearance -> AppearancePlaceholder(stringResource(R.string.widget_calendar), "calendar_appearance", back)
+                    SettingsPage.WeatherAppearance -> AppearancePlaceholder(stringResource(R.string.settings_weather), "weather_appearance", back)
+                    SettingsPage.MediaPlayerAppearance -> AppearancePlaceholder(stringResource(R.string.settings_media_player), "media_appearance", back)
                     SettingsPage.ClockStyle -> ClockStyleSettings(uiState, actions, back)
                     SettingsPage.IconPacks -> IconPackSettings(uiState, actions, back) { navigate(SettingsPage.IconDesigner) }
                     SettingsPage.IconDesigner -> {
@@ -304,7 +311,7 @@ fun LauncherSettingsScreen(
                             }
                         },
                     )
-                    SettingsPage.Calendar -> CalendarSettings(uiState, actions, back)
+                    SettingsPage.Calendar -> CalendarSettings(uiState, actions, back) { navigate(SettingsPage.CalendarAppearance) }
                     // 上游同步 v1.1.8 S3：Advanced 页 = Lab 入口（原 coming-soon 占位移除）
                     SettingsPage.Advanced -> AdvancedSettings(back, navigate)
                     SettingsPage.About -> AboutSettings(back, navigate)

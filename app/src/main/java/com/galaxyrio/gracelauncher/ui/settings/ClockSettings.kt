@@ -31,10 +31,11 @@ internal fun clockAppSummary(uiState: LauncherUiState): String =
 
 /** Choosing a target persists a preference; it never launches the selected app. */
 @Composable
-internal fun ClockSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit) {
+internal fun ClockSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit, onAppearance: () -> Unit = {}) {
     AppSelectionSettings(
         uiState, actions, onBack, title = stringResource(R.string.settings_clock), tag = "clock",
         selectedKey = uiState.settings.clockAppKey, showDefault = true,
+        appBarActions = { SettingsAppearanceAction(onAppearance) },
         description = stringResource(R.string.clock_choose_app_description),
         onSelect = { key -> actions.updateSettings { it.copy(clockAppKey = key) } },
         header = {
@@ -54,6 +55,7 @@ internal fun AppSelectionSettings(
     defaultLabel: String? = null,
     apps: List<com.galaxyrio.gracelauncher.data.LauncherApp> = uiState.allApps,
     excludeOwnApp: Boolean = true,
+    appBarActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
 ) {
     val queryState = rememberTextFieldState()
@@ -62,7 +64,7 @@ internal fun AppSelectionSettings(
     val available = remember(apps, ownPackage, excludeOwnApp) { apps.filter { (!excludeOwnApp || it.packageName != ownPackage) && it.shortcut == null } }
     val enabled = LocalSettingsStorageState.current.canEdit
     val ready = !uiState.isLoadingApps && !uiState.appLoadFailed
-    SettingsScaffold(title, "settings_${tag}_page", onBack) { padding ->
+    SettingsScaffold(title, "settings_${tag}_page", onBack, actions = appBarActions) { padding ->
         AppSelectionList(
             apps = if (ready) available else emptyList(), selectedKeys = setOfNotNull(selectedKey),
             query = queryState, onSelect = { onSelect(it.key) },

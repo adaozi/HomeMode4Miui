@@ -32,12 +32,15 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
                     appKeys = contents["folder:${entry.id}"].orEmpty().filter { it.widget == null }.map { it.key },
                     placement = FolderPlacement.decode(entry.placement),
                     appListAtBottom = entry.appListAtBottom,
+                    autoHideApps = entry.autoHideApps,
                 )
             },
         )
     }.distinctUntilChanged()
 
     suspend fun updateSettings(settings: LauncherSettings) {
+        // The raw hideFavoriteNames flag is stored untouched; hidden-icon safety is
+        // derived on read so the user's preference survives a Hidden round-trip.
         dao.saveSettings(LauncherSettingsEntity(
             clockEnabled = settings.clockEnabled,
             calendarAboveClock = settings.calendarAboveClock,
@@ -49,6 +52,7 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
             allowHapticFeedback = settings.allowHapticFeedback,
             useDynamicColors = settings.useDynamicColors,
             themeColor = settings.themeColor,
+            paletteStyle = settings.paletteStyle.name,
             darkMode = settings.darkMode.name,
             amoledMode = settings.amoledMode,
             iconPackPackage = settings.iconPackPackage,
@@ -94,13 +98,17 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
         dao.replaceHiddenApps(keys.filter(String::isNotBlank).map(::HiddenAppEntity))
     }
 
+    suspend fun hideApp(key: String) {
+        if (key.isNotBlank()) dao.hideApp(HiddenAppEntity(key))
+    }
+
     suspend fun saveFolder(folder: LauncherFolder) {
         require(folder.id.isNotBlank()) { "A folder must have a stable id" }
         val name = folder.name.trim()
         require(name.isNotEmpty()) { "A folder name must not be blank" }
         val keys = folder.appKeys.filter(String::isNotBlank).distinct()
         database.withTransaction {
-            dao.upsertFolder(LauncherFolderEntity(folder.id, name, folder.placement.name, folder.appListAtBottom))
+            dao.upsertFolder(LauncherFolderEntity(folder.id, name, folder.placement.name, folder.appListAtBottom, folder.autoHideApps))
             val itemsDao = database.itemsDao()
             val previous = itemsDao.popup(folder.key)?.let { PopupItem.decode(it.itemsJson) }.orEmpty()
             // Membership callers must not discard widgets or move them to the end.
@@ -113,10 +121,11 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
     }
 
     suspend fun updateFolder(id: String, name: String? = null, placement: FolderPlacement? = null,
-        appListAtBottom: Boolean? = null) = database.withTransaction {
+        appListAtBottom: Boolean? = null, autoHideApps: Boolean? = null) = database.withTransaction {
         val folder = dao.folder(id) ?: return@withTransaction
         dao.upsertFolder(folder.copy(name = name?.trim()?.takeIf { it.isNotEmpty() } ?: folder.name,
-            placement = placement?.name ?: folder.placement, appListAtBottom = appListAtBottom ?: folder.appListAtBottom))
+            placement = placement?.name ?: folder.placement, appListAtBottom = appListAtBottom ?: folder.appListAtBottom,
+            autoHideApps = autoHideApps ?: folder.autoHideApps))
     }
 
     /** The favorites picker edits the same placement as the folder's settings. */
@@ -151,6 +160,7 @@ private fun LauncherSettingsEntity.toSettings() = LauncherSettings(
     allowHapticFeedback = allowHapticFeedback,
     useDynamicColors = useDynamicColors,
     themeColor = themeColor,
+    paletteStyle = decodePaletteStyle(paletteStyle),
     darkMode = ThemeMode.entries.firstOrNull { it.name == darkMode } ?: ThemeMode.System,
     amoledMode = amoledMode,
     iconPackPackage = iconPackPackage,

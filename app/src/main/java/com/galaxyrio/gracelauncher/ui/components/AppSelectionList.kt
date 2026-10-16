@@ -41,6 +41,8 @@ internal fun AppSelectionList(
     itemTagPrefix: String = "app_choice",
     singleChoice: Boolean = false,
     enabled: Boolean = true,
+    lockedKeys: Set<String> = emptySet(),
+    lockedLabel: String? = null,
     userScrollEnabled: Boolean = true,
     showApps: Boolean = true,
     emptyContent: @Composable () -> Unit = {
@@ -71,7 +73,9 @@ internal fun AppSelectionList(
                     AppSelectionRow(
                         label = app.label, selected = app.key in selectedKeys, onClick = { onSelect(app) },
                         modifier = Modifier.animateItem().testTag("$itemTagPrefix:${app.key}"),
-                        enabled = enabled, singleChoice = singleChoice, icon = { AppIcon(app, size = 36.dp) },
+                        enabled = enabled && app.key !in lockedKeys,
+                        annotation = lockedLabel.takeIf { app.key in lockedKeys },
+                        singleChoice = singleChoice, icon = { AppIcon(app, size = 36.dp) },
                     )
                 }
             }
@@ -94,6 +98,7 @@ internal fun AppSelectionRow(
     singleChoice: Boolean = false,
     selectable: Boolean = true,
     icon: (@Composable () -> Unit)? = null,
+    annotation: String? = null,
     trailing: @Composable () -> Unit = {},
 ) {
     Row(
@@ -114,8 +119,14 @@ internal fun AppSelectionRow(
             Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { icon() }
             Spacer(Modifier.width(16.dp))
         }
-        Text(label, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, Modifier.weight(1f, fill = annotation == null), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
+            if (annotation != null) Text(annotation, Modifier.widthIn(max = 120.dp),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
         trailing()
     }
 }

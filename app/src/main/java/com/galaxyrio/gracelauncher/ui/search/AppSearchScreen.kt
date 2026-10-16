@@ -62,6 +62,7 @@ import androidx.compose.foundation.overscroll
 import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.galaxyrio.gracelauncher.data.GraceButtonGesture
+import com.galaxyrio.gracelauncher.data.IconDisplayStyle
 import com.galaxyrio.gracelauncher.ui.components.observeListGestures
 import com.galaxyrio.gracelauncher.ui.components.rememberLauncherListGestureConnection
 import androidx.compose.ui.platform.testTag
@@ -82,6 +83,7 @@ import com.galaxyrio.gracelauncher.ui.components.LauncherLayout
 import com.galaxyrio.gracelauncher.ui.components.LauncherSearchBar
 import com.galaxyrio.gracelauncher.ui.components.stableStatusBarInset
 import com.galaxyrio.gracelauncher.ui.theme.LocalLauncherAppearance
+import com.galaxyrio.gracelauncher.ui.theme.effectiveDisplay
 
 // P2 裁剪：原版 SearchResult sealed interface（App/Contact/Internet）只剩 App 一种
 // 形态，直接以 LauncherApp 承载；P6 恢复 Contact/Internet 时还原 sealed 结构。
@@ -165,9 +167,13 @@ internal fun AppSearchScreen(
             }
             itemsIndexed(results, key = { _, app -> searchResultKey(app) }) { index, app ->
                 val label = app.label
-                SearchResultRow(label, searchResultKey(app), first = index == 0, onClick = { open(app, it) },
+                // 上游 v1.1.9：结果行图标支持圆点/隐藏显示
+                val resultDisplay = app.effectiveDisplay(appearance)
+                SearchResultRow(label, searchResultKey(app), first = index == 0,
+                    hideIcon = resultDisplay.style == IconDisplayStyle.Hidden,
+                    onClick = { open(app, it) },
                     onLongClick = { keyboard?.hide(); onDetails(app) }) { iconModifier ->
-                    AppIcon(app, iconModifier, size = 40.dp)
+                    AppIcon(app, iconModifier, size = 40.dp, display = resultDisplay)
                 }
             }
         }
@@ -181,16 +187,19 @@ internal fun AppSearchScreen(
 }
 
 @Composable
-private fun SearchResultRow(label: String, key: String, first: Boolean, onClick: (Rect) -> Unit,
+private fun SearchResultRow(label: String, key: String, first: Boolean, hideIcon: Boolean = false, onClick: (Rect) -> Unit,
     onLongClick: (() -> Unit)?, icon: @Composable (Modifier) -> Unit) {
     val appearance = LocalLauncherAppearance.current
     var bounds by remember { mutableStateOf(Rect.Zero) }
     Row(Modifier.fillMaxWidth().heightIn(min = LauncherLayout.RowMinHeight).testTag(key)
         .clip(LauncherLayout.RowShape).combinedClickable(onClick = { onClick(bounds) }, onLongClick = onLongClick)
         .semantics { selected = first }.padding(LauncherLayout.ContentInset), verticalAlignment = Alignment.CenterVertically) {
-        icon(Modifier.onGloballyPositioned { bounds = it.boundsInWindow() })
-        Spacer(Modifier.width(LauncherLayout.IconLabelGap))
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+        if (!hideIcon) {
+            icon(Modifier.onGloballyPositioned { bounds = it.boundsInWindow() })
+            Spacer(Modifier.width(LauncherLayout.IconLabelGap))
+        }
+        Row(Modifier.weight(1f).then(if (hideIcon) Modifier.onGloballyPositioned { bounds = it.boundsInWindow() } else Modifier),
+            verticalAlignment = Alignment.CenterVertically) {
             Text(label, Modifier.weight(1f, fill = false).testTag(key + ":label"), color = appearance.text,
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = if (first) FontWeight.Bold else FontWeight.Normal, shadow = appearance.textShadow),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -99,7 +99,7 @@ internal fun AlphabetSettings(uiState: LauncherUiState, actions: LauncherActions
                         boundsTransform = heroBounds, clipInOverlayDuringTransition = OverlayClip(heroShape))
                     if (colorOpen) {
                         IconDesignerColorPicker(stringResource(R.string.alphabet_letter_color), draft.fontColor,
-                            wallpaper.text.toArgb(), primary.toArgb(), null,
+                            primary.toArgb(), null,
                             onChange = { if (enabled && dialog == "color") draft = draft.copy(fontColor = it) },
                             onClose = { if (dialog == "color") closeColor() },
                             modifier = Modifier.padding(bottom = 8.dp).then(colorModifier), fallback = wallpaper.text.toArgb())
@@ -114,7 +114,7 @@ internal fun AlphabetSettings(uiState: LauncherUiState, actions: LauncherActions
                             SettingsActionItem(stringResource(R.string.alphabet_letter_color), null,
                                 1, 7, "alphabet_color", enabled = enabled, modifier = colorModifier, trailing = {
                                     Surface(Modifier.size(24.dp), shape = MaterialTheme.shapes.small,
-                                        color = draft.fontColor?.resolve(wallpaper.text.toArgb(), primary.toArgb())?.let(::Color) ?: wallpaper.text) {}
+                                        color = draft.fontColor?.resolve(primary.toArgb())?.let(::Color) ?: wallpaper.text) {}
                                 }, onClick = { dialog = "color" })
                         }
                         item("font_size") {
@@ -134,7 +134,10 @@ internal fun AlphabetSettings(uiState: LauncherUiState, actions: LauncherActions
                                 val update: (IconDesign) -> Unit = { value -> change { it.copy(indicatorShape = value.shape,
                                     cookieSides = value.cookieSides, pebbleRoundness = value.pebbleRoundness, squareCornerRadius = value.squareCornerRadius) } }
                                 DesignerShapeChoices(design, enabled, "alphabet", update)
-                                DesignerShapeAdjustment(design, IconDesign(), enabled, "alphabet", update)
+                                DesignerShapeAdjustment(design, IconDesign(), enabled, "alphabet", onFinished = update, includeAspectRatio = false) { value ->
+                                    draft = draft.copy(indicatorShape = value.shape, cookieSides = value.cookieSides,
+                                        pebbleRoundness = value.pebbleRoundness, squareCornerRadius = value.squareCornerRadius)
+                                }
                             }
                         }
                         item("top") {
