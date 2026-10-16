@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -821,12 +822,16 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             )
         }
 
-        // ---- 上游同步 v1.1.8 S4：Grace Button（对齐原版 LauncherScreen.kt:1052-1060）----
+        // ---- 上游同步 v1.1.8 S4：Grace Button；v1.1.9 升级 —— 布局可移动
+        //（layout.bounds 绝对定位）+ 分区可见性（isVisible(drawerOpen)）----
         // homeReady 同步揭示：按钮属于首页内容面，跟随时钟/收藏区一起出现
-        if (!drawerOpen && state.homeReady && (editingHome || state.settings.graceButton.enabled)) {
+        if (state.homeReady && ((!drawerOpen && editingHome) || state.settings.graceButton.isVisible(drawerOpen))) {
+            val buttonBounds = state.settings.graceButton.layout.bounds(
+                maxWidth.value, maxHeight.value, statusBarHeight.value, bottomInset.value)
             com.galaxyrio.gracelauncher.ui.components.GraceButton(
                 settings = state.settings.graceButton,
-                editing = editingHome,
+                editing = editingHome && !drawerOpen,
+                size = buttonBounds.size.dp,
                 // 上游同步 S8b 修正：搜索打开时按钮禁用（上游 overlay != null 同语义；
                 // 模块搜索 overlay 独立于 overlay 状态，需显式排除）
                 enabled = overlay == null && !buttonState.active && !searchOpen,
@@ -852,9 +857,9 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                     performGestureAction(state.settings.graceButton.target(gesture), origin)
                 },
                 onFinishEditing = { editingHome = false },
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(end = com.galaxyrio.gracelauncher.ui.components.LauncherLayout.End,
-                        bottom = 22.dp + bottomInset),
+                // 上游 v1.1.9（LauncherScreen.kt:1073）：绝对定位替代 BottomEnd 固定对齐
+                modifier = Modifier.align(androidx.compose.ui.AbsoluteAlignment.TopLeft)
+                    .absoluteOffset(x = buttonBounds.left.dp, y = buttonBounds.top.dp),
             )
         }
 
