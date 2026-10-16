@@ -534,3 +534,12 @@ DIFF vs 桩文件:
     文件镜像、崩溃循环复盘）
 - 若未来 OS4 桌面架构变化（如恢复 dex/ART）或出现 Java 派发能力，本归档可直接续命。
 - 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.55-sync-reveal-88.apk。
+
+### wipe-v3（v2.9.61-wipe-v3 / versionCode 94，2026-10-16）—— 清除第四桌面数据根因修复
+
+- [x] **需求（装机反馈）**：模块主页"清除第四桌面数据"按钮 wipe-v2（vc93）实测无效——Toast 走完、桌面重启后设置/收藏/图标数据仍回归。
+- [x] **根因**：v2 时序模型假设 force-stop 后桌面进程保持死亡，实际桌面是 HOME 应用，force-stop 后系统几百 ms 内自动拉起新进程：① 新进程在 v2 首删（+0.5s）前打开旧 DB/加载旧 SP（旧数据进内存缓存）；② rm 后 `[ -e ]` 回读全不存在 → 误报 wiped；③ 进程 SharedPreferencesImpl 内存缓存随后续任意 pref 写入把旧内容整份写回磁盘，文件"复活"；④ grace_launcher_settings.xml 复活后 `GraceSettingsRepository.loadInitial()` 发现 Room 无行 → 从复活 SP seed 回 Room → 数据全回归。
+- [x] **修复（wipe-v3，HostDataWipe.kt）**：时序改为【杀→删 ×3 轮 + 末次强杀收尾】——每轮 force-stop 先杀自动重启进程（丢弃 SP 缓存）再 rm，轮间兜住复活文件，末次 force-stop 保证下次冷启动读干净磁盘；逐文件回读验证不变。
+- [x] **目标清单补缺**：+grace_launcher.db-journal（非 WAL 日志）、+files/item_icons（ItemIconStore 自定义图标位图目录，rm -rf）；files/clock_fonts 按协议保留。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.61-wipe-v3-94.apk。
+- 备注：工作树中 v2.9.56~v2.9.60 批次（gadget/字体跨进程/wipe v1~v2）尚未入库，本提交仅含 HostDataWipe.kt + 版本号 + 本记录。
