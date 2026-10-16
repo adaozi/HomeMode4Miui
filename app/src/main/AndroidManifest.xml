@@ -45,6 +45,7 @@
              excludeFromRecents：同 MainActivity，设置页也不进多任务界面。 -->
         <activity
             android:name=".SettingsActivity"
+            android:theme="@style/Theme.HomeMode4Miui.Settings"
             android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleTop"

@@ -552,3 +552,10 @@ DIFF vs 桩文件:
   - 宿主：GraceSettingsHostEngine.wipeHostData() —— Room clearAllTables（活连接，IO 协程）+ 三 SP（grace_launcher_settings/grace_launcher_preferences/launcher_appearance）edit().clear().commit（内存缓存+磁盘同进程一致清）+ files/item_icons deleteRecursively；回执后 800ms Process.killProcess 自杀重启（HOME 自动拉起，ModePrefs/clock_fonts 保留）；
   - 模块：按钮发桥命令，3s 无回执（第四桌面未挂载/桥断）回落 root 通道（HostDataWipe 保留为兜底）。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.62-wipe-v4-95.apk，已 adb install 到 d6516f3a 待实机验证。
+
+### settings-wallpaper（v2.9.63-settings-wallpaper / versionCode 96，2026-10-16）—— 设置页壁纸窗口补齐
+
+- [x] **需求（装机反馈 + 截图）**：模块设置页（收藏与应用列表等）背景是纯深灰 surface 底，"背景应该是壁纸"。
+- [x] **根因**：上游 Theme.GraceLauncher.Settings 本就是壁纸窗口（windowShowWallpaper=true + 透明 windowBackground），Compose 层 LauncherSettingsScreen 已配套移植（NavHost 对 ListAppearance/Alphabet/ClockStyle/IconDesigner 画 Transparent，普通设置页画 surfaceContainer 不透明）；模块侧从未配窗口主题，默认不透明窗口把壁纸挡住。
+- [x] **修复**：新建 app/src/main/res/values/themes.xml —— Theme.HomeMode4Miui.Settings 逐项对齐上游（壁纸窗口 + 透明背景 + 透明系统栏 + NoActionBar）；AndroidManifest SettingsActivity 挂主题。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.63-settings-wallpaper-96.apk，已 adb install 到 d6516f3a 待实机验证。

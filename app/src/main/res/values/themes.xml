@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  模块侧窗口主题 —— 对齐上游 GraceLauncher themes.xml。
+
+  Theme.HomeMode4Miui.Settings = 上游 Theme.GraceLauncher.Settings 同构：
+  壁纸窗口（windowShowWallpaper + 透明 windowBackground）—— 原版设置页铺在
+  系统壁纸上；Compose 层 LauncherSettingsScreen 已配套移植（NavHost 对
+  ListAppearance/Alphabet/ClockStyle/IconDesigner 等页面画 Transparent，
+  普通设置页画 surfaceContainer 保持不透明卡片观感）。此前模块缺此主题，
+  默认不透明窗口把壁纸挡住，设置页只剩深灰 surface 底（装机反馈"背景应该是壁纸"）。
+-->
+<resources>
+
+    <style name="Theme.HomeMode4Miui" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+
+    <!-- Settings is a regular application task, never a second HOME task. -->
+    <style name="Theme.HomeMode4Miui.Settings" parent="Theme.HomeMode4Miui">
+        <!-- Only the clock preview is transparent; ordinary settings remain opaque. -->
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowDisablePreview">false</item>
+    </style>
+</resources>
