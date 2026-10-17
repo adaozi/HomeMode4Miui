@@ -323,6 +323,7 @@ object GraceSettingsBridge {
                     .put("id", f.id).put("name", f.name)
                     .put("placement", f.placement.name)
                     .put("appListAtBottom", f.appListAtBottom)
+                    .put("autoHideApps", f.autoHideApps)
                     .put("keys", JSONArray(f.appKeys)))
             }
         })
@@ -354,6 +355,7 @@ object GraceSettingsBridge {
                         } ?: emptyList(),
                         placement = FolderPlacement.decode(f.optString("placement")),
                         appListAtBottom = f.optBoolean("appListAtBottom", true),
+                        autoHideApps = f.optBoolean("autoHideApps", false),
                     )
                 }.getOrNull()
             }
