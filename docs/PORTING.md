@@ -610,3 +610,10 @@ DIFF vs 桩文件:
 - [x] **S4（v2.9.91 / vc107）**：图标圆点/隐藏 + 主色重着色——GraceHomeRoot appearance 链传 iconDisplay；GraceHomeSettings.iconDisplay 派生属性；抽屉/收藏行走 vendored LauncherAppRow/FolderRow effectiveDisplay 自动生效；ItemIconStore fromApp 主色 + HSB 调整随 S1 落地。
 - [x] **S5（v2.9.92 / vc108）**：文件夹 autoHideApps + 单应用隐藏——GraceHomeViewModel effectiveHiddenAppKeys 并集过滤；Room 行映射补字段；SettingsViewModel hideApp/setFolderAutoHide（SAVE_FOLDER 通道）+ encode/decodeFolder 补序列化。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.92-v119-s5-108.apk。上游应用图标换新（ic_launcher 系）不跟进（模块独立图标）。
+
+### v119-s6（v2.9.93 / versionCode 109，2026-10-17）—— v1.1.9 收尾对齐（搜索/工作资料隐藏过滤 + 收藏直达）
+
+- [x] **搜索过滤**（上游 LauncherScreen 语义对齐，顺带修审计 #6）：搜索默认排除 effective 隐藏集合（手动 ∪ autoHideApps 文件夹派生），SearchSettings.hiddenApps「搜索包含隐藏应用」开关自此生效。
+- [x] **工作资料行过滤**：抽屉工作资料 Apps 同样排除 effective 隐藏（AppListModel remember 键补 hiddenAppKeys）。
+- [x] **收藏直达**：LauncherOverlay.Favorites 改 data class（initialAppKey）；弹层新增「编辑收藏」附加行（带应用打开，FavoritesScreen 自动选入收藏）；widget 面板编辑收藏行随 data class 构造。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.93-v119-s6-109.apk。

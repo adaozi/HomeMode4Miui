@@ -163,6 +163,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // stringResource 本身安全，统一预解析保持与 P1/P2 文案注入同构）
     val removeFromFavoritesLabel = stringResource(R.string.remove_from_favorites)
     val addToFavoritesLabel = stringResource(R.string.add_to_favorites)
+    val editFavoritesLabel = stringResource(R.string.edit_favorites)
     // P6（B6.3）：通知附加行文案（主树预解析）
     val notificationOpenLabel = stringResource(R.string.notification_open)
     val notificationDismissLabel = stringResource(R.string.notification_dismiss)
@@ -171,9 +172,12 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 影响字母列表，favorites/其余表面用全量 apps）
     // 上游同步 v1.1.8 S8a：工作资料文件夹进抽屉（无 managed profile 时恒 null，抽屉零变化）
     var workExpanded by rememberSaveable { mutableStateOf(false) }
-    val model = remember(state.appListApps, state.folders, state.workFolder, workExpanded, state.workProfileApps) {
+    val model = remember(state.appListApps, state.folders, state.workFolder, workExpanded, state.workProfileApps,
+        state.hiddenAppKeys) {
+        // 上游同步 v1.1.9（LauncherScreen.workApps 对齐）：工作资料行同样排除 effective 隐藏
+        val workApps = state.workProfileAppsOrdered.filterNot { it.key in state.effectiveHiddenAppKeys }
         AppListModel(state.appListApps, state.folders, workFolder = state.workFolder,
-            workExpanded = workExpanded, workApps = state.workProfileAppsOrdered)
+            workExpanded = workExpanded, workApps = workApps)
     }
     val drawerState = rememberLazyListState()
     // 过渡生命周期：退后台清未决过渡（已提交锁屏保留黑场直至亮屏）；回前台清残留
@@ -281,7 +285,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     val searching = searchOpen
     // hotfix8：编辑收藏全屏页计入 fullScreen（原版 LauncherScreen.kt:534）
     // folders 阶段：文件夹弹层同窗全屏（原版 LauncherScreen.kt:534 fullScreen 集合）
-    val fullScreen = searchOpen || pickerOpen || overlay == LauncherOverlay.Favorites ||
+    val fullScreen = searchOpen || pickerOpen || overlay is LauncherOverlay.Favorites ||
         overlay is LauncherOverlay.Folder
     // dimfix：壁纸效果可见度三分支（原版 LauncherScreen.kt:710-714
     // wallpaperEffectVisibility）：搜索时随 searchAlpha 渐入（搜索页壁纸遮罩/模糊），
@@ -597,6 +601,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 "toggle_favorite",
                 if (app.key in favoriteKeys) removeFromFavoritesLabel else addToFavoritesLabel,
             ) { viewModel.toggleFavorite(app) })
+            // 上游同步 v1.1.9：编辑收藏直达（带应用打开，FavoritesScreen 自动选入）
+            add(PopupEntry("edit_favorites", editFavoritesLabel) {
+                overlay = com.galaxyrio.gracelauncher.ui.overlays.LauncherOverlay.Favorites(initialAppKey = app.key)
+            })
             // P6（B6.3）：有通知的应用附加打开/清除行（命令经桥到模块进程执行）
             state.notifications[app.packageName]?.firstOrNull()?.let { notification ->
                 if (notification.canOpen) add(PopupEntry(
@@ -807,7 +815,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             AppSearchScreen(
                 // 上游同步 v1.1.8 S3：搜索页下拉关闭与桌面共享 Lab 灵敏度
                 swipeSensitivity = state.settings.homeGestures.swipeSensitivity,
-                apps = state.apps,
+                // 上游同步 v1.1.9（LauncherScreen 语义对齐）：搜索默认排除 effective 隐藏
+                //（手动隐藏 ∪ autoHideApps 文件夹成员）；"搜索包含隐藏应用"开关放行
+                apps = if (state.settings.searchSettings.hiddenApps) state.apps
+                       else state.apps.filter { it.folderId == null && it.key !in state.effectiveHiddenAppKeys },
                 recentAppKeys = state.settings.searchSettings.recentAppKeys,
                 fuzzy = state.settings.searchSettings.fuzzy,
                 suggestions = state.settings.searchSettings.suggestions,
@@ -968,7 +979,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             },
             // hotfix8：编辑收藏全屏页（原版 LauncherOverlay.Favorites → FavoritesScreen；
             // uiState/actions 经 GraceFavoritesShim 从宿主 VM 投影，toggle/reorder 直连 FavoritesStore）
-            favorites = {
+            favorites = { initialAppKey ->
                 val shimState = remember(state) { GraceFavoritesShim.uiState(state) }
                 val shimActions = remember(viewModel) { GraceFavoritesShim.actions(viewModel) }
                 FavoritesScreen(
@@ -976,6 +987,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                     actions = shimActions,
                     onToggle = viewModel::toggleFavorite,
                     onReorder = viewModel::reorderFavorites,
+                    // 上游同步 v1.1.9：带应用打开时自动选入收藏（弹层"编辑收藏"直达）
+                    initialAppKey = initialAppKey,
                     // folders 阶段：文件夹入口接通（原版默认行为；FavoriteFoldersScreen
                     // 经 shim actions.setFolderFavorites 直连宿主 Room）
                     onDone = { overlay = null },

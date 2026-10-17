@@ -72,8 +72,9 @@ sealed interface LauncherOverlay {
     // P6（B6.2/B6.4）：日期点击 → 日程+天气面板；时钟长按面板 → 图标包选择
     data object Agenda : LauncherOverlay
     data object IconPacks : LauncherOverlay
-    // hotfix8：编辑收藏全屏页（原版 LauncherOverlay.Favorites；原为 P4 裁剪，C 组页已就位）
-    data object Favorites : LauncherOverlay
+    // hotfix8：编辑收藏全屏页（原版 LauncherOverlay.Favorites；原为 P4 裁剪，C 组页已就位）。
+    // 上游同步 v1.1.9：initialAppKey —— 带应用打开时自动选入收藏（列表/弹层"编辑收藏"直达）。
+    data class Favorites(val initialAppKey: String? = null) : LauncherOverlay
     // folders 阶段：文件夹弹层（原版 LauncherOverlay.Folder；成员在路由层解析）
     data class Folder(val folder: com.galaxyrio.gracelauncher.data.LauncherFolder,
         val anchor: Rect, val reveal: ShortcutRevealState = ShortcutRevealState()) : LauncherOverlay
@@ -107,8 +108,9 @@ fun LauncherOverlays(
     widgetMenuExtras: (@Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit)? = null,
     agenda: (@Composable () -> Unit)? = null,
     iconPacks: (@Composable () -> Unit)? = null,
-    // hotfix8：编辑收藏全屏页 slot（路由层以 GraceFavoritesShim 组装）
-    favorites: (@Composable () -> Unit)? = null,
+    // hotfix8：编辑收藏全屏页 slot（路由层以 GraceFavoritesShim 组装）；
+    // 上游同步 v1.1.9：参数 = overlay.initialAppKey（带应用直达时自动选入收藏）
+    favorites: (@Composable (String?) -> Unit)? = null,
     // folders 阶段：文件夹弹层 slot（路由层组装 FolderPopup）
     folder: (@Composable () -> Unit)? = null,
     // 上游同步 v1.1.8 S8b：弹层行文字可见性（listAppearance.showNames(favorites = false)）
@@ -132,7 +134,7 @@ fun LauncherOverlays(
         LauncherOverlay.Agenda -> agenda?.invoke()
         LauncherOverlay.IconPacks -> iconPacks?.invoke()
         // hotfix8：编辑收藏（原版 LauncherSheets.kt:115-118 同窗口全屏分发）
-        LauncherOverlay.Favorites -> favorites?.invoke()
+        is LauncherOverlay.Favorites -> favorites?.invoke(overlay.initialAppKey)
         // folders 阶段：文件夹弹层（原版 LauncherSheets.kt:164-197）
         is LauncherOverlay.Folder -> folder?.invoke()
     }
@@ -178,7 +180,7 @@ internal fun HomeWidgetPanel(layout: HomeLayout, apps: List<LauncherApp>, action
                 if (custom) {
                     // hotfix8：原版 HomeWidgetSheet.kt:46 —— custom 面板首行 = 编辑收藏
                     WidgetAction(LauncherSymbol.Star, stringResource(R.string.edit_favorites)) {
-                        onDismiss(); onNavigate(LauncherOverlay.Favorites)
+                        onDismiss(); onNavigate(LauncherOverlay.Favorites())
                     }
                     if (widgetApp != null) WidgetAction(LauncherSymbol.Info, stringResource(R.string.app_info)) { onDismiss(); actions.appInfo(widgetApp) }
                     WidgetAction(LauncherSymbol.Resize, stringResource(R.string.widget_move_resize)) { onDismiss(); actions.moveWidget() }
@@ -203,7 +205,7 @@ internal fun HomeWidgetPanel(layout: HomeLayout, apps: List<LauncherApp>, action
                     thickness = 1.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 // hotfix8：原版 HomeWidgetSheet.kt:69 —— non-custom 面板 divider 后 = 编辑收藏
                 WidgetAction(LauncherSymbol.Star, stringResource(R.string.edit_favorites), arrow = true) {
-                    onDismiss(); onNavigate(LauncherOverlay.Favorites)
+                    onDismiss(); onNavigate(LauncherOverlay.Favorites())
                 }
                 // C 组（C1）："Grace settings" 行接通 —— 经模块 App 主入口（LAUNCHER，
                 // P6 hotfix3 实锤的 BAL 可行路径）转发到模块进程 SettingsActivity
