@@ -485,6 +485,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                     com.homemode4miui.R.string.folder_unavailable), android.widget.Toast.LENGTH_SHORT).show()
             }
             com.galaxyrio.gracelauncher.data.GraceButtonAction.AppList -> {
+                // 上游同步 v1.1.9（LauncherScreen.kt:877）：抽屉已开时 AppList 手势 no-op
+                if (drawerOpen) return
                 if (fromButton && buttonSettings.animationsEnabled)
                     buttonState.begin(com.galaxyrio.gracelauncher.ui.components.GraceButtonTransition(
                         com.galaxyrio.gracelauncher.data.GraceButtonAction.AppList, origin,
