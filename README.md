@@ -15,8 +15,8 @@
 | OS2（5.x） | `RELEASE-5.39.40.10843` | `com.miui.home.launcher.Launcher` |
 | OS3（6.x） | `RELEASE-6.01.03.1927` | `com.miui.home.launcher.BaseLauncher`（OS3 的 Launcher 大重构，方法整体上移） |
 
-当前版本：`2.9.55-sync-reveal`（versionCode 88），见 `app/build.gradle`。
-最新 Release：[v2.9.55-sync-reveal](https://github.com/adaozi/HomeMode4Miui/releases/latest)。
+当前版本：`2.9.96-autohide-fix`（versionCode 112），见 `app/build.gradle`。
+最新 Release：[v2.9.96-autohide-fix](https://github.com/adaozi/HomeMode4Miui/releases/latest)。
 
 ## 效果预览
 
@@ -93,7 +93,7 @@ app/src/main/java/com/galaxyrio/gracelauncher/   ② GraceLauncher 源码搬运�
 └── ui/                        home / drawer / search / overlays / widgets / settings / theme 全套 Compose
 ```
 
-> 源码来源：GraceLauncher v1.1.8（github.com/Galaxy-rio/GraceLauncher，GPL-3.0），上游 10 个 tag 已全量同步。
+> 源码来源：GraceLauncher v1.1.9（github.com/Galaxy-rio/GraceLauncher，GPL-3.0），上游全部 tag 已同步（v1.1.4→v1.1.8 十个 tag；v1.1.9 五大功能：Grace Button 可移动与分区可见性、图标圆点/隐藏与主色重着色、主题调色板风格、文件夹成员自动隐藏、收藏编辑直达）。
 > 移植决策与逐文件清单见 [`docs/PORTING_GraceLauncher.md`](docs/PORTING_GraceLauncher.md)。
 
 ## 核心设计：为什么能"原生式"新增模式
@@ -261,6 +261,7 @@ bash tools/build_apk.sh
 | [`docs/PORTING_GraceLauncher.md`](docs/PORTING_GraceLauncher.md) | GraceLauncher 移植路线图（P0–P6）、上游 v1.1.4→v1.1.8 同步记录、风险登记、构建环境 |
 | [`docs/SETUP_NEW_MACHINE.md`](docs/SETUP_NEW_MACHINE.md) | 换机开发指南（签名密钥 / Gradle 镜像 / 环境清单） |
 | [`docs/CODE_AUDIT_2026-10-13.md`](docs/CODE_AUDIT_2026-10-13.md) | 全仓代码审计快照（v2.9.36 天气上移宿主架构，P0 修复见 v2.9.37） |
+| [`docs/CODE_AUDIT_2026-10-16.md`](docs/CODE_AUDIT_2026-10-16.md) | 「写了但没实现」无效功能审计（181 文件交叉引用，整改见 v2.9.87） |
 | [`docs/UISTATE_SPLIT_DESIGN.md`](docs/UISTATE_SPLIT_DESIGN.md) | GraceHomeUiState 拆分设计稿（未实施，随 P3+ 推进） |
 | [`tools/ENV.md`](tools/ENV.md) | 本机开发环境清单（JDK 21 / SDK / Gradle 镜像） |
 

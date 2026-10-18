@@ -617,3 +617,11 @@ DIFF vs 桩文件:
 - [x] **工作资料行过滤**：抽屉工作资料 Apps 同样排除 effective 隐藏（AppListModel remember 键补 hiddenAppKeys）。
 - [x] **收藏直达**：LauncherOverlay.Favorites 改 data class（initialAppKey）；弹层新增「编辑收藏」附加行（带应用打开，FavoritesScreen 自动选入收藏）；widget 面板编辑收藏行随 data class 构造。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.93-v119-s6-109.apk。
+
+### v119-s6b / v119-zh / autohide-fix（v2.9.94~v2.9.96 / versionCode 110~112，2026-10-17）—— 收尾三连
+
+- [x] **s6b（v2.9.94 / vc110，ec44ed5）**：AppList 手势在抽屉已开时 no-op（上游 LauncherScreen.kt:877）；核实 HomeWidgetSheet 1.1.8→1.1.9 实为零改动（此前 40 行系 CRLF 噪音），无欠账。
+- [x] **v119-zh（v2.9.95 / vc111，1466a92）**：values-zh-rCN 补齐 S1 追加的 40 条上游字符串官方中文（取自上游 zh-CN，非自译，零 key 冲突）。
+- [x] **autohide-fix（v2.9.96 / vc112，594ebdb）**：装机回归首 bug —— 文件夹「自动隐藏内部的应用」开关点不动。根因：GraceSettingsBridge 快照 fols 线格式 encode/decode 双漏 autoHideApps，设置页 folders 该字段恒 false 且回推快照无字段，开关视觉弹回。修复：bridge encode/decode 成对补字段，SAVE_FOLDER → pushSnapshot 闭环即时刷新。
+- [x] 惯例沉淀：新增设置字段必须全通道成对 —— DB 列 / LauncherSettingsRepository、GraceSettingsBridge（encodeRow/decode/delta + **快照 wire 格式 fols**）、GraceHomeSettings/快照模型；folder 类字段另查 fols 线格式。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.96-autohide-fix-112.apk。
