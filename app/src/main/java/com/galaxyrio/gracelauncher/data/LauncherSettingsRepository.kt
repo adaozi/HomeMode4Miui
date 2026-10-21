@@ -33,6 +33,7 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
                     placement = FolderPlacement.decode(entry.placement),
                     appListAtBottom = entry.appListAtBottom,
                     autoHideApps = entry.autoHideApps,
+                    isAppStack = entry.isAppStack,
                 )
             },
         )
@@ -108,7 +109,7 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
         require(name.isNotEmpty()) { "A folder name must not be blank" }
         val keys = folder.appKeys.filter(String::isNotBlank).distinct()
         database.withTransaction {
-            dao.upsertFolder(LauncherFolderEntity(folder.id, name, folder.placement.name, folder.appListAtBottom, folder.autoHideApps))
+            dao.upsertFolder(LauncherFolderEntity(folder.id, name, folder.placement.name, folder.appListAtBottom, folder.autoHideApps, folder.isAppStack))
             val itemsDao = database.itemsDao()
             val previous = itemsDao.popup(folder.key)?.let { PopupItem.decode(it.itemsJson) }.orEmpty()
             // Membership callers must not discard widgets or move them to the end.
@@ -121,11 +122,13 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
     }
 
     suspend fun updateFolder(id: String, name: String? = null, placement: FolderPlacement? = null,
-        appListAtBottom: Boolean? = null, autoHideApps: Boolean? = null) = database.withTransaction {
+        appListAtBottom: Boolean? = null, autoHideApps: Boolean? = null,
+        isAppStack: Boolean? = null) = database.withTransaction {
         val folder = dao.folder(id) ?: return@withTransaction
         dao.upsertFolder(folder.copy(name = name?.trim()?.takeIf { it.isNotEmpty() } ?: folder.name,
             placement = placement?.name ?: folder.placement, appListAtBottom = appListAtBottom ?: folder.appListAtBottom,
-            autoHideApps = autoHideApps ?: folder.autoHideApps))
+            autoHideApps = autoHideApps ?: folder.autoHideApps,
+            isAppStack = isAppStack ?: folder.isAppStack))
     }
 
     /** The favorites picker edits the same placement as the folder's settings. */

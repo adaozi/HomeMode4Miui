@@ -77,8 +77,20 @@ class ShortcutRevealState(expanded: Boolean = true, dragging: Boolean = false, v
     var expanded by mutableStateOf(expanded)
 }
 
-/** P4 适配：弹层尾部附加动作行（收藏增删等）。label 必须主树解析后传入。 */
-data class PopupEntry(val key: String, val label: String, val symbol: LauncherSymbol = LauncherSymbol.Star, val onClick: () -> Unit)/** Same-window overlay: adding a popup window during DOWN would cancel the row's drag. */
+/**
+ * P4 适配：弹层尾部附加动作行（收藏增删等）。label 必须主树解析后传入。
+ *
+ * dismissFirst：动作本身要【打开另一个浮层】（如"编辑收藏"→ LauncherOverlay.Favorites）时为
+ * true —— 先关本弹层再执行动作。默认顺序（先动作、后 onDismiss）会把动作里刚设的 overlay
+ * 再清成 null，导致"编辑收藏"点了没反应（装机实锤）。
+ */
+data class PopupEntry(
+    val key: String,
+    val label: String,
+    val symbol: LauncherSymbol = LauncherSymbol.Star,
+    val dismissFirst: Boolean = false,
+    val onClick: () -> Unit,
+)/** Same-window overlay: adding a popup window during DOWN would cancel the row's drag. */
 @Composable
 fun ShortcutPopup(
     app: LauncherApp,
@@ -190,8 +202,13 @@ fun ShortcutPopup(
                     Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("entry:${entry.key}")
                         .clip(RoundedCornerShape(16.dp))
                         .combinedClickable(enabled = !reveal.dragging && reveal.expanded, onClick = {
-                            entry.onClick()
-                            onDismiss()
+                            if (entry.dismissFirst) {
+                                onDismiss()
+                                entry.onClick()
+                            } else {
+                                entry.onClick()
+                                onDismiss()
+                            }
                         }).padding(horizontal = 12.dp, vertical = (listAppearance.appSpacing / 2f).dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

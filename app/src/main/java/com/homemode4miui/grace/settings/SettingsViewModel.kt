@@ -70,6 +70,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val shortcutRepository = ShortcutRepository(application)
     private val settingsWriteMutex = Mutex()
 
+    /**
+     * 宿主快照回带的应用清单（GraceSettingsBridge.Snapshot.appCatalog）。
+     * 模块 App 进程枚举可见集可能少于宿主桌面（MIUI 对第三方调用方裁剪），
+     * refreshApps 只用它补本地缺的 key，不参与装饰/图标链。
+     */
+    private var bridgedCatalog: List<com.galaxyrio.gracelauncher.data.LauncherApp> = emptyList()
+
     /** 快照到达前 true；超时仍无快照 → settingsLoadFailed（只读面）。 */
     private val _uiState = MutableStateFlow(LauncherUiState(
         isLoadingSettings = true,
@@ -118,7 +125,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun refreshApps() {
         viewModelScope.launch {
             runCatching {
-                val apps = appRepository.loadApps(_uiState.value.settings.enabledIconPackPackages)
+                val local = appRepository.loadApps(_uiState.value.settings.enabledIconPackPackages)
+                // 桥回带的宿主清单补差集：模块进程枚举不到、但宿主抽屉里有的应用
+                // （装机实锤：pin/系统组件的个别应用设置页缺失 → 隐藏应用页找不到）。
+                // 只补 key 缺失项，图标留空（AppSelectionList 走占位图），不覆盖本地装饰。
+                val known = local.mapTo(HashSet()) { it.key }
+                val apps = local + bridgedCatalog.filterNot { it.key in known }
                 // 上游同步 v1.1.8 S8b：工作资料枚举（仅 managed profile，MIUI 双开不受影响）
                 val workProfiles = appRepository.workProfiles()
                 val workSerials = workProfiles.map { it.serial }.toSet()
@@ -158,6 +170,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     /** 快照 → uiState（模块本地查询面保留，桥面覆盖）。 */
     private fun applySnapshot(snapshot: GraceSettingsBridge.Snapshot) {
         val previousWeatherLocationId = _uiState.value.settings.weatherLocationId
+        // 宿主应用清单（补本地枚举差集，refreshApps 尾部合并）
+        bridgedCatalog = snapshot.appCatalog.mapNotNull { wire ->
+            val component = android.content.ComponentName.unflattenFromString(wire.component)
+                ?: return@mapNotNull null
+            com.galaxyrio.gracelauncher.data.LauncherApp(
+                componentName = component,
+                label = wire.label.ifBlank { component.packageName },
+                icon = null,
+                userSerial = wire.serial,
+            )
+        }
         // B6.2：天气随快照回带（宿主进程读取；null = 宿主尚无数据，保持现状）
         val bridgedWeather = snapshot.weatherJson?.let { json ->
             runCatching { com.homemode4miui.bridge.GraceBridge.decodeWeatherWire(json) }.getOrNull()
@@ -324,6 +347,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
         },
         saveFolder = { folder -> send(GraceSettingsBridge.Cmd.SAVE_FOLDER, json = encodeFolder(folder)) },
+        // 上游同步 1.2.0：应用堆开关键走整对象保存（与 setFolderAutoHide 同构）
+        setFolderAppStack = { id, enabled ->
+            _uiState.value.folders.firstOrNull { it.id == id }?.let { folder ->
+                send(GraceSettingsBridge.Cmd.SAVE_FOLDER, json = encodeFolder(folder.copy(isAppStack = enabled)))
+            }
+        },
         updateFolder = { id, name, placement, appListAtBottom ->
             val delta = JSONObject().put("id", id)
             name?.let { delta.put("name", it) }
@@ -519,6 +548,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         .put("placement", folder.placement.name)
         .put("appListAtBottom", folder.appListAtBottom)
         .put("autoHideApps", folder.autoHideApps)
+        .put("isAppStack", folder.isAppStack)
         .put("keys", JSONArray(folder.appKeys))
         .toString()
 

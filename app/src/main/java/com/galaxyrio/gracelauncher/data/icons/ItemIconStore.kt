@@ -105,7 +105,8 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
             }
             if (app.folderId != null && choice.kind in setOf("system", "theme")) {
                 val colors = themeColors(settings)
-                val glyph = ContextCompat.getDrawable(context, if (app.folderId == PrivateSpaceFolderId) R.drawable.ms_lock else R.drawable.ms_folder)
+                val glyph = ContextCompat.getDrawable(context, if (app.folderId == PrivateSpaceFolderId) R.drawable.ms_lock
+                    else if (app.isAppStack) R.drawable.ms_steppers else R.drawable.ms_folder)
                     ?.mutate() ?: return@withContext null
                 glyph.setTint(colors.second)
                 return@withContext iconLayers(AdaptiveIconDrawable(ColorDrawable(colors.first), InsetDrawable(glyph, 0.22f)), size, themed = true)
@@ -132,8 +133,15 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
         }
     }
 
+    // 上游同步 1.2.0（S8 性能）：渲染结果缓存。签名 = app.key + 图标选择 + 全部设置 + 日期，
+    // 用 settings.hashCode() 覆盖所有影响渲染的设置字段（宁可少命中，也不返回陈旧图标）。
+    private val renderedApps = IconSnapshotCache<String, LauncherApp>(capacity = 256,
+        maxBytes = 16 * 1024 * 1024, sizeOf = { iconBitmapBytes(it.icon, it.monochromeIcon) })
+
     suspend fun apply(app: LauncherApp, choice: ItemIcon?, settings: LauncherSettings = LauncherSettings()): LauncherApp = withContext(Dispatchers.IO) {
-        safelyRender(app, app) {
+        val renderKey = "${app.key}|${choice?.hashCode()}|${settings.hashCode()}|${java.time.LocalDate.now()}"
+        renderedApps.get(renderKey, renderKey)?.let { return@withContext it }
+        val result = safelyRender(app, app) {
             if (choice == null) return@safelyRender app
             choice.design?.let { design ->
                 // 上游同步 v1.1.8 S8b（ItemIconStore.kt:137）：按钮位图 256px（54dp FAB 高密度）。
@@ -163,6 +171,8 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
             if (icon == null) app else app.copy(icon = icon.bitmap, monochromeIcon = icon.monochrome,
                 monochromeScale = icon.monochromeScale, iconPackPackage = choice.source.takeIf { choice.kind == "pack" })
         }.copy(iconDisplay = choice?.display)
+        renderedApps.put(renderKey, renderKey, result)
+        result
     }
 
     /** One invalid third-party drawable must not abort the launcher or the live preview. */
@@ -197,6 +207,8 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
             images.snapshot().keys.filter { it.startsWith("${choice.source}:") }.forEach(images::remove)
             imageFile(choice.source).delete()
         }
+        // 图源已删，渲染缓存必须失效
+        renderedApps.clear()
         Unit
     }
 

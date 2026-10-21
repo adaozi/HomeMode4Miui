@@ -29,11 +29,14 @@
 package com.homemode4miui.home
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.widget.FrameLayout
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Recomposer
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.AndroidUiDispatcher
+import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
@@ -70,7 +73,7 @@ class GraceHomeView(launcher: Activity) :
     private val savedStateController = SavedStateRegistryController.create(this)
     override val savedStateRegistry: SavedStateRegistry get() = savedStateController.savedStateRegistry
 
-    private var composeView: ComposeView? = null
+    private var composeView: AbstractComposeView? = null
     private var fallbackView: PlaceholderHomeView? = null
     private var recomposerScope: CoroutineScope? = null
     /** P1：手动构造的 ViewModel（B1.3，绕过 viewModels() 委托）；生命周期随本视图 */
@@ -103,7 +106,8 @@ class GraceHomeView(launcher: Activity) :
     }
 
     override fun onHomeAttached(launcher: Activity) {
-        // ---- 复用路径幂等：只把生命周期推回 RESUMED，绝不重复挂内容 ----
+        // blur-gap：insets 可能在上一次 dispatch 里给本视图塞过 padding，进来先清一次
+        clearSystemBarPadding()        // ---- 复用路径幂等：只把生命周期推回 RESUMED，绝不重复挂内容 ----
         // perf3：复用分支同时承担"退后台恢复"—— Launcher.onResume 必经此处。
         // 此前只处理 STARTED→RESUMED；新增 CREATED（onHomePaused 推到 STOP 后）
         // 的 ON_START 补链。状态已 RESUMED 时两次 handleLifecycleEvent 均为 no-op。
@@ -115,6 +119,10 @@ class GraceHomeView(launcher: Activity) :
                 if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                     lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
                 }
+                // pin 快捷方式补同步：应用内"添加到主屏幕" → AddItemActivity 关闭 → 回桌面
+                // 走本复用分支。MIUI 的 accept 链路不一定触发旁听 hook，这里按公开
+                // FLAG_MATCH_PINNED 拉一次（幂等），保证快捷方式立刻出现在应用列表。
+                homeViewModel?.syncPinnedShortcuts()
             } catch (t: Throwable) {
                 ModLog.e("GraceHomeView re-attach sync failed", t)
             }
@@ -153,12 +161,13 @@ class GraceHomeView(launcher: Activity) :
             val viewModel = GraceHomeViewModel(launcher.applicationContext as android.app.Application)
             homeViewModel = viewModel
 
-            val view = ComposeView(ModuleResourceBridge.wrap(launcher)).apply {
+            val view = FullBleedComposeView(ModuleResourceBridge.wrap(launcher)).apply {
                 // 根因修复：自托管 Recomposer。绝不触发 windowRecomposer()
                 // （其工厂从宿主窗口根视图找 LifecycleOwner，必抛）
                 setParentCompositionContext(createRecomposer())
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-                setContent { GraceHomeRoot(viewModel, onComposeAlive = { onHeartbeat(launcher) }, hostActivity = mLauncher) }
+                // setContent 扩展对 AbstractComposeView 同样可用（内部走 Content() 槽）
+                content = { GraceHomeRoot(viewModel, onComposeAlive = { onHeartbeat(launcher) }, hostActivity = mLauncher) }
             }
             composeView = view
             try {
@@ -184,6 +193,65 @@ class GraceHomeView(launcher: Activity) :
         } catch (t: Throwable) {
             ModLog.e("GraceHomeView onHomeAttached failed", t)
             onMountFailed(launcher)
+        }
+    }
+
+    /**
+     * 永远不接受 padding / insets 的 ComposeView（blur-gap 专修，语义见 clearSystemBarPadding）。
+     * ComposeView 本身是 final → 落到它的开基类 AbstractComposeView（setContent 对它同样可用）。
+     */
+    private class FullBleedComposeView(context: Context) : AbstractComposeView(context) {
+        var content: (@Composable () -> Unit)? = null
+
+        @Composable
+        override fun Content() {
+            content?.invoke()
+        }
+
+        override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) {
+            if (left != 0 || top != 0 || right != 0 || bottom != 0) {
+                ModLog.i("ComposeView setPadding blocked: $left,$top,$right,$bottom")
+            }
+            super.setPadding(0, 0, 0, 0)
+        }
+
+        override fun fitSystemWindows(insets: android.graphics.Rect?): Boolean = true
+    }
+
+    override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) {
+        if (left != 0 || top != 0 || right != 0 || bottom != 0) {
+            ModLog.i("GraceHomeView setPadding blocked: $left,$top,$right,$bottom")
+        }
+        super.setPadding(0, 0, 0, 0)
+    }
+
+    /**
+     * blur-gap 根因闸门：宿主（DecorView/DragLayer）在模式切换后会把状态栏 insets
+     * 往下 dispatch，View 默认实现是 `setPadding(top = statusBarHeight)` 并把可用高度
+     * 减掉同样数值 —— Compose 根因此只有 2296 高（窗口 2400），桌面整块下移 104px，
+     * 抽屉模糊壁纸/遮罩盖不住状态栏条带。
+     * 这里消费掉 insets（不让它继续下发/生效），但绝不改 padding：
+     * 系统栏排版由 Compose 侧按 safeDrawing 自行处理。
+     */
+    override fun fitSystemWindows(insets: android.graphics.Rect?): Boolean = true
+
+    /** 清掉历史累积的 padding（本视图 + ComposeView），保证内容铺满整窗。 */
+    override fun clearSystemBarPadding() {
+        try {
+            if (paddingLeft != 0 || paddingTop != 0 || paddingRight != 0 || paddingBottom != 0) {
+                ModLog.i("GraceHomeView clear padding=" + paddingLeft + "," + paddingTop + "," +
+                    paddingRight + "," + paddingBottom)
+                setPadding(0, 0, 0, 0)
+            }
+            composeView?.let { v ->
+                if (v.paddingLeft != 0 || v.paddingTop != 0 || v.paddingRight != 0 || v.paddingBottom != 0) {
+                    ModLog.i("ComposeView clear padding=" + v.paddingLeft + "," + v.paddingTop + "," +
+                        v.paddingRight + "," + v.paddingBottom)
+                    v.setPadding(0, 0, 0, 0)
+                }
+            }
+        } catch (t: Throwable) {
+            ModLog.e("GraceHomeView clearSystemBarPadding failed", t)
         }
     }
 

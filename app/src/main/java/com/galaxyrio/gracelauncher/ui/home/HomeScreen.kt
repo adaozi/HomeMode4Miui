@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.positionInWindow
 import com.galaxyrio.gracelauncher.data.GraceButtonGesture
+import com.galaxyrio.gracelauncher.data.GraceWidget
 import com.galaxyrio.gracelauncher.data.GraceButtonSettings
 import com.galaxyrio.gracelauncher.ui.components.observeBlankDoubleTaps
 import com.galaxyrio.gracelauncher.ui.components.observeListGestures
@@ -45,6 +46,11 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
+import com.galaxyrio.gracelauncher.ui.overlays.FavoritesReorderState
+import com.galaxyrio.gracelauncher.ui.overlays.rememberReorderTranslation
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Surface
@@ -100,6 +106,8 @@ import com.galaxyrio.gracelauncher.data.media.NowPlaying
 import com.galaxyrio.gracelauncher.data.media.IdleMediaSessionId
 import com.galaxyrio.gracelauncher.data.notifications.AppNotification
 import com.galaxyrio.gracelauncher.ui.components.AppRowGestures
+import com.galaxyrio.gracelauncher.ui.components.AppStack
+import com.galaxyrio.gracelauncher.data.AppStackInset
 import com.galaxyrio.gracelauncher.ui.components.FolderRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherAppRow
 import com.galaxyrio.gracelauncher.ui.components.LauncherLayout
@@ -151,6 +159,10 @@ fun HomeScreen(
     folders: List<LauncherFolder> = emptyList(),
     onOpenFolder: (LauncherFolder, Rect) -> Unit = { _, _ -> },
     onEditFolder: (LauncherFolder) -> Unit = {},
+    /** 上游同步 1.2.0：应用堆成员解析（调用方从 popups/appKeys 取 key 再映射成 LauncherApp）。 */
+    stackApps: (LauncherFolder) -> List<LauncherApp> = { emptyList() },
+    /** 上游同步 1.2.0（S6d）：编辑态拖动区块后提交新的 homeOrder。 */
+    onReorderHome: (List<String>) -> Unit = {},
     editingLayout: Boolean = false,
     widgetInputEnabled: Boolean = true,
     topSpace: Dp = 24.dp,
@@ -192,6 +204,8 @@ fun HomeScreen(
     var topOffset by remember(homeLayout.topOffsetDp) { mutableFloatStateOf(homeLayout.topOffsetDp) }
     var widgetHeight by remember(homeLayout.widgetId, homeLayout.widgetHeightDp) { mutableFloatStateOf(homeLayout.widgetHeightDp.toFloat()) }
     var headerHeightPx by remember { mutableIntStateOf(0) }
+    // 上游同步 1.2.0（S6e）：日程从时钟区块拆成独立区块，两块高度累加才算真实头部高度
+    var calendarHeightPx by remember { mutableIntStateOf(0) }
     var anchorOffsetPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val minimumTop = stableStatusBarInset() + 8.dp
@@ -232,7 +246,7 @@ fun HomeScreen(
             }
         }) {
     val availableHeight = (maxHeight - bottomInset).coerceAtLeast(0.dp)
-    val headerHeight = with(density) { headerHeightPx.toDp() }
+    val headerHeight = with(density) { (headerHeightPx + calendarHeightPx).toDp() }
     // Only content ABOVE the calendar anchor constrains its position. Agenda,
     // media, widgets and favorites grow downwards without moving this anchor.
     // Measure the boundary, not a hard-coded clock height, so it can be optional later.
@@ -246,6 +260,39 @@ fun HomeScreen(
         (if (widgetHeight == 0f) hostedWidget.defaultHeight else widgetHeight.roundToInt()).coerceIn(minWidgetHeight, maximumWidgetHeight)
     val resizeLimit = (availableHeight - resolvedTop - headerHeight - 56.dp).value.toInt()
         .coerceIn(minWidgetHeight, maximumWidgetHeight)
+    // 上游同步 1.2.0（S6b）：区块顺序由 homeLayout.homeOrder 驱动。
+    // 模块差异：没有独立的 calendar / baseline 区块（它们在 HomeClockHeader 内部），
+    // 因此可排序区块只有 clock（含日期/日程）/ widget / media，收藏恒在尾部。
+    // 注意：必须在 LazyListScope 之外计算 —— 里面不是 @Composable 上下文。
+    val blockOrder = remember(homeLayout.homeOrder, clockEnabled, calendarAgenda, media, hostedWidget) {
+        val available = buildList {
+            // 上游同步 1.2.0（S6e）：clock 与 calendar 拆成两个独立区块（各自由开关控制）
+            if (clockEnabled) add(GraceWidget.Clock.key)
+            if (calendarAgenda) add(GraceWidget.Calendar.key)
+            if (hostedWidget != null) add("widget:${homeLayout.widgetId}")
+            if (media != null) add(GraceWidget.Media.key)
+        }
+        val seeded = homeLayout.homeOrder
+        if (seeded == null) available else {
+            // 老 homeOrder 里没有新引入的区块（如 S6e 的 calendar）时，按 legacy 相对位置插入，
+            // 不能简单追加到尾部 —— 否则日程会跑到媒体播放器下面（装机实锤的错位）。
+            val order = seeded.filter { it in available }.toMutableList()
+            available.forEachIndexed { index, key ->
+                if (key in order) return@forEachIndexed
+                val previous = available.take(index).lastOrNull { it in order }
+                val position = if (previous == null) 0 else order.indexOf(previous) + 1
+                order.add(position.coerceIn(0, order.size), key)
+            }
+            order
+        }
+    }
+    // 上游同步 1.2.0（S6d）：编辑态长按区块拖动排序，复用收藏拖拽的 FavoritesReorderState。
+    val blockHaptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val blockReorder = remember(listState) {
+        FavoritesReorderState(listState, blockOrder, { order -> onReorderHome(order) },
+            feedback = { blockHaptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress) })
+    }
+    LaunchedEffect(blockOrder) { blockReorder.synchronize(blockOrder) }
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize()
@@ -260,41 +307,94 @@ fun HomeScreen(
         // LazyColumn's own effect is disabled to avoid stretching twice.
         overscrollEffect = null,
     ) {
-        item(key = "date", contentType = "date") {
-            HomeClockHeader(
-                now = now,
-                event = event,
-                onDateClick = onDateClick,
-                onClockClick = onClockClick,
-                onLongClick = onWidgetMenu,
-                onAnchorOffsetChange = { anchorOffsetPx = it },
-                showClock = clockEnabled,
-                clockStyle = clockStyle,
-                interactive = !editingLayout,
-                showCalendar = calendarAgenda,
-                calendarAboveClock = calendarAboveClock,
-                showBattery = showBatteryPercentage,
-                weather = weather,
-                modifier = Modifier.fillMaxWidth().onSizeChanged { headerHeightPx = it.height },
-            )
-            Spacer(Modifier.height(2.dp))
-        }
-        if (hostedWidget != null) item(key = "widget:${homeLayout.widgetId}", contentType = "widget") {
-            HomeWidget(homeLayout, hostedWidget, resolvedWidgetHeight, editingLayout,
-                enabled = widgetInputEnabled, hapticsEnabled = allowHapticFeedback,
-                onLongPress = onCustomWidgetMenu)
-            Spacer(Modifier.height(2.dp))
-        }
-        if (media != null) item(key = "media", contentType = "media") {
-            HomeMediaPlayer(media, onMediaCommand, onDismiss = { id, revision ->
-                if (id == IdleMediaSessionId) { idleMediaDismissed = true; true }
-                else onDismissMedia(id, revision).also { if (it) idleMediaDismissed = true }
-            })
-            Spacer(Modifier.height(2.dp))
+        items(blockOrder, key = { FavoritesReorderState.itemKey(it) }) { blockKey ->
+            val orderOffset by rememberReorderTranslation(blockReorder, blockKey)
+            val dragging = blockReorder.draggingKey == blockKey
+            Box(Modifier.graphicsLayer { translationY = orderOffset }
+                .zIndex(if (dragging) 1f else 0f)
+                // 编辑态才允许拖动；非编辑态内部组件自己消费触摸，不拦截
+                .then(if (editingLayout) Modifier.pointerInput(blockKey, blockOrder) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { blockReorder.start(blockKey) },
+                        onDragEnd = { blockReorder.finish(false) },
+                        onDragCancel = { blockReorder.finish(true) },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        blockReorder.drag(dragAmount.y)
+                    }
+                } else Modifier)) {
+                when (blockKey) {
+                    GraceWidget.Clock.key -> {
+                        HomeClockHeader(
+                            now = now,
+                            event = event,
+                            onDateClick = onDateClick,
+                            onClockClick = onClockClick,
+                            onLongClick = onWidgetMenu,
+                            onAnchorOffsetChange = { anchorOffsetPx = it },
+                            showClock = true,
+                            clockStyle = clockStyle,
+                            interactive = !editingLayout,
+                            showCalendar = false,
+                            showBattery = false,
+                            weather = null,
+                            modifier = Modifier.fillMaxWidth().onSizeChanged { headerHeightPx = it.height },
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
+                    // 上游同步 1.2.0（S6e）：日程作为独立区块（电池/天气跟随日程，与上游一致）
+                    GraceWidget.Calendar.key -> {
+                        HomeClockHeader(
+                            now = now,
+                            event = event,
+                            onDateClick = onDateClick,
+                            onClockClick = onClockClick,
+                            onLongClick = onWidgetMenu,
+                            showClock = false,
+                            clockPresent = clockEnabled,
+                            clockStyle = clockStyle,
+                            interactive = !editingLayout,
+                            showCalendar = true,
+                            calendarAboveClock = calendarAboveClock,
+                            showBattery = showBatteryPercentage,
+                            weather = weather,
+                            modifier = Modifier.fillMaxWidth().onSizeChanged { calendarHeightPx = it.height },
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
+                    GraceWidget.Media.key -> {
+                        val session = media
+                        if (session != null) {
+                            HomeMediaPlayer(session, onMediaCommand, onDismiss = { id, revision ->
+                                if (id == IdleMediaSessionId) { idleMediaDismissed = true; true }
+                                else onDismissMedia(id, revision).also { if (it) idleMediaDismissed = true }
+                            })
+                            Spacer(Modifier.height(2.dp))
+                        }
+                    }
+                    else -> {
+                        val hosted = hostedWidget
+                        if (hosted != null && blockKey == "widget:${homeLayout.widgetId}") {
+                            HomeWidget(homeLayout, hosted, resolvedWidgetHeight, editingLayout,
+                                enabled = widgetInputEnabled, hapticsEnabled = allowHapticFeedback,
+                                onLongPress = onCustomWidgetMenu)
+                            Spacer(Modifier.height(2.dp))
+                        }
+                    }
+                }
+            }
         }
         items(favorites, key = LauncherApp::key, contentType = { if (it.folderId == null) "app" else "folder" }) { app ->
             val folder = app.folderId?.let { id -> folders.firstOrNull { it.id == id } }
-            if (folder != null) FolderRow(
+            // 上游同步 1.2.0：应用堆（isAppStack）用横向 AppStack 渲染，其余仍是文件夹行
+            if (folder != null && folder.isAppStack) AppStack(
+                stack = folder,
+                apps = stackApps(folder),
+                onLaunch = { item, _ -> onLaunchApp(item) },
+                onDetails = onAppDetails,
+                onEdit = { onEditFolder(folder) },
+                modifier = Modifier.padding(horizontal = LauncherLayout.ContentInset - AppStackInset.dp, vertical = 4.dp),
+            ) else if (folder != null) FolderRow(
                 folder = folder,
                 app = app,
                 onOpen = { onOpenFolder(folder, it) },
@@ -362,6 +462,8 @@ internal fun HomeClockHeader(
     onLongClick: () -> Unit = {},
     onAnchorOffsetChange: (Int) -> Unit = {},
     showClock: Boolean = true,
+    /** 上游同步 1.2.0（S6e）：日程区块独立后，用它表示"时钟区块是否存在"（影响星期行等）。 */
+    clockPresent: Boolean = showClock,
     showCalendar: Boolean = true,
     calendarAboveClock: Boolean = false,
     showBattery: Boolean = true,
@@ -373,7 +475,7 @@ internal fun HomeClockHeader(
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
     val clockText = formatHomeClock(now, DateFormat.is24HourFormat(context), locale)
-    val week = showClock && clockStyle.layout.week
+    val week = clockPresent && clockStyle.layout.week
     // perf5（功耗专项）：日期格式化器 remember 缓存 —— getBestDateTimePattern 内部
     // 走 ICU/资源查询，原实现每次重组重建三个格式化器（时钟每分钟 tick、通知/媒体
     // 变化都会触发本组合体重组）。

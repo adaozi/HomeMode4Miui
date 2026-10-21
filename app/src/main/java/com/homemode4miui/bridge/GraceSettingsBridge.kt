@@ -305,7 +305,18 @@ object GraceSettingsBridge {
         val weatherJson: String? = null,
         /** 已落库标志：false = 宿主引擎不可达（第四模式未挂载），设置页只读。 */
         val ok: Boolean = true,
+        /**
+         * 宿主应用清单（组件 + 展示名 + profile serial）。
+         *
+         * 设置页在【模块 App 进程】自行枚举应用，与宿主桌面进程的可见集不一定一致
+         * （MIUI 对第三方调用方的 LauncherApps/PM 可见性裁剪，装机实锤：抽屉里有的
+         * 应用在"隐藏应用"页找不到）→ 快照回带宿主清单，设置页按 key 补差集。
+         */
+        val appCatalog: List<AppWire> = emptyList(),
     )
+
+    /** 应用清单单项（LauncherApp 跨桥裁剪版：位图/组件对象不可序列化）。 */
+    data class AppWire(val component: String, val label: String, val serial: Long? = null)
 
     /** PrivateSpaceState 跨桥裁剪版（UserHandle 不可序列化，user=null 语义 = 未知）。 */
     data class PrivateSpaceWire(
@@ -324,6 +335,8 @@ object GraceSettingsBridge {
                     .put("placement", f.placement.name)
                     .put("appListAtBottom", f.appListAtBottom)
                     .put("autoHideApps", f.autoHideApps)
+                    // 上游同步 1.2.0：应用堆标记（漏了这句 → 设置页开关永远回弹为关闭）
+                    .put("isAppStack", f.isAppStack)
                     .put("keys", JSONArray(f.appKeys)))
             }
         })
@@ -340,6 +353,12 @@ object GraceSettingsBridge {
             .put("accessible", p.accessible).put("revision", p.revision).put("lockVersion", p.lockVersion) }
             ?: JSONObject.NULL)
         .put("wthr", s.weatherJson ?: JSONObject.NULL)
+        .put("apps", JSONArray().apply {
+            s.appCatalog.forEach { a ->
+                put(JSONObject().put("c", a.component).put("l", a.label)
+                    .put("s", a.serial ?: JSONObject.NULL))
+            }
+        })
         .toString()
 
     fun decodeSnapshot(json: String?): Snapshot? = runCatching {
@@ -356,6 +375,7 @@ object GraceSettingsBridge {
                         placement = FolderPlacement.decode(f.optString("placement")),
                         appListAtBottom = f.optBoolean("appListAtBottom", true),
                         autoHideApps = f.optBoolean("autoHideApps", false),
+                        isAppStack = f.optBoolean("isAppStack", false),
                     )
                 }.getOrNull()
             }
@@ -381,6 +401,18 @@ object GraceSettingsBridge {
                 revision = p.optInt("revision"), lockVersion = p.optInt("lockVersion"),
             ) },
             weatherJson = v.optString("wthr").takeIf(String::isNotBlank),
+            appCatalog = v.optJSONArray("apps")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i ->
+                    runCatching {
+                        val a = arr.getJSONObject(i)
+                        AppWire(
+                            component = a.getString("c"),
+                            label = a.optString("l"),
+                            serial = a.opt("s") as? Long,
+                        ).takeIf { it.component.isNotBlank() }
+                    }.getOrNull()
+                }
+            } ?: emptyList(),
         )
     }.getOrNull()
 

@@ -51,6 +51,8 @@ data class LauncherActions(
     val setFolderAutoHide: (String, Boolean) -> Unit = { _, _ -> },
     val saveFolder: (LauncherFolder) -> Unit = {},
     val updateFolder: (String, String?, FolderPlacement?, Boolean?) -> Unit = { _, _, _, _ -> },
+    /** 上游同步 1.2.0：把文件夹切换为横向应用堆（App Stack）或改回普通文件夹。 */
+    val setFolderAppStack: (String, Boolean) -> Unit = { _, _ -> },
     val setFolderFavorites: suspend (Map<String, Boolean>) -> Boolean = { false },
     val deleteFolder: (String) -> Unit = {},
     val shortcuts: suspend (LauncherApp) -> ShortcutResult = { ShortcutResult(ShortcutStatus.DefaultLauncherRequired) },

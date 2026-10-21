@@ -107,7 +107,7 @@ internal fun GraceButton(settings: GraceButtonSettings, editing: Boolean, enable
                 settings.animationsEnabled + " tap=" + settings.tap.active +
                 " longPress=" + settings.longPress.active + " doubleTap=" + settings.doubleTap.active)
     }
-    val extraActions = if (editing || !enabled) emptyList() else GraceButtonGesture.entries
+    val extraActions = if (editing || !enabled) emptyList() else GraceButtonGesture.buttonGestures
         .filter { it != GraceButtonGesture.Tap && it != GraceButtonGesture.LongPress && settings.target(it).active }
         .map { gesture -> CustomAccessibilityAction(stringResource(gesture.labelRes)) { activate(gesture); true } }
 
@@ -222,6 +222,8 @@ internal val GraceButtonGesture.labelRes: Int get() = when (this) {
     GraceButtonGesture.SwipeDown -> R.string.grace_button_swipe_down
     GraceButtonGesture.SwipeLeft -> R.string.grace_button_swipe_left
     GraceButtonGesture.SwipeRight -> R.string.grace_button_swipe_right
+    // 上游同步 1.2.0：A-Z 字母条双击（不在按钮手势组内，仅首页手势设置页展示）
+    GraceButtonGesture.AlphabetDoubleTap -> R.string.home_gesture_alphabet_double_tap
 }
 
 @Composable

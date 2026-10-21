@@ -39,7 +39,9 @@ import com.galaxyrio.gracelauncher.ui.components.labelRes
 internal fun GraceButtonSettingsScreen(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit,
     home: Boolean = false, onAppearance: () -> Unit = {}, onChooseGesture: (GraceButtonGesture) -> Unit) {
     val settings = uiState.settings.gestureSettings(home)
-    val gestures = if (home) listOf(GraceButtonGesture.SwipeUp, GraceButtonGesture.SwipeDown, GraceButtonGesture.DoubleTap) else GraceButtonGesture.entries
+    // 上游同步 1.2.0：首页手势组新增 A-Z 双击；按钮手势组用 buttonGestures 排除它
+    val gestures = if (home) listOf(GraceButtonGesture.SwipeUp, GraceButtonGesture.SwipeDown,
+        GraceButtonGesture.DoubleTap, GraceButtonGesture.AlphabetDoubleTap) else GraceButtonGesture.buttonGestures
     SettingsScaffold(stringResource(if (home) R.string.settings_gestures else R.string.settings_grace_button),
         if (home) "settings_home_gestures" else "settings_grace_button_page", onBack,
         actions = { if (!home) SettingsAppearanceAction(onAppearance) }) { padding ->
@@ -156,6 +158,8 @@ private val GraceButtonAction.labelRes: Int get() = when (this) {
     GraceButtonAction.Website -> R.string.grace_button_open_website
     GraceButtonAction.LockScreen -> R.string.grace_button_lock_screen
     GraceButtonAction.AppList -> R.string.grace_button_open_app_list
+    // 上游同步 1.2.0：Widget Screen（本模块由原生负一屏承载，见 MinusOneEntry）
+    GraceButtonAction.WidgetScreen -> R.string.widget_screen_open
     GraceButtonAction.Notifications -> R.string.grace_button_notifications
     GraceButtonAction.QuickSettings -> R.string.grace_button_quick_settings
     GraceButtonAction.Assistant -> R.string.grace_button_assistant

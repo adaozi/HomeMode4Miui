@@ -49,6 +49,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -223,11 +225,14 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     androidx.compose.runtime.LaunchedEffect(searchOpen, drawerOpen) {
         if (!searchOpen && !drawerOpen) buttonState.clearInstantEntrance()
     }
-    val drawerAlpha by animateFloatAsState(
-        targetValue = if (drawerOpen) 1f else 0f,
-        animationSpec = tween(110),
-        label = "appListFade",
-    )
+    // 上游同步 1.2.0（S7）：主页/抽屉切换改为「抬升 + 淡出」（260ms FastOutSlowIn），
+    // 取代原来的纯 alpha 交叉淡入（tween 110）。HomeListMotion 的 x = 透明度、y = 抬升量。
+    val homeListMotion = remember { com.galaxyrio.gracelauncher.ui.components.HomeListMotion(drawerOpen) }
+    androidx.compose.runtime.LaunchedEffect(drawerOpen) { homeListMotion.animateTo(drawerOpen) }
+    val drawerAlpha = homeListMotion.drawer.value.x
+    val homeLift = homeListMotion.home.value.y
+    val drawerLift = homeListMotion.drawer.value.y
+    val pageLiftDistance = with(androidx.compose.ui.platform.LocalDensity.current) { 24.dp.toPx() }
     val widgetHost = rememberWidgetHost()
     val widgetPickerBusy by viewModel.widgetPickerBusy.collectAsState()
     val widgetProviders by viewModel.widgetProviders.collectAsState()
@@ -495,6 +500,18 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 drawerState.requestScrollToItem(0)
                 drawerOpen = true
             }
+            com.galaxyrio.gracelauncher.data.GraceButtonAction.WidgetScreen -> {
+                // 上游 1.2.0「Widget Screen」在本模块的落地方式（User 决策 2026-10-21）：
+                // 不自绘网格页，直接唤出 MIUI 原生负一屏（personalassistant overlay），
+                // 小部件由负一屏自身按传统网格承载。唤出链见 hook/MinusOneEntry：
+                // 状态机 goToState(FEED_STATE) 主路径 + LauncherClient.showOverlay 兜底。
+                val host = hostActivity ?: com.homemode4miui.MainHook.launcher()
+                if (!com.homemode4miui.hook.MinusOneEntry.open(host)) {
+                    android.widget.Toast.makeText(context, context.getString(
+                        com.homemode4miui.R.string.widget_screen_unavailable),
+                        android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
             com.galaxyrio.gracelauncher.data.GraceButtonAction.Agenda -> {
                 viewModel.refreshWeather(); viewModel.refreshAgenda()
                 overlay = LauncherOverlay.Agenda
@@ -603,8 +620,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 "toggle_favorite",
                 if (app.key in favoriteKeys) removeFromFavoritesLabel else addToFavoritesLabel,
             ) { viewModel.toggleFavorite(app) })
-            // 上游同步 v1.1.9：编辑收藏直达（带应用打开，FavoritesScreen 自动选入）
-            add(PopupEntry("edit_favorites", editFavoritesLabel) {
+            // 上游同步 v1.1.9：编辑收藏直达（带应用打开，FavoritesScreen 自动选入）。
+            // dismissFirst：先关弹层再切 overlay —— 否则 onDismiss 会把刚设置的
+            // Favorites 再清成 null（右滑面板"编辑收藏"点了没反应的根因）。
+            add(PopupEntry("edit_favorites", editFavoritesLabel, dismissFirst = true) {
                 overlay = com.galaxyrio.gracelauncher.ui.overlays.LauncherOverlay.Favorites(initialAppKey = app.key)
             })
             // P6（B6.3）：有通知的应用附加打开/清除行（命令经桥到模块进程执行）
@@ -622,7 +641,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // P5：顶层 provide LocalAppTransitions（对齐原版 MainActivity.setContent）——
     // launcherAnimationTarget 读此 local 注册 LauncherIconTarget，缺省 null 时
     // 图标动画目标整体不生效（降级为无 bounds 启动）。
-    CompositionLocalProvider(LocalAppTransitions provides appTransitions) {
+    CompositionLocalProvider(LocalAppTransitions provides appTransitions,
+        // 上游同步 1.2.0：弹层滑动灵敏度（Lab 可调距离/角度）下发到列表行
+        com.galaxyrio.gracelauncher.ui.components.LocalPopupGestureSettings
+            provides state.settings.shortcutsFolders) {
     // ---- dimfix：壁纸效果层上提为全屏兄弟层（对齐原版 LauncherScreen.kt:730-734 层级）----
     // 原版 wallpaperTint 遮罩与 WallpaperBlur 挂在列表容器（BoxWithConstraints）之外，
     // 不吃容器的 safeDrawing insets padding —— 壁纸效果覆盖全屏，含状态栏/导航栏/
@@ -691,6 +713,13 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 onAppShortcuts = { app, bounds -> overlay = LauncherOverlay.Shortcuts(app, bounds) },
                 // folders 阶段：收藏区文件夹项（原版 HomeScreen.kt:214-224）
                 folders = state.folders,
+                // 上游同步 1.2.0（S6d）：编辑态拖动区块排序 → 落 homeOrder
+                onReorderHome = { order -> viewModel.updateHomeOrder(order) },
+                stackApps = { folder ->
+                    (state.popups[folder.key]?.map { it.key } ?: folder.appKeys)
+                        .mapNotNull { key -> state.apps.firstOrNull { it.key == key } }
+                        .filter { it.folderId == null }
+                },
                 onOpenFolder = { folder, bounds ->
                     // 上游同步 v1.1.8 S8a：工作资料文件夹点击 = 抽屉内展开/收起（非弹层）
                     if (folder.id == com.galaxyrio.gracelauncher.data.WorkProfileFolderId) {
@@ -729,8 +758,27 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 events = state.events,
                 weather = state.weather.snapshot?.current.takeIf { weatherReady },
                 modifier = Modifier.retainedPage(visible = !drawerOpen && !searchOpen && !pickerOpen)
-                    .graphicsLayer { alpha = 1f - drawerAlpha }
-                    .statusBarContentFade(),
+                    .graphicsLayer { alpha = 1f - drawerAlpha; translationY = homeLift * pageLiftDistance }
+                    .statusBarContentFade()
+                    // 上游同步 1.2.0：主页空白区横滑进入 Widget Screen。
+                    // 本模块由原生负一屏承载，方向遵循负一屏自身习惯（右滑拉出）：
+                    // 命中阈值 220dp，且只在首页空闲态（无抽屉/搜索/弹层/编辑/按钮过渡）生效。
+                    .pointerInput(drawerOpen, searchOpen, pickerOpen, overlay, editingHome, buttonState.active) {
+                        if (drawerOpen || searchOpen || pickerOpen || overlay != null ||
+                            editingHome || buttonState.active) return@pointerInput
+                        var accumulated = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { accumulated = 0f },                            onHorizontalDrag = { _, dragAmount -> accumulated += dragAmount },
+                            onDragCancel = { accumulated = 0f },
+                            onDragEnd = {
+                                if (accumulated > 220.dp.toPx()) {
+                                    val host = hostActivity ?: com.homemode4miui.MainHook.launcher()
+                                    com.homemode4miui.hook.MinusOneEntry.open(host)
+                                }
+                                accumulated = 0f
+                            },
+                        )
+                    },
             )
         }
 
@@ -758,13 +806,30 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 }
             },
             onEditFolder = { openGraceSettingsInModule(context, "folders") },
+            // 上游同步 1.2.0：抽屉内应用堆渲染（isAppStack 的文件夹不再走 FolderRow）
+            appStackContent = { folder ->
+                com.galaxyrio.gracelauncher.ui.components.AppStack(
+                    stack = folder,
+                    apps = (state.popups[folder.key]?.map { it.key } ?: folder.appKeys)
+                        .mapNotNull { key -> state.apps.firstOrNull { it.key == key } }
+                        .filter { it.folderId == null },
+                    onLaunch = { app, bounds -> launchApp(app, bounds) },
+                    onDetails = { app -> viewModel.openAppDetails(app) },
+                    onEdit = { openGraceSettingsInModule(context, "folders") },
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            },
             // P6（B6.3）：抽屉行内通知预览（原版 AppDrawerScreen.kt:152 同构）
             notifications = state.notifications,
             // 上游同步 v1.1.8 S8a：工作资料（文件夹展开 + 空态设置入口）
             workExpanded = workExpanded && state.workFolder != null,
             onWorkProfileSettings = { openGraceSettingsInModule(context, "") },
-            modifier = Modifier.retainedPage(visible = drawerOpen)
-                .graphicsLayer { alpha = drawerAlpha }.statusBarContentFade(),
+            // dimfix2：搜索打开时抽屉必须让位（上游 LauncherScreen.kt:998 容器级
+            // retainedPage(visible = !fullScreen) 语义）。原实现只挡了 drawerOpen，
+            // 搜索浮层底下整张应用列表连字母条一起透出（装机实锤：抽屉启动搜索与
+            // 首页启动搜索背景完全不同），抽屉页与首页页的可见性条件必须同构。
+            modifier = Modifier.retainedPage(visible = drawerOpen && !searchOpen && !pickerOpen)
+                .graphicsLayer { alpha = drawerAlpha; translationY = drawerLift * pageLiftDistance }.statusBarContentFade(),
         )
 
         // ---- 字母索引 rail（P2）：常驻右侧，scrub 即跳；hotfix3 接 hideAlphabet ----
@@ -790,6 +855,12 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             letters = model.letters,
             selectedLetter = if (drawerOpen) selectedLetter else null,
             height = railHeight,
+            // 上游同步 1.2.0：字母条定位/触摸面拆成两个独立参数 ——
+            // topOffset 只负责字形与指示器的视觉偏移，touchHeight 决定 scrub 触摸面高度。
+            // 传 maxHeight（整屏）即 A-Z 手势触发区域扩大到屏幕上下边缘（原先只有字形段可拖），
+            // 字形位置不变；配套移除外层 Modifier.offset(y = railTop)。
+            topOffset = railTop,
+            touchHeight = maxHeight,
             onLetterSelected = { letter ->
                 if (letter == null) {
                     drawerOpen = false
@@ -803,13 +874,26 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                     drawerOpen = true
                 }
             },
-            modifier = Modifier.align(Alignment.TopEnd).offset(y = railTop)
+            modifier = Modifier.align(Alignment.TopEnd)
                 .graphicsLayer { alpha = 1f - searchAlpha },
             onScrubFinished = {
                 // The list is already positioned. Only remove the temporary mask;
                 // scrolling here would cause a jump between the held and released views.
                 selectedLetter = null
             },
+            // 上游同步 1.2.0：A-Z 字母条双击动作（默认锁屏、默认关闭）。
+            // 双击识别在 scrub 事件流内完成（组件内实现），这里只决定是否消费 + 执行动作：
+            // 首页空闲态（无弹层/无按钮过渡/搜索未展开）才受理，避免误触打断手势。
+            doubleTapIntervalMs = state.settings.homeGestures.doubleTapIntervalMs,
+            onDoubleTap = if (state.settings.homeGestures.enabled &&
+                state.settings.homeGestures.alphabetDoubleTap.active &&
+                overlay == null && !buttonState.active && searchAlpha < 1f && !editingHome) { position ->
+                val radius = homeGestureRadius
+                val origin = com.galaxyrio.gracelauncher.ui.components.GraceButtonOrigin(
+                    Rect(position.x - radius, position.y - radius,
+                        position.x + radius, position.y + radius))
+                performGestureAction(state.settings.homeGestures.alphabetDoubleTap, origin, fromButton = false)
+            } else null,
         )
 
         // ---- 搜索浮层（P2）：FAB 入口 ----
@@ -818,9 +902,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 // 上游同步 v1.1.8 S3：搜索页下拉关闭与桌面共享 Lab 灵敏度
                 swipeSensitivity = state.settings.homeGestures.swipeSensitivity,
                 // 上游同步 v1.1.9（LauncherScreen 语义对齐）：搜索默认排除 effective 隐藏
-                //（手动隐藏 ∪ autoHideApps 文件夹成员）；"搜索包含隐藏应用"开关放行
-                apps = if (state.settings.searchSettings.hiddenApps) state.apps
-                       else state.apps.filter { it.folderId == null && it.key !in state.effectiveHiddenAppKeys },
+                //（手动隐藏 ∪ autoHideApps 文件夹成员）；"搜索包含隐藏应用"开关放行。
+                // appsWithShortcuts：showInAppList 的已保存/pin 快捷方式与抽屉同源
+                apps = if (state.settings.searchSettings.hiddenApps) state.appsWithShortcuts
+                       else state.appsWithShortcuts.filter { it.folderId == null && it.key !in state.effectiveHiddenAppKeys },
                 recentAppKeys = state.settings.searchSettings.recentAppKeys,
                 fuzzy = state.settings.searchSettings.fuzzy,
                 suggestions = state.settings.searchSettings.suggestions,
@@ -1011,6 +1096,10 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                         apps = state.apps + state.savedShortcutApps,
                         // hotfix folders2：弹层 widget 项（原版 ShortcutPopup entry.widget 分支）
                         widgets = state.folderWidgets[folder.id].orEmpty(),
+                        // 上游同步 1.2.0（S5b）：弹层 widget 尺寸/缩放/全宽回写
+                        onUpdateWidget = { key, layout, save ->
+                            viewModel.updatePopupWidget(key, layout, save)
+                        },
                         anchor = folderOverlay.anchor,
                         reveal = folderOverlay.reveal,
                         onLaunchApp = { app, bounds ->

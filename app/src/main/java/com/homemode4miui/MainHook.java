@@ -84,6 +84,15 @@ public class MainHook implements IXposedHookLoadPackage {
 
     /** 当前 Launcher 实例（setupViews 时缓存，供广播切换用） */
     private static volatile Activity sLauncher;
+
+    /**
+     * 宿主 Launcher 实例（Compose 层同进程直接调用，null = 桌面尚未创建）。
+     * 用于 Widget Screen 入口（空白区横滑 / Grace Button 手势）唤出原生负一屏，
+     * 见 {@link com.homemode4miui.hook.MinusOneEntry}。
+     */
+    public static Activity launcher() {
+        return sLauncher;
+    }
     private static boolean sReceiverRegistered;
     /** 裁决锚点是否已安装（未安装时 isCustomModeActive 回退为直读 SP 标志） */
     private static volatile boolean sAdjudicationInstalled;

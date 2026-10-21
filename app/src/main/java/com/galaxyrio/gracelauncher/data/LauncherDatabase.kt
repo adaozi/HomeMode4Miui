@@ -84,6 +84,8 @@ data class LauncherFolderEntity(
     val placement: String,
     @ColumnInfo(defaultValue = "1") val appListAtBottom: Boolean = true,
     @ColumnInfo(defaultValue = "0") val autoHideApps: Boolean = false,
+    /** 上游同步 1.2.0：横向应用堆标记（与文件夹共用成员/位置存储）。 */
+    @ColumnInfo(defaultValue = "0") val isAppStack: Boolean = false,
 )
 
 @Dao
@@ -132,7 +134,7 @@ abstract class LauncherSettingsDao {
     entities = [LauncherSettingsEntity::class, HiddenAppEntity::class,
         LauncherFolderEntity::class, ItemIconEntity::class,
         SavedShortcutEntity::class, AppPopupEntity::class],
-    version = 22,
+    version = 23,
     exportSchema = true,
 )
 abstract class LauncherDatabase : RoomDatabase() {
@@ -300,6 +302,18 @@ abstract class LauncherDatabase : RoomDatabase() {
         }
 
         /**
+         * 上游同步 1.2.0：App Stack 标记列。
+         * 上游 22→23 加的是 widgetScreenJson、23→24 才加 isAppStack；本模块不移植
+         * Widget Screen 数据（入口复用原生负一屏），故直接一步到 23，只加 isAppStack，
+         * 避免多一个永不使用的 settings 列。
+         */
+        val Migration22To23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE folders ADD COLUMN isAppStack INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
          * 宿主适配：库文件落 databases/custom/grace_launcher.db（对齐底座独立 DB 目录惯例）。
          * hotfix1（装机 2026-10-08 实锤）：getDatabasePath("custom/x.db") 走 ContextImpl
          * makeFilename —— 无条件拒绝带路径分隔符的名字，直接 IllegalArgumentException
@@ -327,7 +341,7 @@ abstract class LauncherDatabase : RoomDatabase() {
                 // Room 降级无迁移路径 → snapshot build 全挂（第四桌面应用/设置装载失败）。
                 // 仅降级时销毁重建（升级仍走迁移链），用户数据以桌面重置为代价换取功能恢复。
                 .fallbackToDestructiveMigrationOnDowngrade()
-                .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22).build().also { instance = it }
+                .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22, Migration22To23).build().also { instance = it }
         }
     }
 }

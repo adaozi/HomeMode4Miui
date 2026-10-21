@@ -61,6 +61,12 @@ class GraceSettingsHostEngine(
     private val weatherJson: () -> String? = { null },
     /** B6.2：设置页「刷新天气」→ 宿主引擎重读（新数据经 onState → VM 推快照回带）。 */
     private val onWeatherRefresh: () -> Unit = {},
+    /**
+     * 宿主应用清单（组件/展示名/serial）→ 随快照回带设置页。
+     * 设置页在模块进程自行枚举，可见集可能少于宿主（MIUI 裁剪第三方调用方），
+     * 隐藏应用/文件夹选应用等入口按本清单补差集，保证与抽屉同源。
+     */
+    private val appCatalog: () -> List<GraceSettingsBridge.AppWire> = { emptyList() },
 ) {
     private val database by lazy { runCatching { LauncherDatabase.getInstance(context) }.getOrNull() }
     private val settingsRepository by lazy { database?.let { LauncherSettingsRepository(it) } }
@@ -238,6 +244,7 @@ class GraceSettingsHostEngine(
                     privateSpace = privateSpace?.state?.value?.let {
                         GraceSettingsBridge.PrivateSpaceWire(it.supported, it.serial, it.locked, it.accessible, it.revision, it.lockVersion)
                     },
+                    appCatalog = runCatching { appCatalog() }.getOrDefault(emptyList()),
                 )
             }.onSuccess { sendSnapshot(it) }
                 .onFailure { ModLog.e("GraceSettingsHostEngine: snapshot build failed", it); sendSnapshot(GraceSettingsBridge.Snapshot(ok = false)) }
@@ -318,6 +325,8 @@ class GraceSettingsHostEngine(
             placement = FolderPlacement.decode(v.optString("placement")),
             appListAtBottom = v.optBoolean("appListAtBottom", true),
             autoHideApps = v.optBoolean("autoHideApps", false),
+            // 上游同步 1.2.0：应用堆标记（设置页 → 宿主写入 folders.isAppStack）
+            isAppStack = v.optBoolean("isAppStack", false),
         )
     }.getOrNull()
 

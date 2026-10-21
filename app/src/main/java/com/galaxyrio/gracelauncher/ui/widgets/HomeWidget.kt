@@ -21,7 +21,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -37,6 +41,7 @@ import com.galaxyrio.gracelauncher.platform.HomeWidgetHost
 import com.galaxyrio.gracelauncher.platform.HomeWidgetHostView
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 internal data class HostedWidget(
     val host: HomeWidgetHost,
@@ -104,13 +109,36 @@ internal fun rememberHostedWidget(layout: HomeLayout): HostedWidget {
 internal fun HomeWidget(
     layout: HomeLayout, widget: HostedWidget, height: Int, editing: Boolean,
     enabled: Boolean, hapticsEnabled: Boolean, onLongPress: () -> Unit,
+    // 上游同步 1.2.0（widget 尺寸/拖拽）：不传则完全保持旧行为（长按弹菜单）
+    onDrag: ((Float, Float) -> Unit)? = null, onDragEnd: ((Boolean) -> Unit)? = null,
+    onDragStart: ((Float, Float) -> Unit)? = null,
+    contentScale: Float = 1f,
+    removeHorizontalPadding: Boolean = false,
 ) {
     val density = LocalDensity.current.density
     val latestLongPress by rememberUpdatedState(onLongPress)
+    val latestDragStart by rememberUpdatedState(onDragStart)
+    val latestDrag = rememberUpdatedState(onDrag)
+    val latestDragEnd by rememberUpdatedState(onDragEnd)
     var size by remember { mutableStateOf(IntSize.Zero) }
     var view by remember(layout.widgetId) { mutableStateOf<HomeWidgetHostView?>(null) }
     var creationFailed by remember(layout.widgetId, widget.info) { mutableStateOf(false) }
-    val modifier = Modifier.fillMaxWidth().height(height.dp).onSizeChanged { size = it }
+    val scale = contentScale.coerceIn(.5f, 1.5f)
+    // 槽位尺寸不变：RemoteViews 按逆缩放测量后整体缩放绘制（含触摸坐标），
+    // scale=1 时与旧的 fillMaxWidth+height 等价。
+    val modifier = Modifier.fillMaxWidth().height(height.dp).clipToBounds()
+        .layout { measurable, constraints ->
+            val width = constraints.maxWidth
+            val outerHeight = constraints.maxHeight
+            val child = measurable.measure(Constraints.fixed(
+                (width / scale).roundToInt().coerceAtLeast(1),
+                (outerHeight / scale).roundToInt().coerceAtLeast(1)))
+            layout(width, outerHeight) {
+                child.placeWithLayer(0, 0) {
+                    scaleX = scale; scaleY = scale; transformOrigin = TransformOrigin(0f, 0f)
+                }
+            }
+        }.onSizeChanged { size = it }
     if (widget.info == null || creationFailed) {
         Surface(modifier.combinedClickable(enabled = enabled && !editing, onClick = onLongPress, onLongClick = onLongPress),
             shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -127,10 +155,26 @@ internal fun HomeWidget(
             },
             update = {
                 it.onWidgetLongPress = { latestLongPress() }
+                // 只有调用方给了拖拽槽才接管长按后的触摸流；否则保持"长按弹菜单"
+                val dragAware = onDrag != null
+                it.onWidgetDragStart = if (dragAware) { x, y -> latestDragStart?.invoke(x, y) } else null
+                it.onWidgetDrag = if (dragAware) { dx, dy -> latestDrag.value?.invoke(dx, dy) } else null
+                it.onWidgetDragEnd = if (dragAware) { cancelled -> latestDragEnd?.invoke(cancelled) } else null
                 it.interactionEnabled = enabled && !editing
                 it.hapticsEnabled = hapticsEnabled
+                // 上游同步 1.2.0：全宽呈现时去掉 providers 默认左右内边距
+                val padding = AppWidgetHostView.getDefaultPaddingForWidget(it.context, widget.info.provider, null)
+                if (removeHorizontalPadding) { padding.left = 0; padding.right = 0 }
+                if (it.paddingLeft != padding.left || it.paddingTop != padding.top ||
+                    it.paddingRight != padding.right || it.paddingBottom != padding.bottom) {
+                    it.setPadding(padding.left, padding.top, padding.right, padding.bottom)
+                }
             },
-            onRelease = { it.onWidgetLongPress = null; if (view === it) view = null },
+            onRelease = {
+                it.onWidgetLongPress = null
+                it.onWidgetDragStart = null; it.onWidgetDrag = null; it.onWidgetDragEnd = null
+                if (view === it) view = null
+            },
         )
     }
     LaunchedEffect(view, size, editing, density) {

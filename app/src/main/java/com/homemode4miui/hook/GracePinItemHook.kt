@@ -33,6 +33,12 @@ object GracePinItemHook {
     /** LauncherApps.PinItemRequest.REQUEST_TYPE_SHORTCUT = 0（APPWIDGET = 1）。 */
     private const val TYPE_SHORTCUT = 0
     private const val TYPE_APPWIDGET = 1
+    /**
+     * 框架层 android.content.pm.LauncherApps$PinItemRequest 的类型常量与 MIUI compat 不同：
+     * REQUEST_TYPE_SHORTCUT = 1 / REQUEST_TYPE_APPWIDGET = 2（AOSP 定义）。
+     * 用 compat 的 0 去比对框架值会永久 skip（装机实测：框架兜底 hook 装了但一条都没落库）。
+     */
+    private const val FW_TYPE_SHORTCUT = 1
 
     fun hook(lpp: XC_LoadPackage.LoadPackageParam, cl: ClassLoader) {
         val compat = XposedHelpers.findClass("com.miui.launcher.common.PinItemRequestCompat", cl)
@@ -124,6 +130,35 @@ object GracePinItemHook {
             }
         })
         XposedBridge.log("[$TAG] hooked PinItemRequestCompat.accept (host ${lpp.packageName})")
+
+        // 兜底（装机实锤：pin 后 saved_shortcuts 无行 → 抽屉看不到快捷方式）：
+        // MIUI 在部分版本/部分 request 类型下不经 PinItemRequestCompat，直接调框架
+        // LauncherApps.PinItemRequest.accept()。框架层再挂一次，两链都覆盖；
+        // 同一 itemKey upsert 幂等，双触发无副作用。
+        try {
+            val requestClass = XposedHelpers.findClass("android.content.pm.LauncherApps\$PinItemRequest", cl)
+            XposedBridge.hookAllMethods(requestClass, "accept", object : de.robv.android.xposed.XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    try {
+                        if ((param.result as? Boolean) != true) return
+                        val request = param.thisObject ?: return
+                        val type = runCatching { XposedHelpers.callMethod(request, "getType") as? Int }
+                            .getOrNull()
+                            ?: runCatching { XposedHelpers.callMethod(request, "getRequestType") as? Int }.getOrNull()
+                            ?: return
+                        XposedBridge.log("[$TAG] framework accept ok, type=$type")
+                        if (type != FW_TYPE_SHORTCUT) return
+                        val info = XposedHelpers.callMethod(request, "getShortcutInfo") ?: return
+                        persist(info)
+                    } catch (t: Throwable) {
+                        ModLog.e("GracePinItemHook framework accept afterHook failed", t)
+                    }
+                }
+            })
+            XposedBridge.log("[$TAG] hooked LauncherApps\$PinItemRequest.accept (fallback)")
+        } catch (t: Throwable) {
+            XposedBridge.log("[$TAG] framework PinItemRequest hook skipped: $t")
+        }
     }
 
     /** 宿主 Application（hidden 类反射；hook 回调线程安全）。 */
@@ -169,7 +204,7 @@ object GracePinItemHook {
                 )
                 val database = com.galaxyrio.gracelauncher.data.LauncherDatabase.getInstance(context)
                 database.itemsDao().saveShortcut(entity)
-                XposedBridge.log("[$TAG] pinned shortcut saved: $itemKey ($label)")
+                XposedBridge.log("[$TAG] pinned shortcut saved: $itemKey label=$label activity=$activity")
             }
         }
     }

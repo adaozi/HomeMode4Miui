@@ -125,6 +125,13 @@ data class GraceHomeUiState(
     val folderWidgets: Map<String, List<com.galaxyrio.gracelauncher.data.HomeLayout>> = emptyMap(),
     /** hotfix folders2：已保存快捷方式（saved_shortcuts 表 → LauncherApp，文件夹成员解析用）。 */
     val savedShortcutApps: List<LauncherApp> = emptyList(),
+    /**
+     * 上游 v1.1.9（LauncherViewModel.shownShortcutKeys 逐字）：saved_shortcuts 里
+     * showInAppList = true 的项要并入【主应用列表】（抽屉/搜索），普通"只进弹层"的
+     * 快捷方式(showInAppList=false)仍只在右滑面板出现。缺失此项 = 第三方应用
+     * "固定到主屏幕"的 pin 快捷方式桌面上有、应用列表里查不到（装机实锤）。
+     */
+    val shownShortcutKeys: Set<String> = emptySet(),
     /** 上游 LauncherUiState.folderApps 同构：装饰后的文件夹图标项（key = folder id）。
      *  图标设计器（FolderEditor → IconDesigner）对文件夹的产出存 item_icons
      *  （key "folder:<id>"），经 ItemIconStore.apply 渲染成位图 —— 主页/抽屉文件夹行消费。 */
@@ -184,10 +191,33 @@ data class GraceHomeUiState(
      * isLoadingApps 空化会让安装/卸载刷新期整列表消失（装机实锤），去掉 —— 刷新期
      * 旧列表保持显示。appLoadFailed 保留：加载失败且无旧数据时空列表即失败态。
      */
+    /**
+     * showInAppList 的已保存快捷方式（pin 到桌面的第三方快捷方式并入主列表）。
+     * 图标：saved_shortcuts 不存位图，用所属应用图标顶替（上游 decorate 同语义）。
+     */
+    val shownShortcutApps: List<LauncherApp>
+        get() {
+            if (shownShortcutKeys.isEmpty() || savedShortcutApps.isEmpty()) return emptyList()
+            return savedShortcutApps.filter { it.key in shownShortcutKeys }.map { entry ->
+                val owner = apps.firstOrNull { it.componentName == entry.componentName }
+                    ?: apps.firstOrNull { it.packageName == entry.packageName }
+                if (entry.icon == null && owner?.icon != null) entry.copy(icon = owner.icon) else entry
+            }
+        }
+
+    /** 抽屉/搜索同源列表：真实应用 + showInAppList 快捷方式（按同一 LauncherAppOrder 归位）。 */
+    val appsWithShortcuts: List<LauncherApp>
+        get() {
+            if (shownShortcutKeys.isEmpty()) return apps
+            val extra = shownShortcutApps.filterNot { entry -> apps.any { it.key == entry.key } }
+            return if (extra.isEmpty()) apps
+            else (apps + extra).sortedWith(com.galaxyrio.gracelauncher.data.LauncherAppOrder)
+        }
+
     val appListApps: List<LauncherApp>
         get() = if (appLoadFailed) emptyList()
         // 上游同步 v1.1.9：手动隐藏表 + autoHideApps 文件夹成员派生集合求并集
-        else apps.filterNot { it.key in effectiveHiddenAppKeys }
+        else appsWithShortcuts.filterNot { it.key in effectiveHiddenAppKeys }
             // 上游同步 v1.1.8 S8a：工作资料应用从主列表收编进独立文件夹（仅 managed profile，
             // MIUI 双开/clone 永不进入——见 AppRepository.workProfiles 严格过滤）
             .let { list -> if (workAppsOrganized) list.filterNot { it.isWorkProfile } else list }
@@ -232,7 +262,16 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 val w = _uiState.value.weather
                 if (w.status == WeatherStatus.Disabled) null else GraceBridge.encodeWeatherWire(w)
             },
-            onWeatherRefresh = { weatherHostEngine.refresh("settings") })
+            onWeatherRefresh = { weatherHostEngine.refresh("settings") },
+            appCatalog = {
+                _uiState.value.apps.map { app ->
+                    com.homemode4miui.bridge.GraceSettingsBridge.AppWire(
+                        component = app.componentName.flattenToString(),
+                        label = app.label,
+                        serial = app.userSerial,
+                    )
+                }
+            })
     }
     /**
      * B6.2 天气宿主引擎：小米天气 provider 白名单放行 com.miui.home、拒绝模块
@@ -451,6 +490,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                             appListAtBottom = entry.appListAtBottom,
                             // 上游同步 v1.1.9：文件夹成员派生隐藏
                             autoHideApps = entry.autoHideApps,
+                            // 上游同步 1.2.0：应用堆（主页 AppStack 渲染分支读这个字段）
+                            isAppStack = entry.isAppStack,
                         )
                     }
                     Triple(folders, widgets, contents)
@@ -535,18 +576,36 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         savedShortcutsJob = viewModelScope.launch {
             try {
                 LauncherDatabase.getInstance(application).itemsDao().shortcuts().collect { rows ->
-                    val apps = rows.mapNotNull { row ->
+                    // 落库行可能没有 activity（pin 请求里 ShortcutInfo.getActivity() 常为 null，
+                    // e.g. 应用自发布的动态快捷方式）：不能整行丢弃，否则 pin 快捷方式永远
+                    // 进不了列表（装机实锤）。activity 缺失时用 packageName 占位，启动走
+                    // LauncherApps.startShortcut(pkg, id) 本就不需要 activity。
+                    val built = rows.mapNotNull { row ->
                         val activity = row.activity.takeIf { it.isNotBlank() }
                             ?.let(android.content.ComponentName::unflattenFromString)
+                        val component = activity
+                            ?: row.packageName.takeIf { it.isNotBlank() }
+                                ?.let { android.content.ComponentName(it, "") }
                             ?: return@mapNotNull null
                         val shortcut = LauncherShortcut(
                             id = row.shortcutId, packageName = row.packageName, label = row.label,
                             icon = null, activity = activity,
                         )
-                        LauncherApp(componentName = activity, label = row.label.ifBlank { row.shortcutId },
-                            icon = null, shortcut = shortcut)
+                        LauncherApp(componentName = component, label = row.label.ifBlank { row.shortcutId },
+                            icon = null, shortcut = shortcut) to row.showInAppList
                     }
-                    _uiState.update { it.copy(savedShortcutApps = apps) }
+                    com.homemode4miui.util.ModLog.i(
+                        "savedShortcuts: rows=" + rows.size + " built=" + built.size +
+                        " shown=" + built.count { it.second } +
+                        " keys=" + built.filter { it.second }.map { it.first.key })
+                    _uiState.update {
+                        it.copy(
+                            savedShortcutApps = built.map { entry -> entry.first },
+                            // showInAppList=true（pin 到桌面的快捷方式）→ 并入抽屉/搜索主列表
+                            shownShortcutKeys = built.filter { entry -> entry.second }
+                                .map { entry -> entry.first.key }.toSet(),
+                        )
+                    }
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
@@ -558,7 +617,58 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         // （本进程直读 provider，不再向模块进程请求）
     }
 
+    /**
+     * 补齐"桌面上的快捷方式"：把系统层面已 pin 的快捷方式同步进 saved_shortcuts
+     * （showInAppList = true → 抽屉/搜索可见）。
+     *
+     * 为什么不能只靠 pin hook：MIUI 的 AddItemActivity 在部分版本/场景下不经过
+     * PinItemRequestCompat.accept（或只写自己的 workspace），旁听会漏（装机实锤：
+     * saved_shortcuts 恒 0 行，抽屉里永远没有 pin 快捷方式）。
+     * FLAG_MATCH_PINNED 是 LauncherApps 的公开查询面，宿主持 HOME 角色可直接读，
+     * 与 MIUI 内部实现无关；upsert 幂等，重启/装包即自愈。
+     */
+    fun syncPinnedShortcuts() {
+        viewModelScope.launch {
+            try {
+                val app = getApplication<Application>()
+                val launcher = app.getSystemService(android.content.pm.LauncherApps::class.java) ?: return@launch
+                val shortcuts = withContext(Dispatchers.IO) {
+                    runCatching {
+                        launcher.getShortcuts(
+                            android.content.pm.LauncherApps.ShortcutQuery()
+                                .setQueryFlags(android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED),
+                            android.os.Process.myUserHandle(),
+                        )
+                    }.onFailure { ModLog.e("syncPinnedShortcuts query failed", it) }.getOrNull()
+                } ?: return@launch
+                if (shortcuts.isEmpty()) return@launch
+                val dao = LauncherDatabase.getInstance(app).itemsDao()
+                withContext(Dispatchers.IO) {
+                    shortcuts.forEach { info ->
+                        val pkg = info.`package` ?: return@forEach
+                        val label = (info.shortLabel ?: info.longLabel)?.toString().orEmpty()
+                            .ifBlank { info.id }
+                        dao.saveShortcut(com.galaxyrio.gracelauncher.data.SavedShortcutEntity(
+                            itemKey = "shortcut:$pkg/" + android.net.Uri.encode(info.id),
+                            packageName = pkg,
+                            shortcutId = info.id,
+                            activity = info.activity?.flattenToString().orEmpty(),
+                            label = label,
+                            showInAppList = true,
+                        ))
+                    }
+                }
+                ModLog.i("syncPinnedShortcuts: pinned=${shortcuts.size}")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                ModLog.e("syncPinnedShortcuts failed", error)
+            }
+        }
+    }
+
     fun refreshApps() {
+        syncPinnedShortcuts()
         appLoadJob?.cancel()
         appLoadJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingApps = true, appLoadFailed = false) }
@@ -744,6 +854,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun launch(app: LauncherApp, sourceBounds: Rect? = null, options: Bundle? = null): Boolean {
         if (app.folderId != null) return false
+        // 上游 LauncherViewModel.launch 逐字：快捷方式项走 startShortcut（抽屉里
+        // showInAppList 的 pin 快捷方式、弹层快捷方式同路径），不能按主 Activity 启动
+        app.shortcut?.let { return launchShortcut(it, sourceBounds, options) }
         return appRepository.launch(app, sourceBounds, options).also { success ->
             if (!success) ModLog.e("GraceHomeViewModel launch failed: ${app.key}", null)
         }
@@ -879,6 +992,30 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** HomeScreen 编辑把手：widget 高度持久化（0 = provider 默认）。 */
     fun updateHomeLayoutWidgetHeight(height: Int) =
         updateSettings { it.copy(homeLayout = it.homeLayout.copy(widgetHeightDp = height)) }
+
+    /** 上游同步 1.2.0（S6d）：主页区块拖动排序结果落库。 */
+    fun updateHomeOrder(order: List<String>) =
+        updateSettings { it.copy(homeLayout = it.homeLayout.copy(homeOrder = order.distinct())) }
+
+    /**
+     * 上游同步 1.2.0（S5b）：弹层内 widget 布局（宽度/全宽/底色/缩放/高度）回写。
+     * 落 app_popups.itemsJson —— 对应 PopupItem.widget，按 widgetId 定位替换。
+     * save=false（拖动中）由 UI 本地 drafts 承担，这里只在落盘时机调用。
+     */
+    fun updatePopupWidget(ownerKey: String, layout: com.galaxyrio.gracelauncher.data.HomeLayout, save: Boolean) {
+        if (!save) return
+        viewModelScope.launch {
+            runCatching {
+                val database = com.galaxyrio.gracelauncher.data.LauncherDatabase.getInstance(getApplication())
+                com.galaxyrio.gracelauncher.data.LauncherItemsRepository(database)
+                    .updatePopup(ownerKey, emptyList()) { previous ->
+                        previous.map { item ->
+                            if (item.widget?.widgetId == layout.widgetId) item.copy(widget = layout) else item
+                        }
+                    }
+            }.onFailure { ModLog.e("GraceHomeViewModel updatePopupWidget failed", it) }
+        }
+    }
 
     /** 原版 clockAppKey == null 的默认语义：Android 标准 SHOW_ALARMS。 */
     fun openClock(): Boolean = runCatching {

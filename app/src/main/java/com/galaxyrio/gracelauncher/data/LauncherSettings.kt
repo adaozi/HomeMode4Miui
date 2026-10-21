@@ -100,13 +100,15 @@ data class LauncherFolder(
     val appListAtBottom: Boolean = true,
     /** Membership-derived hiding never changes the explicit hidden-app table. */
     val autoHideApps: Boolean = false,
+    /** 上游同步 1.2.0：同一套成员/位置存储，但渲染成横向应用堆而不是有名字的文件夹。 */
+    val isAppStack: Boolean = false,
 ) {
     val key: String get() = "folder:$id"
 
     /** Local identity only: folders must never be sent to Android as activities. */
     fun asApp() = LauncherApp(
         componentName = android.content.ComponentName("com.homemode4miui", key),
-        label = name, icon = null, folderId = id,
+        label = name, icon = null, folderId = id, isAppStack = isAppStack,
     )
 }
 

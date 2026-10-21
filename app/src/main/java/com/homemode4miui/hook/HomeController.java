@@ -43,13 +43,48 @@ public final class HomeController {
     private static volatile HomeView sView;
     private static final Map<View, Integer> sOriginalVisibility = new HashMap<>();
     private static volatile BroadcastReceiver sPkgReceiver;
+    /** 进入第四模式前 DecorView 的 systemUiVisibility（退出时原样还原）。 */
+    private static int sRestoreSystemUi = Integer.MIN_VALUE;
 
     private HomeController() {
+    }
+
+    /**
+     * blur-gap（v2.9.123）：原生桌面 ↔ 第四模式来回切后，本次会话内 Compose 根只被量到
+     * 2296（窗口 2400），状态栏 104px 露出系统壁纸，且 decorFitsSystemWindows(false)+
+     * requestLayout 均纠正不了 —— MIUI 内部某层 insets/translation 在切换后残留。
+     * 用户实测：进程重启一次就恢复。于是把"切【进】第四模式"做成显式重启：
+     * 只在状态沿（false→true）触发，进程冷启动首帧（null→true）不触发，天然无循环。
+     */
+    private static Boolean sPrevCustomActive = null;
+    private static long sLastRestartAt = 0L;
+
+    private static void scheduleRestartOnEntering(Activity launcher, boolean on) {
+        try {
+            boolean entering = on && sPrevCustomActive != null && !sPrevCustomActive;
+            sPrevCustomActive = on;
+            if (!entering) return;
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - sLastRestartAt < 3_000) return;   // 切换连击/广播+回调双路径去抖
+            sLastRestartAt = now;
+            log("custom mode ON edge -> schedule launcher restart (blur-gap)");
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                try {
+                    log("launcher restart now (custom mode entry, HOME auto-relaunch)");
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                } catch (Throwable t) {
+                    log("launcher restart failed: " + t);
+                }
+            }, 600);
+        } catch (Throwable t) {
+            log("scheduleRestartOnEntering failed: " + t);
+        }
     }
 
     /** 同步 UI 到目标状态：on=true 挂载自定义视图，false 卸载并还原原生表面 */
     public static void sync(Activity launcher, boolean on) {
         log("sync(on=" + on + ")");
+        scheduleRestartOnEntering(launcher, on);
         try {
             if (on) {
                 attach(launcher);
@@ -168,8 +203,10 @@ public final class HomeController {
         if (existing != null && existing.getParent() == container) {
             existing.setVisibility(View.VISIBLE);
             existing.onHomeAttached(launcher);
+            existing.clearSystemBarPadding();
             // 复用路径也要重扫：原生可能在首次挂载后重建/补加了视图
             int rehidden = hideLauncherSurfaces(container);
+            ensureFullBleedWindow(launcher);   // 窗口可能被原生切回 fitsSystemWindows
             log("attach: reused existing view (re-hidden " + rehidden + ")");
             return;
         }
@@ -182,7 +219,9 @@ public final class HomeController {
         sView = view;
 
         int hidden = hideLauncherSurfaces(container);
+        ensureFullBleedWindow(launcher);
         view.onHomeAttached(launcher);
+        view.clearSystemBarPadding();
         registerPkgReceiver(launcher);
         log("attached: container=" + container.getClass().getName()
                 + ", view=" + view.getClass().getSimpleName()
@@ -193,7 +232,47 @@ public final class HomeController {
             if (v == null || v.getParent() != container) return;
             int n = hideLauncherSurfaces(container);
             if (n > 0) log("late re-hidden " + n + " sibling(s) after attach");
+            // 模式切换后原生可能再次把窗口切回 fitsSystemWindows（内容区缩到状态栏下沿），
+            // 这里与其后各补一次，保证 Compose 根始终按整屏高度测量。
+            ensureFullBleedWindow(launcher);
+            v.clearSystemBarPadding();
+            logGeometry(container);
         }, 600);
+        container.postDelayed(() -> {
+            HomeView v = sView;
+            if (v == null || v.getParent() != container) return;
+            ensureFullBleedWindow(launcher);
+            v.clearSystemBarPadding();
+        }, 1_500);
+    }
+
+    /**
+     * 几何诊断（blur-gap 专项）：挂载视图是否真正铺满窗口。
+     * 装机现象：原生桌面 ↔ 第四模式来回切后，抽屉模糊层/壁纸遮罩不覆盖状态栏条带
+     * （状态栏高度那段是未处理的系统壁纸）—— 等价于我们的 ComposeView 顶边不在屏幕 0 点。
+     * 这里打印 view 在屏幕上的 y、容器 padding/尺寸，区分三种根因：
+     *   ① 容器有 paddingTop（DragLayer 为原生布局加的）→ view 被 padding 内缩；
+     *   ② 容器自身 y>0（窗口不铺状态栏，fitsSystemWindows 类行为）；
+     *   ③ 两者都为 0 但 view 高度小于屏幕 → 容器高度被裁。
+     */
+    private static void logGeometry(ViewGroup container) {
+        try {
+            View v = sView;
+            if (v == null) return;
+            int[] loc = new int[2];
+            v.getLocationOnScreen(loc);
+            int[] cloc = new int[2];
+            container.getLocationOnScreen(cloc);
+            int screenH = v.getResources().getDisplayMetrics().heightPixels;
+            log("geometry: viewTop=" + loc[1] + " viewH=" + v.getHeight()
+                    + " | containerTop=" + cloc[1] + " containerH=" + container.getHeight()
+                    + " paddingTop=" + container.getPaddingTop()
+                    + " clipToPadding=" + (container instanceof android.view.ViewGroup
+                        && ((ViewGroup) container).getClipToPadding())
+                    + " | screenH=" + screenH);
+        } catch (Throwable t) {
+            log("geometry log failed: " + t);
+        }
     }
 
     /** 容器解析：宿主 API → 宿主字段 → 框架 DecorView（版本无关的最后兜底） */
@@ -264,7 +343,58 @@ public final class HomeController {
         return hidden;
     }
 
+    /**
+     * 强制宿主窗口铺满整屏（含状态栏/导航栏区域）。
+     *
+     * 装机实锤（blur-gap）：原生桌面 ↔ 第四模式来回切后，抽屉的模糊壁纸/dim 遮罩
+     * 不覆盖状态栏那一条（模糊层 rect 只有 0..2296，窗口是 2400；整块 Compose 内容
+     * 被下移了一个状态栏高度）。根因不是视图层 padding，而是宿主 DecorView 回到了
+     * fitsSystemWindows=true（内容区从状态栏下沿起算）—— 此时 DragLayer 的 0 点
+     * 已经不在屏幕顶端，Compose 再 fillMaxSize 也够不到状态栏。
+     *
+     * 处理：挂载/复用时确保 decorFitsSystemWindows=false（API 30+ 直调，minSdk 33），
+     * 退出第四模式按进入前的 systemUiVisibility 原样还原，原生桌面行为不受影响。
+     */
+    private static void ensureFullBleedWindow(Activity launcher) {
+        try {
+            android.view.Window w = launcher.getWindow();
+            if (w == null) return;
+            View decor = w.getDecorView();
+            if (decor == null) return;
+            if (sRestoreSystemUi == Integer.MIN_VALUE) {
+                sRestoreSystemUi = decor.getSystemUiVisibility();
+            }
+            // 幂等：始终声明"内容铺到系统栏背后"（等价 SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|
+            // LAYOUT_HIDE_NAVIGATION）。原生若切回 fitsSystemWindows=true，这一句把它掰回来。
+            w.setDecorFitsSystemWindows(false);
+            decor.requestApplyInsets();
+            // 关键：只改 flags 不会触发内容区重新 measure —— 原生上一次布局把
+            // Compose 根量成了"屏高 - 状态栏"（2296），必须 requestLayout 让它按
+            // 新的 2400 重新测量，否则 blur 层永远停在旧高度。
+            decor.requestLayout();
+            log("window: decorFitsSystemWindows(false) enforced, restoreVis=" + sRestoreSystemUi
+                    + " decor=" + decor.getWidth() + "x" + decor.getHeight());
+        } catch (Throwable t) {
+            log("ensureFullBleedWindow failed: " + t);
+        }
+    }
+
+    /** 退出第四模式：还原进入前的 systemUiVisibility（fitsSystemWindows 状态随之恢复）。 */
+    private static void restoreWindowInsets(Activity launcher) {
+        try {
+            if (sRestoreSystemUi == Integer.MIN_VALUE) return;
+            View decor = launcher.getWindow().getDecorView();
+            if (decor != null) decor.setSystemUiVisibility(sRestoreSystemUi);
+        } catch (Throwable t) {
+            log("restoreWindowInsets failed: " + t);
+        } finally {
+            sRestoreSystemUi = Integer.MIN_VALUE;
+        }
+    }
+
+    /** 退出第四模式的完整还原（摘要 + 窗口 insets）。 */
     private static void restoreLauncherSurfaces(Activity launcher) {
+        restoreWindowInsets(launcher);
         for (View v : new ArrayList<>(sOriginalVisibility.keySet())) {
             restore(v);
         }

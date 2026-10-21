@@ -77,6 +77,8 @@ fun AppDrawerScreen(
     modifier: Modifier = Modifier,
     onOpenFolder: (LauncherFolder, Rect) -> Unit = { _, _ -> },
     onEditFolder: (LauncherFolder) -> Unit = {},
+    /** 上游同步 1.2.0：应用堆在抽屉内的渲染槽（null = 按普通文件夹行显示）。 */
+    appStackContent: (@Composable (LauncherFolder) -> Unit)? = null,
     // P6（B6.3）：行内通知预览（快照桥下发；空 map = 无通知/监听未授权，行自然无预览）
     notifications: Map<String, List<AppNotification>> = emptyMap(),
     // 上游同步 v1.1.8：ShortcutsFoldersSettings（通知显示策略；swipeLeftToOpenFirst 随 S3/S7）
@@ -148,7 +150,7 @@ fun AppDrawerScreen(
                             .firstOrNull { popupSettings.showsNotification(it.silent, expanded = false) }
                             .takeUnless { item.app.user != null },
                     )
-                    is DrawerItem.Folder -> FolderRow(
+                    is DrawerItem.Folder -> if (item.folder.isAppStack && appStackContent != null) appStackContent(item.folder) else FolderRow(
                         folder = item.folder,
                         // 上游 AppDrawerScreen.kt:171 同构：优先装饰后的文件夹图标
                         app = folderApps[item.folder.id] ?: item.folder.asApp(),

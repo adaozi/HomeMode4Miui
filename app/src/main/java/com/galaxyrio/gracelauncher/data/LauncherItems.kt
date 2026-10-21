@@ -156,7 +156,12 @@ class LauncherItemsRepository(private val database: LauncherDatabase) {
         database.withTransaction {
             requireExistingFolder(key)
             val previous = dao.popup(key)?.let { PopupItem.decode(it.itemsJson) } ?: defaults
-            val next = transform(previous).distinctBy { it.key }
+            // 上游同步 1.2.0：应用堆只收应用 —— widget 项与嵌套文件夹不进堆
+            val stack = key.takeIf { it.startsWith("folder:") }?.removePrefix("folder:")
+                ?.let { database.settingsDao().folder(it) }?.isAppStack == true
+            val next = transform(previous).distinctBy { it.key }.filter {
+                !stack || (it.widget == null && !it.key.startsWith("folder:"))
+            }
             dao.savePopup(AppPopupEntity(key, PopupItem.encode(next)))
             val retained = next.mapNotNull { it.widget?.widgetId }.toSet()
             previous.mapNotNull { it.widget?.widgetId }.filterNot { it in retained }

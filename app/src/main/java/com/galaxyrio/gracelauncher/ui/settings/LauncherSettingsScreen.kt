@@ -80,7 +80,7 @@ internal enum class SettingsPage {
     ListAppearance, Alphabet, ShortcutsFolders, Fonts, WorkProfile, WorkProfileEditor,
     // 上游同步 v1.1.8（S3）：手势目标编辑 + Lab；旧 GraceTap*/GraceLong* 四页被
     // GraceAction/{gesture}?home={home} 参数化路由取代
-    GraceAction, GraceApp, GraceShortcut, GraceFolder, Gestures, LabGraceButton, LabGesture,
+    GraceAction, GraceApp, GraceShortcut, GraceFolder, Gestures, LabGraceButton, LabGesture, LabPopup, HomeOrder, AppStacks,
     // 上游同步 v1.1.9：外观编辑页（Grace 按钮外观/位置 + 日历/天气/媒体播放器外观占位）
     GraceButtonAppearance, GraceButtonPosition, CalendarAppearance, WeatherAppearance, MediaPlayerAppearance,
 }
@@ -276,6 +276,14 @@ fun LauncherSettingsScreen(
                     SettingsPage.Fonts -> FontSettings(uiState, actions, back)
                     SettingsPage.LabGraceButton -> LabGraceButtonSettings(uiState, actions, back)
                     SettingsPage.LabGesture -> LabGestureSettings(uiState, actions, back)
+                    // 上游同步 1.2.0：Pop-up 触发灵敏度（额外滑动距离 / 允许偏离角度）
+                    SettingsPage.LabPopup -> LabPopupSettings(uiState, actions, back)
+                    // 上游同步 1.2.0（S6c）：主页区块顺序编辑
+                    // 上游同步 1.2.0（S4c）：应用堆独立管理页（与文件夹同页复用，只列 isAppStack）
+                    SettingsPage.AppStacks -> FolderSettings(uiState, actions, back, appStacks = true) { folderId ->
+                        if (isCurrent()) navController.navigate("FolderEditor/${Uri.encode(folderId)}")
+                    }
+                    SettingsPage.HomeOrder -> HomeOrderSettings(uiState, actions, back)
                     SettingsPage.ListAppearance -> ListAppearanceSettings(uiState, actions, back) { }
                     SettingsPage.ShortcutsFolders -> ShortcutsFoldersSettingsScreen(uiState, actions, back)
                     SettingsPage.Alphabet -> AlphabetSettings(uiState, actions, back) { }

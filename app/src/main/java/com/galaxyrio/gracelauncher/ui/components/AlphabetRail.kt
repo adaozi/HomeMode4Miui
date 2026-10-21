@@ -33,14 +33,17 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -97,6 +100,11 @@ fun AlphabetRail(
     onWallpaper: Boolean = true,
     leftTouchEnabled: Boolean = false,
     alphabet: AlphabetAppearance? = null,
+    topOffset: Dp = 0.dp,
+    touchHeight: Dp = height,
+    enabled: Boolean = true,
+    onDoubleTap: ((Offset) -> Unit)? = null,
+    doubleTapIntervalMs: Int? = null,
 ) {
     if (letters.isEmpty()) return
     val appearance = LocalLauncherAppearance.current
@@ -115,10 +123,18 @@ fun AlphabetRail(
     val entries = remember(letters, includeHome) { if (includeHome) listOf<String?>(null) + letters else letters }
     val state = remember { ScrubState() }
     val currentOnSelect by rememberUpdatedState(onLetterSelected)
+    val inputEnabled by rememberUpdatedState(enabled)
     val currentOnScrubFinished by rememberUpdatedState(onScrubFinished)
+    val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
+    var leftTouchOrigin by remember { mutableStateOf(Offset.Zero) }
+    var rightTouchOrigin by remember { mutableStateOf(Offset.Zero) }
     val haptics by rememberUpdatedState(LocalHapticFeedback.current)
     val density = LocalDensity.current
-    var railHeightPx by remember { mutableIntStateOf(1) }
+    val doubleTapSlop = with(density) { 100.dp.toPx() }
+    // The desktop's edge touch strips span the viewport, independently of the
+    // alphabet's configured position/spacing. Pickers keep the compact defaults.
+    val railHeightPx by rememberUpdatedState(with(density) { height.roundToPx().coerceAtLeast(1) })
+    val railTopPx by rememberUpdatedState(with(density) { topOffset.toPx() })
     val cellHeight = height / entries.size
     val cellHeightPx = with(density) { cellHeight.toPx() }
     val waveRadius = with(density) { 82.dp.toPx() }
@@ -149,9 +165,25 @@ fun AlphabetRail(
     val railDescription = stringResource(R.string.alphabet_scroller)
     val homeDescription = stringResource(R.string.back_home)
 
-    fun touchSurface(fromLeft: Boolean) = Modifier.pointerInput(entries, fromLeft) {
+    // Ignoring events inside a disabled pointer handler still blocks siblings below
+    // this overlay. Detach it so widget resize handles can receive the initial down.
+    fun touchSurface(fromLeft: Boolean) = if (!enabled) Modifier else Modifier.pointerInput(
+        entries, fromLeft, onDoubleTap != null, doubleTapIntervalMs, doubleTapSlop,
+    ) {
+        val doubleTapTimeout = doubleTapIntervalMs?.coerceIn(150, 700)?.toLong()
+            ?: viewConfiguration.doubleTapTimeoutMillis
+        var firstTapUpTime: Long? = null
+        var firstTapPosition = Offset.Zero
         awaitEachGesture {
             val down = awaitFirstDown()
+            if (!inputEnabled) return@awaitEachGesture
+            val previousUpTime = firstTapUpTime
+            firstTapUpTime = null
+            val secondTap = previousUpTime != null &&
+                down.uptimeMillis - previousUpTime in viewConfiguration.doubleTapMinTimeMillis..doubleTapTimeout &&
+                (down.position - firstTapPosition).getDistance() <= doubleTapSlop
+            var isTap = currentOnDoubleTap != null
+            var doubleTapPosition: Offset? = null
             val pointerId = down.id
             var change = down
             var previousIndex = -1
@@ -159,12 +191,26 @@ fun AlphabetRail(
             state.active = true
             try {
                 while (true) {
+                    if (!inputEnabled) break
+                    // Recognize taps in the existing scrub stream. Do not delay selection
+                    // or add a competing detector that could consume a drag's first down.
+                    isTap = isTap && !change.isConsumed && currentEvent.changes.size == 1 &&
+                        (change.position - down.position).getDistance() <= viewConfiguration.touchSlop &&
+                        change.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis &&
+                        change.position.x in 0f..size.width.toFloat() && change.position.y in 0f..size.height.toFloat()
                     if (!change.pressed) {
+                        if (isTap && change.changedToUpIgnoreConsumed()) {
+                            if (secondTap) doubleTapPosition = change.position else {
+                                firstTapUpTime = change.uptimeMillis
+                                firstTapPosition = down.position
+                            }
+                        }
                         change.consume()
                         break
                     }
-                    state.drift = alphabetDriftAt(change.position.y, railHeightPx.toFloat(), state.drift, freeMovement)
-                    state.fingerY = (change.position.y - state.drift).coerceIn(0f, railHeightPx.toFloat())
+                    val railY = change.position.y - railTopPx
+                    state.drift = alphabetDriftAt(railY, railHeightPx.toFloat(), state.drift, freeMovement)
+                    state.fingerY = (railY - state.drift).coerceIn(0f, railHeightPx.toFloat())
                     state.fingerX = if (fromLeft) railWidth - change.position.x else change.position.x
                     val index = alphabetIndexAt(
                         y = state.fingerY,
@@ -184,17 +230,23 @@ fun AlphabetRail(
                 state.active = false
                 currentOnScrubFinished()
             }
+            // Finish the scrub before an action changes pages or starts its transition.
+            doubleTapPosition?.let { position ->
+                val origin = if (fromLeft) leftTouchOrigin else rightTouchOrigin
+                currentOnDoubleTap?.invoke(origin + position)
+            }
         }
     }
 
     // Two touch regions, one visual rail and one scrub state. No second alphabet is drawn.
-    Box(modifier.then(if (leftTouchEnabled) Modifier.fillMaxWidth() else Modifier.width(48.dp)).height(height)) {
-        if (leftTouchEnabled) Box(Modifier.align(Alignment.TopStart).width(28.dp).height(height)
+    Box(modifier.then(if (leftTouchEnabled) Modifier.fillMaxWidth() else Modifier.width(48.dp)).height(touchHeight)) {
+        if (leftTouchEnabled) Box(Modifier.align(Alignment.TopStart).width(28.dp).height(touchHeight)
+            .onGloballyPositioned { leftTouchOrigin = it.positionInRoot() }
             .testTag("alphabet_left_touch").then(touchSurface(true)).clearAndSetSemantics {})
         Box(
-            Modifier.align(Alignment.TopEnd).width(48.dp).height(height)
+            Modifier.align(Alignment.TopEnd).width(48.dp).height(touchHeight)
+                .onGloballyPositioned { rightTouchOrigin = it.positionInRoot() }
                 .testTag("alphabet_rail")
-                .onSizeChanged { railHeightPx = it.height.coerceAtLeast(1) }
                 .semantics { contentDescription = railDescription }
                 .then(touchSurface(false)),
         ) {
@@ -209,7 +261,7 @@ fun AlphabetRail(
                     modifier = Modifier
                         .width(48.dp)
                         .height(cellHeight)
-                        .offset { IntOffset(0, (index * cellHeightPx).roundToInt()) }
+                        .offset { IntOffset(0, (railTopPx + index * cellHeightPx).roundToInt()) }
                         .testTag(if (letter == null) "alphabet_home" else "alphabet:$letter")
                         .graphicsLayer {
                             // Fade the glyphs only: keep the same touch surface alive
@@ -227,9 +279,11 @@ fun AlphabetRail(
                             contentDescription = description
                             role = Role.Button
                             onClick {
-                                currentOnSelect(letter)
-                                currentOnScrubFinished()
-                                true
+                                if (inputEnabled) {
+                                    currentOnSelect(letter)
+                                    currentOnScrubFinished()
+                                }
+                                inputEnabled
                             }
                         },
                     contentAlignment = Alignment.Center,
@@ -269,7 +323,7 @@ fun AlphabetRail(
                         // crowds the rail while it appears or follows the finger.
                         translationX = railWidth / 2f - indicatorSize - railGlyphHalfWidth - indicatorGap -
                             (basePull + extraPull) * wave
-                        translationY = drift + (state.fingerY - indicatorSize / 2f)
+                        translationY = railTopPx + drift + (state.fingerY - indicatorSize / 2f)
                             .coerceIn(0f, (railHeightPx - indicatorSize).coerceAtLeast(0f))
                         alpha = wave
                         scaleX = 0.85f + wave * 0.15f

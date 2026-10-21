@@ -100,14 +100,36 @@ public final class CustomLauncherMode extends LauncherMode {
         return false;
     }
 
+    /**
+     * 负一屏（智能助理）能力位 —— 必须为 true。
+     *
+     * 逆向依据（OS2 RELEASE-5.39.40.10843，MIUI 原生语义）：
+     *   DesktopLauncherMode.supportAssistant() = true（所有原生桌面模式均为 true）；
+     *   该值被 LauncherAssistantCompatMIUI.createClientOptions(LauncherMode) 直接读取，
+     *   参与 LauncherClient.ClientOptions 的助手能力位计算 ——
+     *   返回 false 等于告诉负一屏"本桌面不提供服务"，personalassistant 侧内容
+     *   （含小部件卡片）随之不加载。
+     *   （历史遗留：v2.9.42 删除负一屏入口时连同能力位一起关掉，属误伤。）
+     *
+     * 入口仍由 GestureIsolator 隔离 —— 本模式不提供右滑进负一屏的手势，
+     * 但负一屏自身的内容链路必须保持可用（系统设置/其他入口拉起时才能正常显示）。
+     */
     @Override
     public boolean supportAssistant() {
-        return false;
+        return true;
     }
 
+    /**
+     * 负一屏总开关 —— 跟随系统设置，不再强制关闭。
+     *
+     * 原生实现（LauncherMode 基类）：Launcher.isAssistantOpen()（即系统设置
+     * open_personal_assistant）；Launcher 未就绪时回退读 MIUI Settings 同名键。
+     * 直接复用父类实现，语义与原生三模式完全一致：用户在系统设置里关掉负一屏时
+     * 依然生效，未关时正常显示。
+     */
     @Override
     public boolean isPersonalAssistantOn(Context context) {
-        return false;
+        return super.isPersonalAssistantOn(context);
     }
 
     /** 自定义视图不接收拖拽 */

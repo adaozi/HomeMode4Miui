@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
@@ -137,12 +139,22 @@ internal fun WallpaperEffectLayers(
     dimEnabled: Boolean,
     dimAmount: Int,
 ) {
+    // blur-gap 专项诊断：Compose 侧认为的窗口尺寸（与视图层 geomery 日志对照）
+    val windowSize = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
     blurBitmap?.let { wallpaperBlur ->
         Image(
             bitmap = wallpaperBlur.asImageBitmap(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
+                .onGloballyPositioned {
+                    // blur-gap 看门狗：正常恒为 0,0-windowW,windowH；顶边>0 或高度不足
+                    //（= 状态栏条带会露系统壁纸）才打日志，避免常规布局刷屏。
+                    val r = it.boundsInWindow()
+                    if (r.top != 0f || it.size.height != windowSize.height || it.size.width != windowSize.width) {
+                        ModLog.i("blurLayer ANOMALY rect=" + r + " size=" + it.size + " window=" + windowSize)
+                    }
+                }
                 .graphicsLayer { alpha = effectAlpha }
                 .blur(blurRadiusDp.coerceIn(0, 48).dp),
         )

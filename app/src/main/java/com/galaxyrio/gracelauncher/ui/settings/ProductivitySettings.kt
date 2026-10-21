@@ -136,38 +136,54 @@ internal fun ProductivitySettings(
             item {
                 SettingsActionItem(
                     stringResource(R.string.settings_hide_apps), pluralStringResource(R.plurals.settings_hidden_count, uiState.effectiveHiddenAppKeys.size, uiState.effectiveHiddenAppKeys.size),
-                    0, 4, "settings_open_hidden_apps",
+                    0, 5, "settings_open_hidden_apps",
                     leading = { LauncherIcon(LauncherSymbol.VisibilityOff) },
                 ) { navigate(SettingsPage.HiddenApps) }
             }
             item {
                 SettingsActionItem(
-                    stringResource(R.string.settings_folders), pluralStringResource(R.plurals.settings_folder_count, uiState.folders.size, uiState.folders.size),
-                    1, 4, "settings_open_folders",
+                    stringResource(R.string.settings_folders), pluralStringResource(R.plurals.settings_folder_count, uiState.folders.count { !it.isAppStack }, uiState.folders.count { !it.isAppStack }),
+                    1, 5, "settings_open_folders",
                     leading = { LauncherIcon(LauncherSymbol.Folder) },
                 ) { navigate(SettingsPage.Folders) }
+            }
+            // 上游同步 1.2.0（S4c）：应用堆独立管理页（创建时直接就是堆）
+            item {
+                SettingsActionItem(
+                    stringResource(R.string.app_stacks_title),
+                    pluralStringResource(R.plurals.settings_folder_count, uiState.folders.count { it.isAppStack }, uiState.folders.count { it.isAppStack }),
+                    2, 5, "settings_open_app_stacks",
+                    leading = { LauncherIcon(LauncherSymbol.Steppers) },
+                ) { navigate(SettingsPage.AppStacks) }
             }
             // 上游同步 v1.1.8 S8b：Work Profile 行恢复（S8a 数据面 + ProfileSettingsScreen work 面）
             item {
                 SettingsActionItem(stringResource(R.string.work_profile_title), stringResource(R.string.work_profile_summary),
-                    2, 4, "settings_open_work_profile", leading = { LauncherIcon(LauncherSymbol.Work) }) { navigate(SettingsPage.WorkProfile) }
+                    3, 5, "settings_open_work_profile", leading = { LauncherIcon(LauncherSymbol.Work) }) { navigate(SettingsPage.WorkProfile) }
             }
             item {
                 SettingsActionItem(stringResource(R.string.private_space_title), stringResource(R.string.private_space_summary),
-                    3, 4, "settings_open_private_space", leading = { LauncherIcon(LauncherSymbol.Lock) }) { navigate(SettingsPage.PrivateSpace) }
+                    4, 5, "settings_open_private_space", leading = { LauncherIcon(LauncherSymbol.Lock) }) { navigate(SettingsPage.PrivateSpace) }
             }
             item { SettingsHeading(stringResource(R.string.settings_advanced)) }
             // 上游同步 v1.1.8 S3：Gestures 行恢复（桌面手势目标编辑，GraceButtonSettingsScreen home 面）
             item {
-                SettingsActionItem(stringResource(R.string.settings_gestures), null, 0, 2, "settings_gestures",
+                SettingsActionItem(stringResource(R.string.settings_gestures), null, 0, 3, "settings_gestures",
                     leading = { LauncherIcon(LauncherSymbol.Gesture) }) { navigate(SettingsPage.Gestures) }
             }
             item {
                 SettingsToggleItem(
                     stringResource(R.string.settings_allow_haptics), stringResource(R.string.settings_allow_haptics_summary),
-                    settings.allowHapticFeedback, 1, 2, "allow_haptics",
+                    settings.allowHapticFeedback, 1, 3, "allow_haptics",
                     leading = { LauncherIcon(LauncherSymbol.Vibration) },
                 ) { value -> actions.updateSettings { current -> current.copy(allowHapticFeedback = value) } }
+            }
+            // 上游同步 1.2.0（S6c）：主页区块顺序（时钟/小组件/媒体）
+            item {
+                SettingsActionItem(stringResource(R.string.settings_home_order), stringResource(R.string.settings_home_order_summary),
+                    2, 3, "settings_home_order", leading = { LauncherIcon(LauncherSymbol.Resize) }) {
+                    navigate(SettingsPage.HomeOrder)
+                }
             }
         }
     }
@@ -260,32 +276,40 @@ internal fun FolderSettings(
     uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit,
     selectedIds: Set<String>? = null, onToggle: (String) -> Unit = {}, enabled: Boolean = true,
     singleChoice: Boolean = false,
+    // 上游同步 1.2.0（S4c）：同一页复用为「应用堆」管理（只列 isAppStack 项），
+    // 新建时直接带上 isAppStack，省掉"先建文件夹再开开关"两步。
+    appStacks: Boolean = false,
+    newPlacement: FolderPlacement = FolderPlacement.Favorites,
     onEdit: (String) -> Unit,
 ) {
+    val folders = remember(uiState.folders, appStacks) { uiState.folders.filter { it.isAppStack == appStacks } }
     var creating by rememberSaveable { mutableStateOf(false) }
     var openingId by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(openingId, uiState.folders, uiState.settingsSaveFailed) {
+    LaunchedEffect(openingId, folders, uiState.settingsSaveFailed) {
         val id = openingId ?: return@LaunchedEffect
-        if (uiState.folders.any { it.id == id }) {
+        if (folders.any { it.id == id }) {
             openingId = null
             onEdit(id)
         } else if (uiState.settingsSaveFailed) openingId = null
     }
-    SettingsScaffold(stringResource(R.string.settings_folders), "settings_folders", onBack) { padding ->
+    SettingsScaffold(stringResource(if (appStacks) R.string.app_stacks_title else R.string.settings_folders),
+        if (appStacks) "settings_app_stacks" else "settings_folders", onBack) { padding ->
         SettingsList(padding) {
             item { Spacer(Modifier.height(24.dp)) }
             item {
                 SettingsActionItem(
-                    stringResource(R.string.settings_folder_create), null, 0, 1, "folder_create",
+                    stringResource(if (appStacks) R.string.app_stack_create else R.string.settings_folder_create),
+                    null, 0, 1, if (appStacks) "app_stack_create" else "folder_create",
                     enabled = enabled && openingId == null,
                     leading = { LauncherIcon(LauncherSymbol.Plus) },
                 ) { creating = true }
             }
-            if (uiState.folders.isEmpty()) {
-                item { Text(stringResource(R.string.settings_folder_empty), Modifier.padding(horizontal = 4.dp, vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (folders.isEmpty()) {
+                item { Text(stringResource(if (appStacks) R.string.app_stacks_empty else R.string.settings_folder_empty),
+                    Modifier.padding(horizontal = 4.dp, vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             } else {
-                item { SettingsHeading(stringResource(R.string.settings_folders)) }
-                itemsIndexed(uiState.folders, key = { _, folder -> folder.id }) { index, folder ->
+                item { SettingsHeading(stringResource(if (appStacks) R.string.app_stacks_title else R.string.settings_folders)) }
+                itemsIndexed(folders, key = { _, folder -> folder.id }) { index, folder ->
                     val count = uiState.popups[folder.key]?.size ?: folder.appKeys.size
                     val checked = selectedIds?.contains(folder.id)
                     // An action selects a target, not whether the folder belongs in favorites.
@@ -293,7 +317,7 @@ internal fun FolderSettings(
                     SettingsActionItem(
                         folder.name,
                         pluralStringResource(R.plurals.settings_folder_summary, count, count, placement.label()),
-                        index, uiState.folders.size, "folder:${folder.id}",
+                        index, folders.size, "folder:${folder.id}",
                         enabled = enabled,
                         modifier = Modifier.semantics {
                             if (checked != null) {
@@ -322,9 +346,10 @@ internal fun FolderSettings(
             }
         }
     }
-    if (creating) TextEntryDialog(stringResource(R.string.settings_folder_create), "", { creating = false }, { name ->
+    if (creating) TextEntryDialog(stringResource(if (appStacks) R.string.app_stack_create else R.string.settings_folder_create),
+        "", { creating = false }, { name ->
         val id = UUID.randomUUID().toString()
-        actions.saveFolder(LauncherFolder(id, name, emptyList(), FolderPlacement.Favorites))
+        actions.saveFolder(LauncherFolder(id, name, emptyList(), newPlacement, isAppStack = appStacks))
         creating = false
         openingId = id
     })
@@ -348,14 +373,18 @@ internal fun FolderEditorSettings(folderId: String?, uiState: LauncherUiState, a
     var confirmDelete by rememberSaveable(folder.id) { mutableStateOf(false) }
     PopupEditorScreen(app, uiState, actions, onBack, header = {
         Column(Modifier.padding(top = 16.dp)) {
-            SettingsActionItem(folder.name, stringResource(R.string.settings_folder_name), 0, 3, "folder_name",
+            SettingsActionItem(folder.name, stringResource(R.string.settings_folder_name), 0, 4, "folder_name",
                 leading = { AppIcon(app, Modifier.clickable(onClickLabel = stringResource(R.string.icon_designer_title)) { onEditIcon(app) }, size = 36.dp) }) { rename = true }
             Spacer(Modifier.height(ListItemDefaults.SegmentedGap))
-            SettingsActionItem(stringResource(R.string.settings_folder_placement), folder.placement.label(), 1, 3, "folder_placement",
+            SettingsActionItem(stringResource(R.string.settings_folder_placement), folder.placement.label(), 1, 4, "folder_placement",
                 leading = { LauncherIcon(LauncherSymbol.Folder) }) { placement = true }
             Spacer(Modifier.height(ListItemDefaults.SegmentedGap))
             SettingsToggleItem(stringResource(R.string.settings_folder_auto_hide), stringResource(R.string.settings_folder_auto_hide_summary),
-                folder.autoHideApps, 2, 3, "folder_auto_hide") { actions.setFolderAutoHide(folder.id, it) }
+                folder.autoHideApps, 2, 4, "folder_auto_hide") { actions.setFolderAutoHide(folder.id, it) }
+            Spacer(Modifier.height(ListItemDefaults.SegmentedGap))
+            // 上游同步 1.2.0：文件夹 → 横向应用堆（同一套成员/位置，仅换渲染形态）
+            SettingsToggleItem(stringResource(R.string.folder_app_stack), stringResource(R.string.folder_app_stack_summary),
+                folder.isAppStack, 3, 4, "folder_app_stack") { actions.setFolderAppStack(folder.id, it) }
             TextButton(onClick = { confirmDelete = true }, enabled = LocalSettingsStorageState.current.canEdit, modifier = Modifier.testTag("folder_delete")) {
                 Text(stringResource(R.string.settings_folder_delete), color = MaterialTheme.colorScheme.error)
             }
@@ -381,3 +410,78 @@ private fun FolderPlacement.label(): String = stringResource(
         FolderPlacement.None -> R.string.settings_folder_nowhere
     },
 )
+
+/**
+ * 上游同步 1.2.0（S6c）：主页区块顺序。
+ * 模块可排序区块只有三类 —— 时钟（含日期与日程，都在 HomeClockHeader 内部）、
+ * 单个小组件、媒体播放器；收藏列表恒在尾部（与上游一致）。
+ */
+@Composable
+internal fun HomeOrderSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit) {
+    val layout = uiState.settings.homeLayout
+    val available = remember(layout.hasWidget, layout.widgetId, uiState.settings.mediaPlayer,
+        uiState.settings.calendarAgenda, uiState.settings.clockEnabled) {
+        buildList {
+            add(com.galaxyrio.gracelauncher.data.GraceWidget.Clock.key)
+            // 上游同步 1.2.0（S6e）：日程与日期行是独立区块，必须列出来
+            if (uiState.settings.calendarAgenda) add(com.galaxyrio.gracelauncher.data.GraceWidget.Calendar.key)
+            if (layout.hasWidget) add("widget:${layout.widgetId}")
+            if (uiState.settings.mediaPlayer) add(com.galaxyrio.gracelauncher.data.GraceWidget.Media.key)
+        }
+    }
+    val current = remember(layout.homeOrder, available) {
+        val order = layout.homeOrder ?: available
+        (order.filter { it in available } + available).distinct()
+    }
+    fun move(from: Int, delta: Int) {
+        val to = from + delta
+        if (from !in current.indices || to !in current.indices) return
+        val next = current.toMutableList()
+        val moved = next.removeAt(from)
+        next.add(to, moved)
+        actions.updateSettings { it.copy(homeLayout = it.homeLayout.copy(homeOrder = next)) }
+    }
+    SettingsScaffold(stringResource(R.string.settings_home_order), "settings_home_order", onBack) { padding ->
+        SettingsList(padding) {
+            item(key = "home_order_intro") { Spacer(Modifier.height(24.dp)) }
+            item(key = "home_order_summary") {
+                androidx.compose.material3.Text(
+                    stringResource(R.string.settings_home_order_summary),
+                    Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+            }
+            current.forEachIndexed { index, key ->
+                item(key = "home_order_$key") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        androidx.compose.material3.Text(
+                            homeBlockLabel(key), Modifier.weight(1f),
+                            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge)
+                        androidx.compose.material3.TextButton(onClick = { move(index, -1) },
+                            enabled = index > 0 && LocalSettingsStorageState.current.canEdit) {
+                            androidx.compose.material3.Text(stringResource(R.string.home_order_move_up))
+                        }
+                        androidx.compose.material3.TextButton(onClick = { move(index, 1) },
+                            enabled = index < current.lastIndex && LocalSettingsStorageState.current.canEdit) {
+                            androidx.compose.material3.Text(stringResource(R.string.home_order_move_down))
+                        }
+                    }
+                }
+            }
+            // 恢复上游默认顺序（时钟 → 日程 → 小组件 → 媒体）
+            item(key = "home_order_reset") {
+                SettingsActionItem(stringResource(R.string.home_order_reset), null, 0, 1, "home_order_reset") {
+                    actions.updateSettings { it.copy(homeLayout = it.homeLayout.copy(homeOrder = null)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun homeBlockLabel(key: String): String = when (key) {
+    com.galaxyrio.gracelauncher.data.GraceWidget.Clock.key -> stringResource(R.string.home_order_clock)
+    com.galaxyrio.gracelauncher.data.GraceWidget.Calendar.key -> stringResource(R.string.home_order_calendar)
+    com.galaxyrio.gracelauncher.data.GraceWidget.Media.key -> stringResource(R.string.home_order_media)
+    else -> stringResource(R.string.home_order_widget)
+}

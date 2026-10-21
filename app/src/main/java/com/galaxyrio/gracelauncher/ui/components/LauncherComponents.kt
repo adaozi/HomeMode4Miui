@@ -81,6 +81,7 @@ import com.galaxyrio.gracelauncher.data.IconShape
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherFolder
 import com.galaxyrio.gracelauncher.data.PrivateSpaceFolderId
+import com.galaxyrio.gracelauncher.data.ShortcutsFoldersSettings
 import com.galaxyrio.gracelauncher.data.WorkProfileFolderId
 import com.galaxyrio.gracelauncher.data.RecentlyInstalledFolderId
 import com.galaxyrio.gracelauncher.data.icons.iconShapePath
@@ -91,6 +92,9 @@ import com.galaxyrio.gracelauncher.ui.theme.effectiveDisplay
 // Retained desktop lists keep their scroll position under full-screen pages,
 // but must cancel the long press that opened the page before being unplaced.
 internal val LocalLauncherInputEnabled = staticCompositionLocalOf { true }
+// 上游同步 1.2.0：弹层滑动手势灵敏度（Lab 可调）经此下发到列表行，
+// 避免把 ShortcutsFoldersSettings 逐层透传到每个 LauncherRow。
+internal val LocalPopupGestureSettings = staticCompositionLocalOf { ShortcutsFoldersSettings() }
 
 private val FallbackIconColors = listOf(
     Color(0xFF65D5BE), Color(0xFFFFB3A7), Color(0xFFAEC6FF),
@@ -157,7 +161,7 @@ fun AppIcon(app: LauncherApp, modifier: Modifier = Modifier, size: Dp = 38.dp, a
                     PrivateSpaceFolderId -> LauncherSymbol.Lock
                     WorkProfileFolderId -> LauncherSymbol.Work
                     RecentlyInstalledFolderId -> LauncherSymbol.History2
-                    else -> LauncherSymbol.Folder
+                    else -> if (app.isAppStack) LauncherSymbol.Steppers else LauncherSymbol.Folder
                 })
             }
             else -> {
@@ -298,6 +302,8 @@ private fun LauncherRow(
 ) {
     val appearance = LocalLauncherAppearance.current
     val inputEnabled = LocalLauncherInputEnabled.current
+    // 上游同步 1.2.0：弹层滑动灵敏度（Lab 距离/角度）由 GraceLauncherRoute 提供
+    val popupSettings = LocalPopupGestureSettings.current
     val list = LocalListAppearance.current
     val labelStyle = listLabelStyle()
     val openFirstDescription = stringResource(R.string.popup_swipe_left_first)
@@ -342,13 +348,20 @@ private fun LauncherRow(
                     currentPrepare()
                 }
             }
-            .pointerInput(rowKey, inputEnabled, popupsEnabled, onSwipeLeft != null) {
+            .pointerInput(rowKey, inputEnabled, popupsEnabled, onSwipeLeft != null,
+                popupSettings.popupSwipeDistanceDp, popupSettings.popupSwipeAngleDegrees) {
                 if (!inputEnabled || !popupsEnabled) return@pointerInput
                 val swipe = PopupSwipeIntent(reversalSlop = 8.dp.toPx(),
                     firstItemSlop = if (currentSwipeLeft != null) 40.dp.toPx() else Float.POSITIVE_INFINITY)
                 fun resetPull() { dragging = false; leftPull = 0f }
                 try {
-                    detectHorizontalDragGestures(
+                    // 上游同步 1.2.0：Pop-up 触发灵敏度 ——
+                    // extraDistance（Lab 0..48dp，默认 8dp）在 touchSlop 之外额外要求的手指行程，
+                    // maxAngleDegrees（Lab 10..90°，默认 45°）拒绝偏角过大的斜滑（交还给列表滚动）。
+                    detectPopupDragGestures(
+                        extraDistance = popupSettings.popupSwipeDistanceDp.coerceIn(0, 48).dp.toPx(),
+                        maxAngleDegrees = popupSettings.popupSwipeAngleDegrees.coerceIn(10, 90),
+                        leftEnabled = currentSwipeLeft != null,
                         onDragStart = { swipe.reset(); leftPull = 0f; dragging = true },
                         onDragCancel = {
                             if (swipe.revealed) currentDragEnd(false)

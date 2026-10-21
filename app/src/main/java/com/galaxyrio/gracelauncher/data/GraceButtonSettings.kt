@@ -3,14 +3,20 @@ package com.galaxyrio.gracelauncher.data
 import org.json.JSONObject
 
 enum class GraceButtonAction {
-    App, Shortcut, Folder, Settings, Search, Website, LockScreen, AppList, Notifications, QuickSettings, Assistant, Agenda, Disabled;
+    App, Shortcut, Folder, Settings, Search, Website, LockScreen, AppList, WidgetScreen, Notifications, QuickSettings, Assistant, Agenda, Disabled;
 
     val requiresAccessibility: Boolean get() = this == LockScreen || this == Notifications || this == QuickSettings
 }
 
 enum class GraceButtonGesture(val storageKey: String) {
     Tap("tap"), LongPress("longPress"), DoubleTap("doubleTap"),
-    SwipeUp("swipeUp"), SwipeDown("swipeDown"), SwipeLeft("swipeLeft"), SwipeRight("swipeRight");
+    SwipeUp("swipeUp"), SwipeDown("swipeDown"), SwipeLeft("swipeLeft"), SwipeRight("swipeRight"),
+    // 上游同步 1.2.0：A-Z 字母条双击（不是 Grace Button 手势，单独归组）
+    AlphabetDoubleTap("alphabetDoubleTap");
+
+    companion object {
+        val buttonGestures = entries.filterNot { it == AlphabetDoubleTap }
+    }
 }
 
 data class GraceButtonTarget(
@@ -31,6 +37,8 @@ data class GraceButtonSettings(
     val swipeDown: GraceButtonTarget = GraceButtonTarget(GraceButtonAction.Search, enabled = false),
     val swipeLeft: GraceButtonTarget = GraceButtonTarget(GraceButtonAction.Search, enabled = false),
     val swipeRight: GraceButtonTarget = GraceButtonTarget(GraceButtonAction.Search, enabled = false),
+    /** 上游同步 1.2.0：A-Z 字母条双击默认动作为锁屏，默认关闭 */
+    val alphabetDoubleTap: GraceButtonTarget = GraceButtonTarget(GraceButtonAction.LockScreen, enabled = false),
     val animationsEnabled: Boolean = true,
     val searchAnimationDurationMs: Int = 500,
     val appListAnimationDurationMs: Int = 500,
@@ -50,6 +58,7 @@ data class GraceButtonSettings(
         GraceButtonGesture.SwipeDown -> swipeDown
         GraceButtonGesture.SwipeLeft -> swipeLeft
         GraceButtonGesture.SwipeRight -> swipeRight
+        GraceButtonGesture.AlphabetDoubleTap -> alphabetDoubleTap
     }
 
     fun withTarget(gesture: GraceButtonGesture, target: GraceButtonTarget): GraceButtonSettings = when (gesture) {
@@ -60,12 +69,17 @@ data class GraceButtonSettings(
         GraceButtonGesture.SwipeDown -> copy(swipeDown = target)
         GraceButtonGesture.SwipeLeft -> copy(swipeLeft = target)
         GraceButtonGesture.SwipeRight -> copy(swipeRight = target)
+        GraceButtonGesture.AlphabetDoubleTap -> copy(alphabetDoubleTap = target)
     }
 
     fun withEnabled(gesture: GraceButtonGesture, enabled: Boolean): GraceButtonSettings {
         val current = target(gesture)
         val action = if (current.action != GraceButtonAction.Disabled) current.action
-            else if (gesture == GraceButtonGesture.LongPress) GraceButtonAction.Settings else GraceButtonAction.Search
+            else when (gesture) {
+                GraceButtonGesture.LongPress -> GraceButtonAction.Settings
+                GraceButtonGesture.AlphabetDoubleTap -> GraceButtonAction.LockScreen
+                else -> GraceButtonAction.Search
+            }
         return withTarget(gesture, current.copy(action = action, enabled = enabled))
     }
 

@@ -45,6 +45,8 @@ data class LauncherApp(
     val iconDisplay: IconDisplaySettings? = null,
     /** Dominant color of the original app icon, before any pack/design. Null means neutral/unavailable. */
     val originalIconColor: Int? = null,
+    /** 上游同步 1.2.0：该文件夹项是否以横向应用堆（App Stack）形式渲染。 */
+    val isAppStack: Boolean = false,
 ) {
     val key: String = folderId?.let { "folder:$it" } ?: shortcut?.key
         ?: userSerial?.let { "profile:$it:${componentName.flattenToString()}" } ?: componentName.flattenToString()

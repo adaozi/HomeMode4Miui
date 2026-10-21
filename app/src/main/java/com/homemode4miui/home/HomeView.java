@@ -55,6 +55,17 @@ public abstract class HomeView extends FrameLayout {
     }
 
     /**
+     * 清理系统栏 insets 造成的 View 级 padding（blur-gap 专修，由底座 attach/延迟检查调用）。
+     *
+     * MIUI 的 DecorView/DragLayer 在「原生桌面 ↔ 第四模式」切换后会向子视图 dispatch
+     * 一次状态栏 insets，View 默认的 fitSystemWindows 实现会直接 setPadding(top=状态栏高)
+     * 并把内容高度减掉同样的值 —— 表现就是 Compose 根矮了 104px、整块桌面下移 104px，
+     * 抽屉的模糊壁纸/dim 遮罩盖不住状态栏条带。默认空实现供其他 UI 复用。
+     */
+    public void clearSystemBarPadding() {
+    }
+
+    /**
      * Home 键回桌面（带 Intent 透传，hotfix return-anim）：返回动画需要 HOME intent
      * 里的 GestureNavContract extra（Quickstep 注入的图标回位合约）。null = 无 contract
      * 路径（OS3 onNewIntentWhenAlreadyOnHome / 已在桌面复位）。默认转调无参重载，

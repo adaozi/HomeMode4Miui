@@ -61,7 +61,16 @@ fun FolderPopup(
     // hotfix folders2：弹层 widget 项（原版 ShortcutPopup entry.widget 分支 ShortcutPopup.kt:172-182）。
     // 降级登记：widget 行排成员尾部（原版按 popup JSON 顺序与 app 成员交错）。
     widgets: List<HomeLayout> = emptyList(),
+    // 上游同步 1.2.0（S5b）：弹层 widget 尺寸/呈现编辑回写（key = "folder:<id>"，save=false 为拖动中预览）
+    onUpdateWidget: ((String, HomeLayout, Boolean) -> Unit)? = null,
 ) {
+    // 选中态：显示尺寸控制条 + 四边拖拽手柄；drafts 保存拖动中的本地预览
+    var selectedWidgetId by remember { mutableStateOf<Int?>(null) }
+    var drafts by remember { mutableStateOf<Map<Int, HomeLayout>>(emptyMap()) }
+    fun applyDraft(id: Int, next: HomeLayout, save: Boolean) {
+        drafts = drafts + (id to next)
+        if (save) onUpdateWidget?.invoke("folder:${folder.id}", next, true)
+    }
     val members = remember(folder.appKeys, apps) { folder.appKeys.mapNotNull { key -> apps.firstOrNull { it.key == key } } }
     SwipeRevealPanel(
         anchor = anchor,
@@ -87,7 +96,10 @@ fun FolderPopup(
             Spacer(Modifier.width(10.dp))
             Text(folder.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        LazyColumn(Modifier.heightIn(max = maxListHeight).testTag("folder_members")) {
+        // 底部留白（S5b hotfix）：widget 末项的 resize 手柄不能被挤到屏幕手势区，
+        // 否则拖动会被系统返回/上滑手势抢走（装机实锤：手柄贴底 → 拖一下就关弹层）。
+        LazyColumn(Modifier.heightIn(max = maxListHeight).testTag("folder_members"),
+            contentPadding = PaddingValues(bottom = 32.dp)) {
             if (members.isEmpty()) item {
                 Text(stringResource(R.string.folder_contents_empty),
                     Modifier.testTag("folder_empty").padding(horizontal = 12.dp, vertical = 18.dp),
@@ -113,14 +125,41 @@ fun FolderPopup(
                     Text(itemApp.label, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            // hotfix folders2：弹层 widget 项（原版 ShortcutPopup.kt:172-182 逐字：
-            // rememberHostedWidget + HomeWidget，editing=false，长按进编辑）
+            // hotfix folders2 → S5b：弹层 widget 项改走 PopupWidgetItem（尺寸/缩放/全宽可编辑）。
+            // 编辑入口 = 右上角小按钮（选中后出现控制条与四边手柄）；长按仍进文件夹编辑页。
+            val selectedLayout = selectedWidgetId?.let { id -> widgets.firstOrNull { it.widgetId == id } }
+            if (selectedLayout != null) item(key = "widget_controls") {
+                PopupWidgetControls(
+                    layout = drafts[selectedLayout.widgetId] ?: selectedLayout,
+                    onChange = { next, save -> applyDraft(selectedLayout.widgetId, next, save) },
+                    onDone = { selectedWidgetId = null },
+                )
+            }
             items(widgets, key = { "widget:${it.widgetId}" }) { layout ->
-                val hosted = rememberHostedWidget(layout)
-                Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    HomeWidget(layout, hosted, hosted.defaultHeight, editing = false,
-                        enabled = !reveal.dragging && reveal.expanded, hapticsEnabled = true,
-                        onLongPress = { onEdit?.invoke() })
+                val current = drafts[layout.widgetId] ?: layout
+                Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp)) {
+                    PopupWidgetItem(
+                        layout = current,
+                        selected = selectedWidgetId == layout.widgetId,
+                        enabled = !reveal.dragging && reveal.expanded,
+                        haptics = true,
+                        // 高度上限 = 弹层可视高度（原来固定 1200dp，用户实锤"上下没限制"）
+                        maxHeight = maxListHeight.value.toInt().coerceIn(48, 1200),
+                        onChange = { next, save -> applyDraft(layout.widgetId, next, save) },
+                        onDragStart = {},
+                        onDrag = {},
+                        onDragEnd = {},
+                        onResizing = {},
+                        // 默认 18dp 内缩：给左右手柄留出可点击区（传 0 会让手柄贴着弹层边缘被裁掉）
+                        horizontalInset = 18.dp,
+                    )
+                    if (selectedWidgetId != layout.widgetId) {
+                        androidx.compose.material3.IconButton(
+                            onClick = { selectedWidgetId = layout.widgetId; drafts = drafts + (layout.widgetId to current) },
+                            modifier = Modifier.align(Alignment.TopEnd).size(30.dp)
+                                .testTag("popup_widget_edit:${layout.widgetId}"),
+                        ) { LauncherIcon(LauncherSymbol.Resize, Modifier.size(15.dp)) }
+                    }
                 }
             }
         }
