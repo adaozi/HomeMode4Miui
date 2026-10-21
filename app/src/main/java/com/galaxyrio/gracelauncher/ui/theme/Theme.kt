@@ -16,10 +16,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalResources
 import com.materialkolor.PaletteStyle
 import com.galaxyrio.gracelauncher.data.FontLibrary
-import com.galaxyrio.gracelauncher.data.launcherThemeSeed
 import com.galaxyrio.gracelauncher.data.launcherColorScheme
 
 val Ink = Color(0xFF071A19)
@@ -78,8 +76,14 @@ fun GraceLauncherTheme(
     paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
     content: @Composable () -> Unit,
 ) {
+    // 模块侧根因修复（壁纸跟随）：dynamicColor 分支原版只读一次 system_accent1_500，
+    // MIUI 上该资源静态 + 无重组失效源 → 主题色不随壁纸变。改为 rememberWallpaperSeedColor：
+    // WallpaperColors 主色驱动 + OnColorsChangedListener 失效（见 LauncherAppearance.kt）。
     val colorScheme = if (seedColor != null || (dynamicColor && Build.VERSION.SDK_INT >= 31)) {
-        val seed = launcherThemeSeed(LocalResources.current, dynamicColor, seedColor?.toArgb() ?: 0xFF6750A4.toInt())
+        val fallbackSeed = seedColor?.toArgb() ?: 0xFF6750A4.toInt()
+        val seed = if (dynamicColor && Build.VERSION.SDK_INT >= 31) {
+            rememberWallpaperSeedColor(fallbackSeed)
+        } else fallbackSeed
         remember(seed, darkTheme, paletteStyle) { launcherColorScheme(seed, darkTheme, paletteStyle) }
     } else if (darkTheme) DarkColorScheme else LightColorScheme
 

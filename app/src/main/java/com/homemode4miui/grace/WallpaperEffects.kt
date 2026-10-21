@@ -82,8 +82,12 @@ internal fun WindowWallpaperBlurEffect(
 @Composable
 internal fun rememberWallpaperBlurBitmap(hostContext: Context?, enabled: Boolean): State<Bitmap?> {
     val bitmap = androidx.compose.runtime.remember { mutableStateOf<Bitmap?>(null) }
+    // 模块侧根因修复：原 LaunchedEffect 只 key 在 hostContext —— 壁纸更换后位图永远
+    // 是旧快照。接入 rememberWallpaperVersion（颜色监听 + 换壁纸广播双通道）驱动重载；
+    // 重载期间保留旧位图，新位图就绪后无缝替换（不闪空窗）。
+    val wallpaperVersion = com.galaxyrio.gracelauncher.ui.theme.rememberWallpaperVersion()
     if (enabled && hostContext != null) {
-        LaunchedEffect(hostContext) {
+        LaunchedEffect(hostContext, wallpaperVersion) {
             bitmap.value = withContext(Dispatchers.IO) {
                 runCatching {
                     val drawable = WallpaperManager.getInstance(hostContext).drawable

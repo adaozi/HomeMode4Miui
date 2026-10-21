@@ -319,12 +319,28 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** folders 阶段：文件夹流（Room folders 表 + popup items 成员 JSON，原版 snapshots 同构） */
     private var foldersJob: Job? = null
     private var iconsJob: Job? = null
+    /** 壁纸跟随失效源（模块侧根因修复）：Grace 按钮/themed 图标的光栅化配色在 VM 层
+     *  预渲染成位图，壁纸变化后必须重渲染才跟得上主题。双通道 bump（与组合层
+     *  rememberWallpaperVersion 同语义）：OnColorsChangedListener（AOSP 对同色系
+     *  壁纸去重不回调）+ ACTION_WALLPAPER_CHANGED 广播（每次设壁纸必发）。 */
+    private val wallpaperRevision = kotlinx.coroutines.flow.MutableStateFlow(0)
+    private val wallpaperColorsListener = android.app.WallpaperManager.OnColorsChangedListener { _, _ ->
+        wallpaperRevision.value = wallpaperRevision.value + 1
+    }
+    private val wallpaperReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_WALLPAPER_CHANGED) wallpaperRevision.value = wallpaperRevision.value + 1
+        }
+    }
     /** 上游同步补漏：item_icons 快照（iconsJob 主线程写，refreshApps/装饰读）。
      *  上游 LauncherViewModel.itemsSnapshot.icons 的宿主同构。 */
     private var iconsSnapshot: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon> = emptyMap()
     /** 内存列表（apps + folderApps）当前已按哪个 icons 快照装饰完成的标记；
      *  null = 未装饰/上次装饰失败（下次快照到达强制重试）。 */
     private var itemsDecoratedWith: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon>? = null
+    /** 上次重装饰时的主题戳（壁纸 revision + 主题设置指纹，见 decorationThemeStampOf）；
+     *  null = 从未记录。戳变化 = 光栅化配色来源变化，iconsJob 强制重装饰。 */
+    private var decorationThemeStamp: String? = null
     /** 「读内存列表 → 装饰 → 原子换入」串行化：iconsJob 重装饰与 refreshApps 收尾互斥。 */
     private val decorateMutex = Mutex()
     /** hotfix folders2：已保存快捷方式流（saved_shortcuts 表） */
@@ -358,6 +374,14 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         // notif1：挂载即拉取快照 —— 引擎指纹去重是模块进程持久单例，桌面重启后
         // 重启前的通知/媒体快照不会重发（要等新通知/切歌），必须显式拉取。
         sendBridgeCommand(GraceBridge.Cmd.SNAPSHOT_REFRESH)
+        // 壁纸跟随失效源注册（见 wallpaperRevision 注释）；shutdown 侧解绑
+        runCatching {
+            android.app.WallpaperManager.getInstance(application)
+                .addOnColorsChangedListener(wallpaperColorsListener,
+                    android.os.Handler(android.os.Looper.getMainLooper()))
+        }
+        ContextCompat.registerReceiver(application, wallpaperReceiver,
+            IntentFilter(Intent.ACTION_WALLPAPER_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         // B6.2：天气首装载（本进程直读小米天气 provider；后续 ContentObserver 失效）
         weatherHostEngine.refresh("mount")
         // P3：Room 设置接管 —— SP seed 迁移（一次性）+ 行变化流常驻跟随
@@ -440,10 +464,16 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
         // 上游同步 v1.1.8 S8b：图标设计器产出跟随（GraceButton design + artwork 面）
+        // 模块侧根因修复：combine 壁纸 revision + 设置流 —— 光栅化配色（WallpaperColors
+        // 种子）或主题设置变化时，Grace 按钮 artwork 重渲染 + themed 图标强制重装饰。
         iconsJob = viewModelScope.launch {
             try {
                 val database = LauncherDatabase.getInstance(application)
-                database.itemsDao().icons().collect { rows ->
+                kotlinx.coroutines.flow.combine(
+                    database.itemsDao().icons(),
+                    settingsRepository.observeSettings(),
+                    wallpaperRevision,
+                ) { rows, _, _ -> rows }.collect { rows ->
                     val icons = rows.mapNotNull { row ->
                         com.galaxyrio.gracelauncher.data.ItemIcon.decode(row.iconJson)?.let { row.itemKey to it }
                     }.toMap()
@@ -482,7 +512,16 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     // ② isLoadingApps = refreshApps 在途，其 decorateApps 会读到刚落的最新
                     //   快照，无需（也不能）在此并发重装饰——否则读到的旧/空 apps 会在
                     //   update 时覆盖装载结果（空列表闪断竞态，v2.9.51 起存在）。
-                    if (icons != itemsDecoratedWith) applyItemIconSnapshot()
+                    // ③ 模块侧补强：主题戳（壁纸 revision + 主题设置）变化也强制重装饰 ——
+                    //   themed 图标/Grace 按钮的光栅化配色随壁纸取色种子即时刷新。
+                    val iconSettingsForStamp = currentIconSettingsOrNull()
+                    if (iconSettingsForStamp != null) {
+                        val stamp = decorationThemeStampOf(iconSettingsForStamp)
+                        if (icons != itemsDecoratedWith || stamp != decorationThemeStamp) {
+                            decorationThemeStamp = stamp
+                            applyItemIconSnapshot()
+                        }
+                    }
                     _uiState.update { it.copy(itemIcons = icons, graceButtonApp = buttonApp) }
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
@@ -587,6 +626,20 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      * （在途 refreshApps 的 decorateApps 会读到刚落的最新快照）。成功后落 itemsDecoratedWith
      * 标记；失败不落（下次快照到达强制重试）。
      */
+    /** 主题戳：光栅化配色的全部来源指纹（壁纸取色 revision + 主题设置 + 夜间模式）。
+     *  任一变化 = ItemIconStore.themeColors/dynamicColors 会产出不同配色 → 强制重装饰。 */
+    private fun decorationThemeStampOf(settings: com.galaxyrio.gracelauncher.data.LauncherSettings): String {
+        val nightMode = getApplication<Application>().resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        return wallpaperRevision.value.toString() + "|" + settings.useDynamicColors + "|" + settings.themeColor +
+            "|" + settings.darkMode.name + "|" + settings.paletteStyle.name + "|" +
+            settings.enabledIconPackPackages + "|" + nightMode
+    }
+
+    /** currentIconSettings 的容错版（主题戳计算用；失败返回 null 跳过本次重装饰判定）。 */
+    private suspend fun currentIconSettingsOrNull(): com.galaxyrio.gracelauncher.data.LauncherSettings? =
+        runCatching { currentIconSettings() }.getOrNull()
+
     private suspend fun applyItemIconSnapshot(): Boolean {
         if (_uiState.value.isLoadingApps) return false
         return decorateMutex.withLock {
@@ -1063,5 +1116,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             .onFailure { ModLog.e("GraceHomeViewModel unregister receiver failed", it) }
         runCatching { getApplication<Application>().unregisterReceiver(bridgeReceiver) }
             .onFailure { ModLog.e("GraceHomeViewModel unregister bridge receiver failed", it) }
+        // 壁纸跟随失效源解绑（init 侧注册，见 wallpaperRevision 注释）
+        runCatching {
+            android.app.WallpaperManager.getInstance(getApplication())
+                .removeOnColorsChangedListener(wallpaperColorsListener)
+        }
+        runCatching { getApplication<Application>().unregisterReceiver(wallpaperReceiver) }
+            .onFailure { ModLog.e("GraceHomeViewModel unregister wallpaper receiver failed", it) }
     }
 }

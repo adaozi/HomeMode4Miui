@@ -625,3 +625,11 @@ DIFF vs 桩文件:
 - [x] **autohide-fix（v2.9.96 / vc112，594ebdb）**：装机回归首 bug —— 文件夹「自动隐藏内部的应用」开关点不动。根因：GraceSettingsBridge 快照 fols 线格式 encode/decode 双漏 autoHideApps，设置页 folders 该字段恒 false 且回推快照无字段，开关视觉弹回。修复：bridge encode/decode 成对补字段，SAVE_FOLDER → pushSnapshot 闭环即时刷新。
 - [x] 惯例沉淀：新增设置字段必须全通道成对 —— DB 列 / LauncherSettingsRepository、GraceSettingsBridge（encodeRow/decode/delta + **快照 wire 格式 fols**）、GraceHomeSettings/快照模型；folder 类字段另查 fols 线格式。
 - [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.96-autohide-fix-112.apk。
+
+### wallpaper-follow（v2.9.97 / versionCode 113，2026-10-21）—— 壁纸跟随三连修（主题色/模糊层/Grace 按钮+themed 图标）
+
+- [x] **问题（装机反馈）**：换壁纸后主题色不跟随、开启模糊时模糊壁纸不刷新、Grace 按钮颜色不跟随主题色。同源根因：桌面各处只在进程启动时读一次壁纸，无任何"壁纸变化失效源"。
+- [x] **根因拆解**：① Theme.kt dynamicColor 分支组合期读一次静态 `system_accent1_500`（MIUI/HyperOS 无完整 Material You 取色，该资源恒定）且无重组触发；② rememberWallpaperBlurBitmap 的 LaunchedEffect 只 key hostContext，壁纸快照永不过期；③ Grace 按钮/themed 图标是 VM 层光栅化位图（ItemIconStore），配色种子走 launcherThemeSeed 且 icons Room 流只在 item_icons 行变化时重渲染 —— 壁纸/主题变化后位图颜色冻结。
+- [x] **修复**：ThemePalette.kt 落共享底座 —— `wallpaperPrimaryArgb`（反射取 WallpaperColors 主色）+ `launcherWallpaperSeed(context,...)`（主色优先，accent 兜底，与上游 launcherThemeSeed 同降级链）；LauncherAppearance.kt 新增 `rememberWallpaperVersion`（OnColorsChangedListener + ACTION_WALLPAPER_CHANGED 广播双通道，广播补 AOSP WallpaperColors 同色去重盲区）与 `rememberWallpaperSeedColor`（组合层 reactive 种子）；Theme.kt dynamicColor 分支接 reactive 种子；WallpaperEffects.kt 模糊位图 key 壁纸版本重载（重载期保留旧图不闪窗）；ItemIconStore themeColors/dynamicColors 切 launcherWallpaperSeed；GraceHomeViewModel 新增 wallpaperRevision 失效源（init 注册/shutdown 解绑）+ icons 流 combine(icons, 设置流, 壁纸revision) + 主题戳（壁纸 rev+主题设置+夜间模式）强制重装饰。
+- [x] **关键坑（编译期实锤）**：compileSdk 37 下 `WallpaperColors.getPrimaryColor()` 返回类型从 int 变为 `android.graphics.Color`（同名不同方法描述符）——按新签名直编，装机在旧 framework 上 NoSuchMethodError；必须 Java 反射按名调用 + toArgb 兼容。
+- [x] 构建：assembleRelease 通过；产物 .build/out/HomeMode4Miui-v2.9.97-wallpaper-follow-113.apk。行为说明：默认 G glyph 按钮走 colorScheme.primaryContainer 本就跟随；自定义设计按钮/themed 图标随主题戳重渲染即时跟随（IO 异步，允许极短旧色→新色过渡）。

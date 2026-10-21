@@ -37,6 +37,7 @@ import com.galaxyrio.gracelauncher.data.IconDisplaySettings
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.WallpaperTextMode
 import com.galaxyrio.gracelauncher.data.IconColor
+import com.galaxyrio.gracelauncher.data.wallpaperPrimaryArgb
 import com.materialkolor.palettes.TonalPalette
 import java.util.function.Consumer
 
@@ -88,6 +89,79 @@ fun rememberLauncherAppearance(mode: WallpaperTextMode, themedIcons: Boolean, ic
         iconSize = iconSize.coerceIn(80, 150),
         iconDisplay = iconDisplay,
     )
+}
+
+/**
+ * 壁纸变化信号（wallpaper-reactive，模块侧根因修复）：
+ * 原版 dynamicColor 只在组合期读一次 system_accent1_500 —— MIUI/HyperOS 的该资源是
+ * 静态值（无完整 Material You 壁纸取色），且壁纸更换后没有任何重组失效源，主题色
+ * 永远停在进程启动时的状态。此 Composable 提供统一的壁纸版本号，双通道去盲区：
+ *   - OnColorsChangedListener：AOSP 会做 WallpaperColors 去重（同色系新壁纸不回调）；
+ *   - ACTION_WALLPAPER_CHANGED 广播：每次设壁纸必发，补齐同色系盲区。
+ * 双通道对同一次换壁纸可能各 bump 一次（广播即时、colors 回调延迟）→ 两次重组/两次
+ * 重载，无正确性问题，仅一次冗余重载，可接受。
+ */
+@Composable
+internal fun rememberWallpaperVersion(): Int {
+    val context = LocalContext.current
+    var version by remember(context) { mutableStateOf(0) }
+    DisposableEffect(context) {
+        val manager = runCatching { WallpaperManager.getInstance(context) }.getOrNull()
+        val colorsListener = WallpaperManager.OnColorsChangedListener { _, _ -> version++ }
+        runCatching { manager?.addOnColorsChangedListener(colorsListener, Handler(Looper.getMainLooper())) }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_WALLPAPER_CHANGED) version++
+            }
+        }
+        runCatching {
+            ContextCompat.registerReceiver(
+                context, receiver, IntentFilter(Intent.ACTION_WALLPAPER_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
+        onDispose {
+            runCatching { manager?.removeOnColorsChangedListener(colorsListener) }
+            runCatching { context.unregisterReceiver(receiver) }
+        }
+    }
+    return version
+}
+
+/**
+ * 壁纸动态取色种子（reactive）。优先 WallpaperColors 主色 —— 与 ROM 的
+ * Material You 实现无关，任何 ROM（含 MIUI/HyperOS）都能跟随壁纸；system_accent1_500
+ * 仅在系统未回壁纸颜色时兜底（保持与上游 launcherThemeSeed 一致的降级链）。
+ * 主色提取走 data 层共享的 wallpaperPrimaryArgb（反射兼容 API 37 签名变化，见
+ * ThemePalette.kt）——与 ItemIconStore 光栅化配色同源。
+ * rememberLauncherAppearance 的 darkText 已有自己的颜色监听，二者互不干扰。
+ */
+@Composable
+internal fun rememberWallpaperSeedColor(fallback: Int): Int {
+    val context = LocalContext.current
+    val manager = remember(context) { runCatching { WallpaperManager.getInstance(context) }.getOrNull() }
+    var seed: Int by remember(manager) {
+        val initial: Int = runCatching {
+            wallpaperPrimaryArgb(manager?.getWallpaperColors(WallpaperManager.FLAG_SYSTEM))
+                ?: context.resources.getColor(android.R.color.system_accent1_500, null)
+        }.getOrDefault(fallback)
+        mutableStateOf(initial)
+    }
+    DisposableEffect(manager) {
+        val listener = WallpaperManager.OnColorsChangedListener { colors, which ->
+            if (which and WallpaperManager.FLAG_SYSTEM != 0) {
+                val resolved: Int? = runCatching {
+                    wallpaperPrimaryArgb(colors)
+                        ?: wallpaperPrimaryArgb(manager?.getWallpaperColors(WallpaperManager.FLAG_SYSTEM))
+                        ?: context.resources.getColor(android.R.color.system_accent1_500, null)
+                }.getOrNull()
+                resolved?.let { seed = it }
+            }
+        }
+        runCatching { manager?.addOnColorsChangedListener(listener, Handler(Looper.getMainLooper())) }
+        onDispose { runCatching { manager?.removeOnColorsChangedListener(listener) } }
+    }
+    return seed
 }
 
 @Composable

@@ -25,7 +25,7 @@ import com.galaxyrio.gracelauncher.data.LauncherSettings
 import com.galaxyrio.gracelauncher.data.ThemeMode
 import com.galaxyrio.gracelauncher.data.icons.isGraceButton
 import com.galaxyrio.gracelauncher.data.launcherIconColors
-import com.galaxyrio.gracelauncher.data.launcherThemeSeed
+import com.galaxyrio.gracelauncher.data.launcherWallpaperSeed
 import com.materialkolor.PaletteStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -71,7 +71,10 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
     }
 
     internal fun themeColors(settings: LauncherSettings): Pair<Int, Int> {
-        val seed = launcherThemeSeed(context.resources, settings.useDynamicColors, settings.themeColor)
+        // 模块侧根因修复：launcherThemeSeed 读静态 system_accent1_500 —— MIUI 上恒定
+        // 且不随壁纸变。改 launcherWallpaperSeed（WallpaperColors 主色优先，降级链一致），
+        // Grace 按钮 / themed 图标的光栅化配色与桌面主题种子同源。
+        val seed = launcherWallpaperSeed(context, settings.useDynamicColors, settings.themeColor)
         return paletteColors(seed, isDark(settings), settings.paletteStyle)
     }
 
@@ -88,7 +91,7 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
     }
 
     internal fun dynamicColors(settings: LauncherSettings): Pair<Int, Int> {
-        val seed = launcherThemeSeed(context.resources, true, settings.themeColor)
+        val seed = launcherWallpaperSeed(context, true, settings.themeColor)
         return paletteColors(seed, isDark(settings), settings.paletteStyle)
     }
 
