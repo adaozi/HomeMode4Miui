@@ -322,7 +322,12 @@ abstract class LauncherDatabase : RoomDatabase() {
                 context.applicationContext,
                 LauncherDatabase::class.java,
                 databasePath(context),
-            ).addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22).build().also { instance = it }
+            )
+                // hotfix1（2026-10-21 实锤）：v1.2.0 同步战役曾把 DB 升到 v24，回装 v22 版后
+                // Room 降级无迁移路径 → snapshot build 全挂（第四桌面应用/设置装载失败）。
+                // 仅降级时销毁重建（升级仍走迁移链），用户数据以桌面重置为代价换取功能恢复。
+                .fallbackToDestructiveMigrationOnDowngrade()
+                .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22).build().also { instance = it }
         }
     }
 }
