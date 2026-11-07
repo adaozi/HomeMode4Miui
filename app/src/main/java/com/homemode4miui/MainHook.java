@@ -107,6 +107,14 @@ public class MainHook implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpp) {
+        // 6b. PA 进程分支（负一屏自愈链）：拦截 PA 判死流程的 widget id 删除，
+        //     保住第三方 provider（notes 等）按 appWidgetId 键控的内容映射。
+        //     需 LSPosed 作用域勾选 com.miui.personalassistant；hook 失败独立降级。
+        if ("com.miui.personalassistant".equals(lpp.packageName)) {
+            log("loaded into " + lpp.packageName + " (PaWidgetGuard)");
+            com.homemode4miui.hook.PaWidgetGuard.install(lpp.classLoader);
+            return;
+        }
         if (!HOME_PKG.equals(lpp.packageName)) return;
         // hotfix：仅主进程装载全套 hook —— 宿主若派生子进程（内容中心/推送等），
         // 每进程都装 hook + 注册接收器会造成多份 pong 响应与静态状态分裂

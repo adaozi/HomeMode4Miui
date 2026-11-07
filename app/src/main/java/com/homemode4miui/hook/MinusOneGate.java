@@ -56,15 +56,21 @@ public final class MinusOneGate {
     private static volatile boolean sReceiverRegistered = false;
     private static volatile boolean sUnlockSeen = false;
 
-    /** 重放就绪判定：provider 注册表阈值（本机全量 522，缩水态 9~17，边界取 50）。 */
-    private static final int READY_MIN_PROVIDERS = 50;
+    /** 重放就绪判定：provider 注册表阈值（本机全量 522，缩水态 9~17，toggle 后 25 → 取 20）。 */
+    private static final int READY_MIN_PROVIDERS = 20;
     /** 就绪轮询节奏与超时（超时强制重放 = 回退旧竞态行为，绝不永久卡死）。 */
     private static final long READY_POLL_INTERVAL_MS = 1000L;
     private static final long READY_TIMEOUT_MS = 120_000L;
+    /** toggle 后注册补全的固定等待（实测 PACKAGE_CHANGED 重扫 ~16s，取 20s 留余量）。 */
+    private static final long TOGGLE_SETTLE_MS = 20_000L;
     private static final android.os.Handler sHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
     private static volatile long sReadyPollStart = 0L;
     private static volatile boolean sToggleTried = false;
+    /** toggle 完成时刻（elapsedRealtime）。重放需在 toggle 后留足注册补全时间（实测 ~16s）。 */
+    private static volatile long sToggleAt = 0L;
+    /** 就绪标志：true = connect 已可放行/已重放。MinusOneEntry 据此挡状态机兜底。 */
+    private static volatile boolean sReady = false;
 
     /**
      * 已知负一屏 widget 包（每包 toggle 一个组件即可触发整包 provider 重注册，
@@ -85,6 +91,11 @@ public final class MinusOneGate {
     private MinusOneGate() {
     }
 
+    /** 供 MinusOneEntry 查询：gate 正在延迟期（解锁后 provider 未就绪）→ open 不落状态机。 */
+    public static boolean isDeferring() {
+        return !sReady;
+    }
+
     /** MainHook 挂载入口。 */
     public static void install(ClassLoader cl) {
         XposedHelpers.findAndHookMethod(CLIENT_CLS, cl, "connect", new XC_MethodHook() {
@@ -94,6 +105,7 @@ public final class MinusOneGate {
                     if (sUnlockSeen) return; // 解锁后：所有 connect 直接放行
                     if (isUserUnlocked()) {
                         sUnlockSeen = true;
+                        sReady = true; // 解锁即放行 = 无缩水场景（原生路径），开放使用
                         ModLog.i("MinusOneGate: unlocked already, connect passthrough");
                         return;
                     }
@@ -113,6 +125,7 @@ public final class MinusOneGate {
                 } catch (Throwable t) {
                     // 自愈组件自身故障绝不阻断宿主连接：放行并永久停用 gate
                     sUnlockSeen = true;
+                    sReady = true; // 降级：gate 失效则完全放行，isDeferring 不得挡 open
                     ModLog.e("MinusOneGate: gate error, passthrough + disabled", t);
                 }
             }
@@ -129,6 +142,7 @@ public final class MinusOneGate {
             boolean unlocked = um.isUserUnlocked(Process.myUserHandle());
             return unlocked;
         } catch (Throwable t) {
+            sReady = true; // 探测失败降级放行
             ModLog.e("MinusOneGate: isUserUnlocked probe failed, passthrough", t);
             return true;
         }
@@ -191,9 +205,17 @@ public final class MinusOneGate {
         if (sPending.isEmpty()) return;
         final int n = countInstalledProviders();
         final long elapsed = android.os.SystemClock.elapsedRealtime() - sReadyPollStart;
-        if (n >= READY_MIN_PROVIDERS || elapsed >= READY_TIMEOUT_MS) {
+        // 重放双条件：① 注册表恢复到阈值；② toggle 后留足注册补全时间（实测 ~16s 取 20s）
+        // —— v3 教训：toggle 刚发就重放，PA 预载撞未完成的注册窗口再次判死（16:33:55）。
+        final long sinceToggle = sToggleAt == 0L
+                ? Long.MAX_VALUE : android.os.SystemClock.elapsedRealtime() - sToggleAt;
+        final boolean registryReady = n >= READY_MIN_PROVIDERS;
+        final boolean toggleSettled = sinceToggle >= TOGGLE_SETTLE_MS;
+        if ((registryReady && toggleSettled) || elapsed >= READY_TIMEOUT_MS) {
+            sReady = true;
             ModLog.i("MinusOneGate: ready (providers=" + n + ", waited=" + elapsed
-                    + "ms, timeout=" + (n < READY_MIN_PROVIDERS) + ") -> replaying "
+                    + "ms, sinceToggle=" + (sinceToggle == Long.MAX_VALUE ? -1 : sinceToggle)
+                    + ", timeout=" + (elapsed >= READY_TIMEOUT_MS) + ") -> replaying "
                     + sPending.size() + " connect()");
             replayAll();
             return;
@@ -203,6 +225,7 @@ public final class MinusOneGate {
         // 时置位 sToggleTried 不再重复，退化为纯轮询 + 超时重放兜底。
         if (!sToggleTried) {
             sToggleTried = true;
+            sToggleAt = android.os.SystemClock.elapsedRealtime();
             toggleKnownProviders();
         }
         sHandler.postDelayed(MinusOneGate::pollReady, READY_POLL_INTERVAL_MS);
@@ -246,6 +269,7 @@ public final class MinusOneGate {
 
     /** 重放全部挂起的 connect()（原生调用线程即主线程，此处同为 Handler 主线程）。 */
     private static void replayAll() {
+        sReady = true;
         final List<Object> pending;
         synchronized (sPending) {
             if (sPending.isEmpty()) return;
@@ -273,6 +297,27 @@ public final class MinusOneGate {
                 ModLog.e("MinusOneGate: replay connect failed on "
                         + client.getClass().getSimpleName(), t);
             }
+        }
+        // 自愈收尾：重放前 PA 若已在缩水窗口跑过预载，视图会停在判死占位（数据已就绪
+        // 而视图未刷新，2026-11-07 17:23 实测）。force-stop PA 触发干净重载 —— 此时
+        // provider 已就绪，重起后的预载一步到位（bind 成功、无判死）。权限不足则跳过，
+        // 用户重开负一屏时由 MinusOneEntry 的 attach 链自然恢复。
+        sHandler.postDelayed(MinusOneGate::forceStopPa, 2000L);
+    }
+
+    /** 反射 ActivityManager.forceStopPackage（@hide）：priv-app 持有签名权限则生效。 */
+    private static void forceStopPa() {
+        try {
+            final Context app = currentApplication();
+            if (app == null) return;
+            XposedHelpers.callStaticMethod(
+                    XposedHelpers.findClass("android.app.ActivityManager",
+                            MinusOneGate.class.getClassLoader()),
+                    "forceStopPackage", "com.miui.personalassistant");
+            ModLog.i("MinusOneGate: force-stopped PA for clean reload (providers ready)");
+        } catch (Throwable t) {
+            ModLog.i("MinusOneGate: forceStopPA unavailable ("
+                    + t.getClass().getSimpleName() + "), skipping");
         }
     }
 }
