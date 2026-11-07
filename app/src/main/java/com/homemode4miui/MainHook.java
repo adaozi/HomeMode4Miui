@@ -206,6 +206,16 @@ public class MainHook implements IXposedHookLoadPackage {
                 hookLauncherMethod(cl, "onPause", mLauncherPauseSync);
             }
         });
+        // 6. 负一屏 Widget 自愈：u0 FBE 解锁前延迟 PA overlay 连接（LauncherClient.connect）。
+        //    模块桌面模式开机时宿主启动开销使 PA 预载早于 unlock 完成 → CE 区 widget
+        //    provider 未注册 → PA restoreWidget bind 被拒 → 判死删库 → 负一屏
+        //    "无法添加微件"/空白且永久失效（2026-11-07 双模式对照实验实锤）。
+        //    gate 后解锁重放 connect = 原生健康路径（provider 就绪 → bind 成功 → 自动恢复）。
+        tryHook("6.MinusOneGate (负一屏解锁前延迟连接)", new HookTask() {
+            @Override public void run() {
+                com.homemode4miui.hook.MinusOneGate.install(cl);
+            }
+        });
         tryHook("9.SuperDraglayer.findActiveController (手势隔离)", new HookTask() {
             @Override public void run() { GestureIsolator.inject(cl); }
         });
@@ -260,8 +270,14 @@ public class MainHook implements IXposedHookLoadPackage {
             try {
                 return LauncherModeController.getCurrentMode() == CustomLauncherMode.getInstance();
             } catch (Throwable t) {
-                // 裁决链路异常最需留痕：静默回退 SP 分支会掩盖宿主签名漂移
-                ModLog.e("MainHook isCustomModeActive adjudication read failed", t);
+                // 熔断（2026-10-31 日志实锤）：OS3 之外的部分宿主把 getCurrentMode 裁成
+                // R8 stub（"HOST STUB — never executed at runtime"），该调用会出现在触摸
+                // 分发路径上 —— 实测 5 分钟抛 711 次、每次打完整栈（≈1.4 万行日志），
+                // 异常构造 + 栈打印本身就是卡顿源。判定锚点既然不可用就不该反复重试：
+                // 一次失败永久降级到 SP 标志分支（后续零异常、零日志）。
+                sAdjudicationInstalled = false;
+                ModLog.e("MainHook isCustomModeActive adjudication unavailable"
+                        + " -> fallback to SP flag (further attempts disabled)", t);
             }
         }
         Activity launcher = sLauncher;
