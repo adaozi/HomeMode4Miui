@@ -1,10 +1,8 @@
 /*
  * notif7.5：root 保活 —— 新建文件（非搬运）。运行在【模块 App 进程】。
- *
  * 背景（notif7 定案）：MIUI 省电策略在模块退后台后解绑 NotificationListenerService
  * 且系统不自动重绑；notif7 自愈链（看门狗 + rebind + component toggle）是解绑后的
  * 兜底，本文件把防线前移 —— 尽量让 MIUI 根本不解绑。
- *
  * 设计约束：
  *   - LSPosed 环境设备必然已 root，su 通道现成；但 su 必须不阻塞主线程
  *     （Magisk 授权框挂起时 waitFor 会无限等 —— 全程后台线程 + 超时强杀）。
@@ -14,8 +12,8 @@
  *     造成移植漂移）。
  *   - 三项手段全部 best-effort、逐项隔离失败、逐项打点：任一失败不影响
  *     其余，全失败时 notif7 自愈链照常兜底 —— 保活是增强不是依赖。
- *
- * 手段清单（按可靠性排序）：
+ * 手段清单（按可靠性排序；v2.9.144 移除 service.d 开机脚本——死循环卡 KSU
+ *   启动 + 卸载残留，见 removeLegacyBootScript 注释）：
  *   1. Doze 白名单 `dumpsys deviceidle whitelist +pkg` —— 标准 Android，可靠。
  *   2. MIUI PowerKeeper 数据库写 per-app 省电策略（本次解绑 listener 的元凶）
  *      —— 表结构随 HyperOS 版本漂移，多变体尝试，设备缺 sqlite3 或表结构
@@ -84,7 +82,7 @@ object RootKeepAlive {
                 applyDozeWhitelist()
                 applyPowerKeeperPolicy()
                 applyAutostart()
-                installBootScript()
+                removeLegacyBootScript()
                 applied = true
                 true
             }.onFailure { ModLog.e("RootKeepAlive: apply failed", it) }.getOrDefault(false)
@@ -129,40 +127,20 @@ object RootKeepAlive {
     }
 
     /**
-     * 4. Magisk service.d 开机守护脚本（keep1）：开机后常驻循环，周期检查
-     * 模块进程，被杀则 root 身份 am startservice 拉起（root 调用方不受后台
-     * startService 限制 —— 装机实锤的「模块死在后台无人拉」的 root 侧根治）。
-     * perf4（功耗专项）：轮询周期 30s → 120s。该脚本是 root 侧兜底而非主保活
-     * 链路 —— 主链路是 HomeController.attach 的 pokeFromHost（用户回桌面即拉起，
-     * 零延迟）；用户实际感知到"模块死了"的场景几乎都发生在回到桌面时，彼时
-     * poke 已先行复活，兜底拉活延迟从最坏 30s 放宽到 120s 无实际体验差异，
-     * 换来待机期周期 fork（pidof 每次读 /proc 全量）降 75%。
-     * 脚本内容经 base64 传输落盘（规避 su -c 的引号嵌套地狱）；重复安装覆盖写
-     * 幂等；pkill 旧守护后 nohup 立即启动，不要求重启即生效。
+     * 4.（已移除，v2.9.144）Magisk/KSU service.d 开机保活脚本（keep1）—— 运行时以 su
+     *    写入 /data/adb/service.d/ 的方案废弃：
+     *    ① while true 死循环在 KSU service 阶段被串行执行等待完成，永久卡住启动流程
+     *      → 开机失败 → KSU 自动进安全模式（2026-11-12 用户设备实锤）；
+     *    ② 运行时写入的脚本不属于模块刷入包，卸载模块后残留，持续影响用户环境。
+     *    保活完全依赖主链路 pokeFromHost（用户回桌面即拉起，零延迟）+ Doze 白名单 +
+     *    PowerKeeper 策略；旧设备残留由 removeLegacyBootScript() 自动清理。
      */
-    private fun installBootScript() {
-        // v2.9.144 修复：保活循环必须后台化 —— KSU/Magisk 的 service.d 脚本在
-        // 启动 service 阶段被串行执行并等待完成，此前的 while true 死循环会永久
-        // 卡住 KSU 的启动流程 → 开机失败 → KSU 自动进安全模式（2026-11-12 实锤，
-        // 用户设备卡启动、仅安全模式可开机）。外包 ( ) & 后脚本立即返回，保活
-        // 子进程不受影响。
-        val script = """
-            #!/system/bin/sh
-            # HomeMode4Miui process keepalive (keep1, managed by module)
-            (while true; do
-              if ! pidof com.homemode4miui >/dev/null 2>&1; then
-                am startservice -n com.homemode4miui/com.homemode4miui.bridge.GraceKeepAliveService >/dev/null 2>&1
-              fi
-              sleep 120
-            done) &
-        """.trimIndent()
-        val b64 = android.util.Base64.encodeToString(script.toByteArray(), android.util.Base64.NO_WRAP)
-        val path = "/data/adb/service.d/hm4m_keepalive.sh"
-        val out = su(
-            "mkdir -p /data/adb/service.d && echo $b64 | base64 -d > $path && chmod 700 $path" +
-                " && pkill -f hm4m_keepalive.sh; nohup sh $path >/dev/null 2>&1 & echo installed"
-        )
-        ModLog.i("RootKeepAlive: boot guard script -> ${if (out != null) "installed ($path)" else "failed/skipped"}")
+    /** 清理历史版本写入的 service.d 保活脚本残留（幂等，每次 apply 顺手执行）。 */
+    private fun removeLegacyBootScript() {
+        val out = su("rm -f /data/adb/service.d/hm4m_keepalive.sh")
+        if (out != null) {
+            ModLog.i("RootKeepAlive: legacy service.d keepalive script removed if present")
+        }
     }
 
     /**
