@@ -141,15 +141,20 @@ object RootKeepAlive {
      * 幂等；pkill 旧守护后 nohup 立即启动，不要求重启即生效。
      */
     private fun installBootScript() {
+        // v2.9.144 修复：保活循环必须后台化 —— KSU/Magisk 的 service.d 脚本在
+        // 启动 service 阶段被串行执行并等待完成，此前的 while true 死循环会永久
+        // 卡住 KSU 的启动流程 → 开机失败 → KSU 自动进安全模式（2026-11-12 实锤，
+        // 用户设备卡启动、仅安全模式可开机）。外包 ( ) & 后脚本立即返回，保活
+        // 子进程不受影响。
         val script = """
             #!/system/bin/sh
             # HomeMode4Miui process keepalive (keep1, managed by module)
-            while true; do
+            (while true; do
               if ! pidof com.homemode4miui >/dev/null 2>&1; then
                 am startservice -n com.homemode4miui/com.homemode4miui.bridge.GraceKeepAliveService >/dev/null 2>&1
               fi
               sleep 120
-            done
+            done) &
         """.trimIndent()
         val b64 = android.util.Base64.encodeToString(script.toByteArray(), android.util.Base64.NO_WRAP)
         val path = "/data/adb/service.d/hm4m_keepalive.sh"
