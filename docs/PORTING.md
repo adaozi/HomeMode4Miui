@@ -649,3 +649,124 @@ DIFF vs 桩文件:
 - [x] **① blur-gap（切模式后抽屉模糊壁纸不盖状态栏条带）**：adb 复现实锤 —— 切换后同会话内 Compose 根只被量到 2296（窗口/decor/DragLayer 全 2400），整块内容下移 104 = 状态栏高；`decorFitsSystemWindows(false)+requestLayout`、View 级 padding 硬闸门（GraceHomeView/ComposeView setPadding 全拦截）均纠正不了 → MIUI 内部某层 insets/translation 残留，无法从外部安全纠正。按用户实测结论落地：**切【进】第四模式（状态沿 false→true）延迟 600ms 重启宿主桌面**（`HomeController.scheduleRestartOnEntering`，3s 冷却；进程冷启动首帧 null→true 不触发，无循环；killProcess 后系统自动拉起 HOME）。真机验证：切关→切开 = "ON edge → restart now" → 新进程 blurLayer rect 0..2400，状态栏条带被模糊+遮罩覆盖（像素级确认）。附带加固保留：ensureFullBleedWindow（decorFits 强制 false + 还原）、GraceHomeView/ComposeView padding 硬闸门、clearSystemBarPadding。
 - [x] 诊断日志收敛：`blurLayer ANOMALY`（仅 rect 顶边>0 或尺寸≠窗口时打印）+ `geometry:`（attach 后 600ms 一次），保留作长期看门狗。
 - [x] 构建：assembleRelease 通过；产物 `.build/out/HomeMode4Miui-v2.9.123-blur-restart-139.apk`（已装机冒烟：桌面冷启正常、零 FATAL、快捷方式 rows=1）。
+
+### minusone-keepalive（v2.9.144 / versionCode 160，2026-11-12）—— 负一屏 PA 持久绑定保活（RE 落地）
+
+- [x] **方案来源**：`docs/RE_MINUS_ONE_KEEPALIVE.md`（OS3 RELEASE-6.01.03 反编译定案）。原生桌面 PA 常驻的机制是"桌面进程存活期间绑定永不解绑"，第四桌面模式此前"负一屏不存活"的真因不是缺保活，而是 `MinusOneGate` 把 connect 拦掉导致绑定从未建立。
+- [x] **保活主改动（新增 `hook/OverlayKeepAlive.java`）**：拦 `PersistentLauncherOverlayConnection.setStopped(Z)` 与 `LauncherClientService.setStopped(Z)`，包名 `com.miui.personalassistant` 时吞掉 `setStopped(true)` → `mStopped` 恒 false → `cleanUp()` 的 `mStopped && overlay==null` 永不成立 → 不再 unbind。PA 被 LMK 杀掉后系统按存活 binding 重启 → `onServiceConnected` → `setOverlay` → 内容链与 `AppWidgetHost` 自动重挂。`LauncherClient.onStop` 的 `mActivityState` 通知照常下发，PA 后台不空转渲染。
+- [x] **与文档 §6.1 的偏差（必读）**：§6.1 的 `onStop` 桩读 `strategy.mPackageName`，但反编译确认 `ServiceConnectionStrategy` **零字段**（mPackageName 在 `LauncherOverlayConnection` / `LauncherClientService` 上）→ 原样落地必然 field miss、永远放行 = 空补丁。改拦 `setStopped`：两条落点（flags=33 persistent / flags=65 clientService）的唯一公共环节，且粒度只封"降级为 stopped"。
+- [x] **文档 §4 缺口的补丁**：Waive 策略下 `onBindingDied()` 不复位 `mConnected` → 绑定已死但 `connect()` 被 "already connected" 短路。新增 after 钩子复位 `mConnected` 后走 2s/6s/15s 有界补绑，overlay 回来即停。`onServiceDisconnected`（binding 仍活）只观测不重复 bind（避免引用计数叠加）。
+- [x] **`MinusOneGate` v6→v7**：放行上限 60s→8s、轮询 1s→500ms、放行后 `sOpen` 永久为 true（四条 connect 通道含 reconnect/事件通道全部交还原生）、toggle 改为"仅当 misettings/notes provider 不可见时才做"。`MinusOneEntry.open()` 在 gate 预热期改 500ms×16 有界重试，不再直接丢弃用户手势。
+- [x] 旧补丁按文档 §6.3 全部保留为兜底（`scheduleOpenRetry` / `startClientAwaitHeal` / `sReattachDone`），不删。
+- [x] 构建：assembleRelease 通过（dex 内已确认 OverlayKeepAlive 与两个 hook 目标类名齐全）；产物 `.build/out/HomeMode4Miui-v2.9.144-minusone-keepalive-160.apk`。
+- [ ] **待装机验证**：`am kill com.miui.personalassistant` 后应出现 `PA binder lost(...)->binding kept` → `PA binder restored(overlay=true)`，再滑负一屏应即时显示且微件正常；同时观察 `dumpsys meminfo com.miui.personalassistant` 常驻内存与耗电排行（PA 常驻是原生桌面本就在付的成本）。
+
+### keepalive-noscript（v2.9.145 / versionCode 161，2026-11-12）—— service.d 开机脚本彻底废弃（整机重启事故收尾）
+
+- [x] **事故（用户设备实锤，2026-11-12 22:00 起）**：装机 v2.9.144 后整机进入反复重启循环（约 90s 一轮，无 tombstone / 无 dropbox —— 死在日志落地之前）。真凶不是负一屏 hook，而是 `RootKeepAlive` 早期版本安装的 **`/data/adb/service.d/hm4m_keepalive.sh`**：`while true` 轮询 `pidof` 在 KSU/Magisk service 阶段被串行等待，永久阻塞启动流程。
+- [x] **为什么卸载 APK 也不恢复**：该脚本位于 `/data/adb`，不属于模块刷入包，`pm uninstall` 不会带走它 —— 这正是"卸载了模块还在重启"的原因，也是排查被误导的核心（禁用 LSPosed 模块、删 APK 都无效，直到脚本被摘掉）。
+- [x] **已实施修复（efdaa9d / 4e5d6e9）**：保活改为纯用户态三条线 —— ① 主链路 `pokeFromHost`（宿主前台 startService，零 root 依赖）；② Doze 白名单 + PowerKeeper 策略 + 自启动 provider（只降低被杀概率，不负责拉起）；③ `START_STICKY` 白赚一层。开机脚本方案整体删除。
+- [x] **本次收紧（v2.9.145）**：① `removeLegacyBootScript()` 提到 su 探测之后**第一步**执行（原来排最后，前面任一 su 失败就跳过清理）并覆盖 `post-fs-data.d`，命中残留时打印 `legacy boot script REMOVED -> <path>` 作为排障锚点；② `GraceKeepAliveService` 头注释删掉"Magisk service.d 开机守护"，改为显式**禁止区**警告，防止后来者照旧注释重装回去。
+- [x] **纪律（写入 MEMORY.md）**：模块**永不**写 `/data/adb/service.d`、`post-fs-data.d`、`init.d`、`/system/etc/init.d` 等任何开机自启脚本。若某功能非开机常驻不可，只能在应用层用前台服务/JobScheduler 实现；`/data/adb` 只允许读（日志导出）与删（清理历史残留）。
+- [x] 构建：assembleRelease 通过；产物 `.build/out/HomeMode4Miui-v2.9.145-keepalive-noscript-161.apk`。
+- [ ] **装机前**：确认 `/data/adb/service.d/hm4m_keepalive.sh` 已不存在（TWRP 终端：`ls -l /data/adb/service.d/`）；若仍在，先 `rm -f` 再装。
+
+### widget-zombie + scope-pa（v2.9.146 → v2.9.149 / vc162~165，2026-11-13）—— 负一屏"微件无法添加"三段根因
+
+- [x] **症状与证据**：负一屏微件显示"无法添加微件"。`dumpsys appwidget` 里 PA 的 widget 记录**只有 host 行、没有 `provider=` 行**（id 568~571 / 573~574 / 576~579 均如此），provider 注册表本身完好（notes 6 个 + misettings 2 个都在）。判定：id 存在但 provider 绑定为空 = 渲染不出任何内容的僵尸 id。
+- [x] **根因①（v2.9.146）**：`PaWidgetGuard` 无条件拦截 `deleteAppWidgetId`。PA 早于 provider 注册恢复 widget → bind 失败 → provider 为空 → PA 想删掉重来 → 被拦下 → 僵尸 id 永久占位。改为**条件拦截**：`getAppWidgetInfo(id) == null`（provider 已空）放行清理，provider 仍在才拦截保值（保住 notes 按 appWidgetId 键控的内容映射）。
+- [x] **根因②（v2.9.148，结论已修正）**：`assets/scope.list` 只有 `com.miui.home`。它不是"UI 只读的静态作用域"（LSPosed 作用域界面仍可勾选，实测可证），而是**模块安装/覆盖更新时 LSPosed 读取的作用域来源** —— 每次 `adb install -r` 都按它重置一遍 scope，把用户手动勾选的 `com.miui.personalassistant` 冲掉 → **PA 进程零注入**（19:08 实测：桌面有注入、PA 无），`PaWidgetGuard` 全程未运行。修复：`assets/scope.list` 写全 `com.miui.home` + `com.miui.personalassistant`，装后 PA 注入恢复（11 条注入日志）。
+  附：同时加的 `META-INF/xposed/scope.list` 在该版 LSPosed 上**未生效**（若生效 scope 勾选框会变只读，截图实测仍可勾），属无效文件，已删除；保留单一来源 `assets/scope.list` 避免双份声明漂移。
+- [x] **根因③（v2.9.147 → v2.9.149）**：`PaWidgetGuard` 的"就绪自杀重载"看门狗阈值写的是 `providers >= 50`，本机注册表满值只有 **25**（原样永不触发）；改成定向就绪后又暴露更严重的问题 —— PA 进程刚起时 `getInstalledProvidersForProfile` **读数恒为 0**（进程 init 中），1s 后才 24，于是每次启动都判"缩水→就绪→自杀"，实测连杀 4 轮，把 launcher 侧绑定拖成 `CR IMP DEAD`，PA 不再被拉起、负一屏整页空掉。**v5 彻底移除自杀重载**，只记录启动快照。
+- [x] **同时修**：`MinusOneGate` 放行上限 8s → **25s**（实测 unlock 后注册表 25s 时只有 2 个 provider，8s 上限必然提前放行）；`MinusOneEntry` gate 预热期重试 8s → 10s。
+- [x] **验证（真机，2026-11-13 19:23 重启后）**：
+  - `PaWidgetGuard: killing PA for clean reload` 计数 **0**（不再自杀循环），PA 进程存活；
+  - `dumpsys appwidget` → `id=581 provider=com.miui.notes/NoteWidgetProvider_4x2 ... views=RemoteViews`、`id=582 provider=xiaomi.misettings/SimpleUsageStatsWidget ... views=RemoteViews` —— **provider 与 RemoteViews 同时在场**，僵尸 id 全部消失；
+  - 产物 `.build/out/HomeMode4Miui-v2.9.149-guard-v5-165.apk`。
+- [x] **教训**：① 任何"拦截系统清理"的补丁都必须检查拦截对象是否还有效，否则会把可自愈状态变成永久坏死；② 静态作用域会覆盖 LSPosed 数据库里的手动勾选，且每次覆盖安装都会重放，PA 侧 hook 必须写进 `scope.list`；③ 在进程 init 早期读 `AppWidgetManager` 不可靠（恒 0），不能拿它做"自杀重载"的判据。
+
+### listening-gate + gate-diag（v2.9.150 / v2.9.151 / vc166~167，2026-11-14）—— 开机即开负一屏的时序闸 + 已知残留
+
+- [x] **v2.9.150：PA 侧 `startListening` 时序闸**。用户实测"开机立刻滑负一屏必坏，等一会儿再开则正常"——微件恢复发生在 `AppWidgetHost.startListening()` 那一刻（按 PA 库里的 appWidgetId 逐个 bind）。现在在 PA 进程拦 `startListening`：misettings/notes 两个 provider 未可见就挂起（500ms 重试，上限 20s），就绪或超时立刻放行，之后闩死不再扫描。实测日志：`startListening deferred #1..#8` → `providers ready -> startListening allowed`。
+- [x] **v2.9.151：gate 上限 45s + 采样诊断**。诊断结论：**launcher 侧读不到真实注册表**（`15.8s 时 providers=2`，系统真实 25；`targeted=false`），所以 `MinusOneGate` 的"等就绪"信号在本机等价于**固定延时**。真正有效的时序控制只有 PA 侧的 `startListening` 闸（它读到 0→24 的准确曲线）。用户决策：保留 45s 上限（微件最稳），接受"开机后 45s 内负一屏要等"。
+- [x] **验证（真机，15:02 / 15:06 两次重启）**：`dumpsys appwidget` 中 PA 的两个 widget 均带 `provider=` 与 `views=RemoteViews`；`AppWidgetServiceImpl: bindAppWidgetId() callingPackage: com.miui.personalassistant appWidgetId: 602 → NoteWidgetProvider_4x2 / 603 → SimpleUsageStatsWidget`，绑定链路正常；`mResetHost:false`、`zombie=false`、host 2048 `widgets.size=2`。
+- [ ] **已知残留（用户已接受，优先不改）**：PA 每次开机都会重新分配 appWidgetId（599 → 602 → 603 …），而笔记部件的内容绑定是 notes 侧按 appWidgetId 键控的 → **每次重启需重新绑定一次笔记内容**，其他部件显示正常。根治方向（未实施，风险中）：在 PA 进程 hook `AppWidgetHost.allocateAppWidgetId/deleteAppWidgetId` 保住原 id，或维护 id 映射表；需 2~3 轮真机验证。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.151-gate-diag-167.apk`（当前装机版本）。
+
+### icons-singlepass（v2.9.152 / versionCode 168，2026-11-14）—— 重启后抽屉图标整批丢失：装载回归单段
+
+- [x] **症状（User 实锤）**：重启手机后收藏区图标全部正常，抽屉里所有应用都是字母占位；等多久都不恢复（除非再触发一次包变化/重启桌面）。
+- [x] **根因（两处叠加，都在"两段式装载"）**：
+  1. **解码超时粒度错**（`AppRepository.withIcons`）：原实现用**整批共用一个 2500ms 窗口**的非结构化等待。冷启动 MIUI `getBadgedIcon` 走 IconCustomizer 主题图标，首解 80–150ms/个，200+ 应用即使 4 并行也要 3–8s → 必然超时 → 超时分支只收"已完成"的、"未完成"的直接放弃 → 抽屉整批退回骨架（字母）。
+  2. **两段各自抢同一把主题资源锁**：phase1（收藏子集 ≈ 20 个）先跑完拿到锁、正常出图并换入首屏；phase2（全量 200+）紧接着撞上仍被占用的 IconCustomizer 锁 + 自己的 2.5s 窗口 → 几乎全灭。这正是"收藏正常 / 抽屉全占位"的形态，与用户直觉（先收藏后抽屉）一致。
+  3. 之后的"缺失自愈"也没救回来：`missing ≥ 5%` 的重试走 `parallelism = 1`（200 个串行、同样吃 2.5s 窗口）几乎不产出；退避重装只有 2 轮，且每轮重新进入同一竞态。
+- [x] **修复 ①（回归单段装载，`GraceHomeViewModel.refreshApps`）**：删除 phase1 收藏预换入，改为 `enumerateApps → withIcons(全量) → decorateApps → 一次换入`。首帧晚 1–2 秒（时钟/文件夹/收藏一起出现，`homeReady` 单点置位），用户已确认接受这个代价换抽屉图标可靠。
+- [x] **修复 ②（解码超时改按块，`AppRepository.withIcons`）**：`ICON_CHUNK_SIZE = 24`，每块独立 `CoroutineScope + limitedParallelism`、独立超时 `max(1500ms, 块大小 × 150ms / 并行度)`。单块卡死只丢该块最多 24 个图标，其余块照常出图；日志锚点 `icon decode abandoned=N/总数 (stuck decoders on MIUI IconCustomizer)`。
+- [x] **修复 ③（重试路径）**：缺失重试从 `parallelism = 1` 改 `2`（第二轮已暖 IconCustomizer 缓存，配合按块超时能真正补回）；退避重装两轮（6s / 15s）保留为最终兜底。
+- [x] **保留项**：`appLoadGeneration` + `decorateMutex` 不动 —— 虽然 phase1 覆盖窗口随两段式一起消失，iconsJob 重装饰与包变化刷新并发时仍是同一类竞态。
+- [x] 构建：assembleRelease 通过；产物 `.build/out/HomeMode4Miui-v2.9.152-icons-singlepass-168.apk`。
+- [ ] **待装机验证**：冷启动（重启手机）后 `logcat -s HomeMode4Miui` 应看到 `refreshApps: enumerated=N` → `icons done ... missing=0/N`；抽屉/搜索图标全部为真实图标；观察 `/data/adb` 无关项不要误动（保活纪律见 v2.9.145 小节）。
+
+### shortcut-sync（v2.9.153 / versionCode 169，2026-11-14）—— 快捷方式三连修：重复行 / 图标错 / 删不掉 + 实时对账
+
+- [x] **症状（User 实锤，pin 快捷方式 = 第三方应用创建的指向文件/联系人/功能的桌面图标）**：
+  ① 抽屉里同一条快捷方式出现**两个**（原生桌面只有一个）；
+  ② 图标是"创建快捷方式的应用"的图标，和原生桌面上的不一样；
+  ③ 长按无法删除（只能打开应用信息页）。
+- [x] **根因（logcat 实锤）**：`syncPinnedShortcuts: pinned=1` 而 `savedShortcuts: rows=2`
+  —— `saved_shortcuts` 只做 upsert、**从不按系统 pinned 集合对账**，历史 pin 过的旧
+  shortcutId 行永久残留（shortcutmaker 每次生成新 uuid → 行数只增不减）。
+  图标侧 `shownShortcutApps` 在行内 icon 为 null 时回落所属应用图标；
+  删除侧没有入口，且即便删行也会被下一轮 `syncPinnedShortcuts` 自愈写回。
+- [x] **修复 ①（对账，DB v24）**：`saved_shortcuts` 加 `dismissed` 列（Migration23To24）。
+  `syncPinnedShortcuts` 改为权威对账：
+  - 系统 pinned 集合外的行 → 删除；但若该 key 仍被 `app_popups`（文件夹/弹层成员）引用，
+    只 `showInAppList=0` 保值（`demoted`），不破坏成员解析；
+  - 只对账当前用户行（`profile:` 前缀跳过，work profile 的 key 不混进来）；
+  - `getShortcuts` 返回 null（无权限/服务未就绪）**等于查询失败，绝不当"没有 pin"去清库**。
+  日志锚点：`syncPinnedShortcuts: pinned=N icons=M purged=X demoted=Y`。
+- [x] **修复 ②（图标）**：`LauncherApps.getShortcutBadgedIconDrawable(info, density)` 解码真实
+  快捷方式图标（含角标）→ `GraceHomeUiState.shortcutIcons`（内存，冷启动/resume 重解），
+  `shownShortcutApps` 优先用它，取不到才回落应用图标。与原生桌面显示一致。
+- [x] **修复 ③（删除 + 原生同步）**：抽屉长按**快捷方式项**（`app.shortcut != null`）= 移除
+  （普通应用仍是应用信息）→ 确认框 → `dao.dismissShortcut`（UI 立即消失）+ 
+  `LauncherApps.pinShortcuts(pkg, 该应用剩余 pinned id, user)` 取消系统 pin
+  （公开 API 没有 unpin，pinShortcuts 传全量剩余集合即等价；查询失败不下发，避免误清）。
+  真机验证：`removeShortcut: ... unpinOk=true remaining=0` → 原生桌面图标同步消失。
+  dismissed 行在系统 unpin 后由对账彻底删行；重新 pin（hook 写 dismissed=false）可正常恢复。
+- [x] **修复 ④（实时刷新，User 追加要求）**：`LauncherApps.registerCallback` 的
+  `onShortcutsChanged`（600ms 合并）→ 立刻对账，覆盖"别处删了快捷方式、模块桌面还留着"；
+  `resume`（已有）与**抽屉每次打开**补对账为兜底。
+- [x] **顺手挖出的坑（资源 id 撞号）**：确认框"取消"用 `R.string.cancel` 显示成 **"400"** ——
+  模块 `0x7f0b002b` 与宿主 `integer/config_itemShakeTime(=400)` 同 id，经宿主 Resources
+  解析取到宿主值。改用本批新增字符串 `shortcut_remove_cancel`（新 id 不与宿主冲突）即正常。
+  **新增 UI 文案一律新建独立 string，不要复用上游旧名**（旧 id 有撞宿主的历史概率）。
+- [x] **验证（真机 OS2 RELEASE-5.39.40 / d6516f3a）**：`rows=1 dismissed=0 built=1 shown=1`（重复行清除）；
+  `icons=1`；长按 → 确认框"移除快捷方式？/取消/移除"；确认后 `unpinOk=true` 且行立即消失、
+  系统 pinned 归零。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.153-shortcut-sync-169.apk`。
+
+### shortcut-icon-design（v2.9.154 / versionCode 170，2026-11-14）—— 快捷方式图标对齐桌面 + 接入图标设计器
+
+- [x] **症状（User 实锤，接着 v2.9.153）**：图标虽然换成了快捷方式自己的，但仍与原生桌面不一致 ——
+  用户原话"这个区别相当于是应用的图标和在桌面的图标的区别"，且要求"快捷方式的图标也要接入图标设计器"。
+- [x] **根因**：快捷方式图标来自 `ShortcutInfo.icon`（应用自带位图），不经系统 `getBadgedIcon` 的
+  MIUI 主题化，也**没走模块的图标装饰链**（`decorateApps` 只处理 `apps`，`savedShortcutApps` 被跳过）。
+- [x] **修复 ①（MIUI 图标形状）**：解码后套 `miui.content.res.IconCustomizer.generateIconStyleDrawable(Drawable)`
+  —— 原生桌面裁图标形状/内容占比的同一入口（RE 定案：类在宿主 dex，静态方法返回 `BitmapDrawable`）。
+  真机日志锚点：`IconCustomizer: Content Ratio = 0.725` / `drawableToBitmap: sourceWidth=198`。
+  反射失败（非 MIUI/签名漂移）原样返回，不影响可用性。
+- [x] **修复 ②（接入模块装饰链）**：新增 `buildShortcutApps(rows)` = 行 → LauncherApp（带 shortcutIcons）
+  → `decorateApps`（主题化图标 / 图标包 / 图标设计器产出），Room 流、sync 完成、`applyItemIconSnapshot`
+  三处统一走它。`shownShortcutKeys` 由未装饰的原始项算，不受装饰影响。
+- [x] **修复 ③（图标设计器可选中快捷方式）**：设置页模块进程读不到宿主 `saved_shortcuts`，
+  故 `GraceSettingsBridge.Snapshot` 新增 `savedShortcuts: List<ShortcutWire>`（encode 键 `shc`），
+  宿主 `pushSnapshot` 从 DAO 回带（过滤 dismissed + `profile:` 前缀）；`SettingsViewModel.applySnapshot`
+  并入 `shortcutApps`（key 与宿主 `LauncherApp.key` 逐字一致）；`AppSelectionSettings` 加
+  `includeShortcuts`，图标设计器选择页传 `allApps + shortcutApps` 并 distinctBy key。
+  保存走既有 `SET_ITEM_ICON` → 宿主 `item_icons`，`decorateApps` 按 `shortcut:<pkg>/<id>` 查表即生效
+  （`applyItemIconSnapshot` 已同步重装饰快捷方式，改完即时生效）。
+- [x] **已知降级**：设计器列表里快捷方式行的缩略图为空（模块进程无快捷方式图标权限），靠名字识别。
+- [x] **回归（User 真机验收四项全通过）**：① 图标与原生桌面一致；② 图标设计器可选中快捷方式且设计即时生效；
+  ③ 长按移除 + 原生桌面同步消失；④ 别处删除 → 模块实时消失。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.154-shortcut-icon-design-170.apk`。

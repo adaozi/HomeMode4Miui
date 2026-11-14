@@ -185,6 +185,25 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val bridgedWeather = snapshot.weatherJson?.let { json ->
             runCatching { com.homemode4miui.bridge.GraceBridge.decodeWeatherWire(json) }.getOrNull()
         }
+        // v2.9.154：桌面快捷方式并入设置侧 shortcutApps —— 图标设计器要能选中快捷方式。
+        // 模块进程读不到宿主 saved_shortcuts 表，只能靠快照回带；key 必须与宿主
+        // LauncherApp.key 逐字一致（shortcut:<pkg>/<Uri.encode(id)>），否则设计器
+        // 存下的 item_icons 行在桌面侧查不到。
+        val bridgedShortcuts = snapshot.savedShortcuts.mapNotNull { wire ->
+            if (wire.key.startsWith("profile:") || wire.packageName.isBlank()) return@mapNotNull null
+            val activity = wire.activity?.let { android.content.ComponentName.unflattenFromString(it) }
+            val component = activity
+                ?: android.content.ComponentName(wire.packageName, "")
+            com.galaxyrio.gracelauncher.data.LauncherApp(
+                componentName = component,
+                label = wire.label.ifBlank { wire.shortcutId },
+                icon = null,
+                shortcut = com.galaxyrio.gracelauncher.data.LauncherShortcut(
+                    id = wire.shortcutId, packageName = wire.packageName,
+                    label = wire.label, icon = null, activity = activity,
+                ),
+            )
+        }
         _uiState.update { current ->
             current.copy(
                 isLoadingSettings = false,
@@ -193,6 +212,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 settings = snapshot.settings,
                 hiddenAppKeys = snapshot.hiddenAppKeys,
                 folders = snapshot.folders,
+                // 快捷方式池 = 查询结果 ∪ 宿主桌面清单（后者带 key，图标设计器入口用）
+                shortcutApps = (current.shortcutApps + bridgedShortcuts)
+                    .distinctBy { it.key },
                 // folders 阶段：宿主快照 ok = 桌面已挂载 = 宿主持 HOME 角色 → 快捷方式
                 // 代查（SHORTCUTS_QUERY）预期可达；真正的查询失败在 shortcutsFor 降级
                 hasShortcutAccess = snapshot.ok,

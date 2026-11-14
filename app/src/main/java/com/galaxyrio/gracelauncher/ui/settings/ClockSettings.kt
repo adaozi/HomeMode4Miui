@@ -55,13 +55,17 @@ internal fun AppSelectionSettings(
     defaultLabel: String? = null,
     apps: List<com.galaxyrio.gracelauncher.data.LauncherApp> = uiState.allApps,
     excludeOwnApp: Boolean = true,
+    /** v2.9.154：图标设计器要能给"桌面快捷方式"做图标 —— 该入口必须放行 shortcut 项。 */
+    includeShortcuts: Boolean = false,
     appBarActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     header: LazyListScope.() -> Unit = {},
 ) {
     val queryState = rememberTextFieldState()
     val ownPackage = LocalContext.current.packageName
     // A profile-qualified activity key keeps private and personal copies distinct.
-    val available = remember(apps, ownPackage, excludeOwnApp) { apps.filter { (!excludeOwnApp || it.packageName != ownPackage) && it.shortcut == null } }
+    val available = remember(apps, ownPackage, excludeOwnApp, includeShortcuts) {
+        apps.filter { (!excludeOwnApp || it.packageName != ownPackage) && (includeShortcuts || it.shortcut == null) }
+    }
     val enabled = LocalSettingsStorageState.current.canEdit
     val ready = !uiState.isLoadingApps && !uiState.appLoadFailed
     SettingsScaffold(title, "settings_${tag}_page", onBack, actions = appBarActions) { padding ->

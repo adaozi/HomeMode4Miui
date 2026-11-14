@@ -245,6 +245,21 @@ class GraceSettingsHostEngine(
                         GraceSettingsBridge.PrivateSpaceWire(it.supported, it.serial, it.locked, it.accessible, it.revision, it.lockVersion)
                     },
                     appCatalog = runCatching { appCatalog() }.getOrDefault(emptyList()),
+                    // v2.9.154：桌面快捷方式清单（图标设计器选择面；模块进程无宿主 DB 可见性）
+                    savedShortcuts = runCatching {
+                        dao?.readShortcuts().orEmpty()
+                            .filterNot { it.dismissed || it.itemKey.startsWith("profile:") }
+                            .map { row ->
+                                GraceSettingsBridge.ShortcutWire(
+                                    appKey = row.packageName,
+                                    key = row.itemKey,
+                                    packageName = row.packageName,
+                                    shortcutId = row.shortcutId,
+                                    activity = row.activity.takeIf { it.isNotBlank() },
+                                    label = row.label.ifBlank { row.shortcutId },
+                                )
+                            }
+                    }.getOrDefault(emptyList()),
                 )
             }.onSuccess { sendSnapshot(it) }
                 .onFailure { ModLog.e("GraceSettingsHostEngine: snapshot build failed", it); sendSnapshot(GraceSettingsBridge.Snapshot(ok = false)) }

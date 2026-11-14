@@ -101,6 +101,9 @@ private val FallbackIconColors = listOf(
     Color(0xFFFFD18A), Color(0xFFD4B7FF),
 )
 
+/** 诊断预算（AppIcon 字母占位日志前 3 条，见 AppIcon 内注释）。 */
+private val iconNullBudget = java.util.concurrent.atomic.AtomicInteger(3)
+
 private fun fallbackIconColor(key: String): Color =
     FallbackIconColors[(key.hashCode() and Int.MAX_VALUE) % FallbackIconColors.size]
 
@@ -118,6 +121,14 @@ internal fun IconBadge(app: LauncherApp, badgeSize: Dp, modifier: Modifier = Mod
 fun AppIcon(app: LauncherApp, modifier: Modifier = Modifier, size: Dp = 38.dp, applyDisplaySize: Boolean = true,
     display: IconDisplaySettings = IconDisplaySettings()) {
     val appearance = LocalLauncherAppearance.current
+    // 诊断（2026-11-02 装机）：字母占位唯一判据 = app.icon == null。VM 侧装载日志报
+    // missing=0 却仍出现字母时，用这条把"数据层有图标 / 渲染层拿到 null"区分开。
+    // 限流 3 条，正常路径零成本。
+    if (app.icon == null && iconNullBudget.getAndDecrement() > 0) {
+        android.util.Log.w("HomeMode4Miui", "AppIcon fallback: key=" + app.key
+            + " mono=" + (app.monochromeIcon != null) + " themed=" + appearance.themedIcons
+            + " style=" + display.style + " folder=" + app.folderId)
+    }
     val displaySize = size * if (applyDisplaySize) appearance.iconSize / 100f else 1f
     val style = display.style
     val iconModifier = if (app.folderId == null) modifier.launcherAnimationTarget(listOf(app.componentName)) else modifier

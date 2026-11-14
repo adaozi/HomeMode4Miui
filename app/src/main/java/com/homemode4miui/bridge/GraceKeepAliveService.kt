@@ -5,11 +5,18 @@
  * 媒体/天气快照全链依赖本进程（listener + 引擎），进程死 = 桌面侧全部降级。
  * notif7 自愈链只能在"进程还活着"的前提下自救，本文件解决"进程本身被杀"：
  *
- *   1. 宿主拉起（主链路，root-free）：com.miui.home 几乎常驻前台（launcher），
- *      前台应用 startService 不受后台限制 —— 桌面挂载（HomeController.attach）
- *      与首页交互（toggle receiver）时显式拉起本服务，进程随之创建。
- *   2. Magisk service.d 开机守护（root 增强，RootKeepAlive 安装）：开机后
- *      每 30s 检查 pidof，进程不在则 root 身份 am startservice 拉起。
+ *   1. 宿主拉起（**唯一**主链路，root-free）：com.miui.home 几乎常驻前台
+ *      （launcher），前台应用 startService 不受后台限制 —— 桌面挂载
+ *      （HomeController.attach）与首页交互（toggle receiver）时显式拉起本服务，
+ *      进程随之创建。
+ *   2. RootKeepAlive 辅助手段（Doze 白名单 / PowerKeeper 策略 / 自启动 provider）
+ *      —— 降低被 MIUI 杀掉的概率，不负责拉起。
+ *
+ * ⚠️ 禁止区（2026-11-12 用户设备实锤）：**绝不**再用 Magisk/KSU service.d、
+ *    post-fs-data.d、init.d 写开机脚本拉起本服务。旧实现（while true 轮询 pidof）
+ *    在 KSU service 阶段被串行等待，直接卡死启动流程 → 整机反复重启，且脚本位于
+ *    /data/adb 不受模块卸载管理，卸载后仍持续破坏用户环境。详见
+ *    RootKeepAlive.removeLegacyBootScript() 注释。
  *
  * 引擎 GraceBridgeEngine.start 幂等（started 标志），onCreate 与 NLS
  * onListenerConnected 重复触发安全 —— 谁先到谁初始化，后者 no-op。

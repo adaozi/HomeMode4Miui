@@ -141,6 +141,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     val context = LocalContext.current
     val launchView = LocalView.current
     var drawerOpen by rememberSaveable { mutableStateOf(false) }
+    /** v2.9.141：待确认移除的快捷方式（长按抽屉里的快捷方式项）。 */
+    var shortcutToRemove by remember { mutableStateOf<LauncherApp?>(null) }
     // scrubfix：保留原始 MutableState —— AppDrawerScreen 的 placement 块要实时读它
     // （retainItemSpace liveVisible），重组滞后一帧也能当帧隐藏/显示。
     val selectedLetterState = remember { mutableStateOf<String?>(null) }
@@ -228,7 +230,13 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 上游同步 1.2.0（S7）：主页/抽屉切换改为「抬升 + 淡出」（260ms FastOutSlowIn），
     // 取代原来的纯 alpha 交叉淡入（tween 110）。HomeListMotion 的 x = 透明度、y = 抬升量。
     val homeListMotion = remember { com.galaxyrio.gracelauncher.ui.components.HomeListMotion(drawerOpen) }
-    androidx.compose.runtime.LaunchedEffect(drawerOpen) { homeListMotion.animateTo(drawerOpen) }
+    androidx.compose.runtime.LaunchedEffect(drawerOpen) {
+        homeListMotion.animateTo(drawerOpen)
+        // v2.9.141 快捷方式实时刷新：抽屉是快捷方式主要可见面 —— 每次打开都对账一次
+        // 系统 pinned 集合（用户在原生桌面/其他应用里删掉的快捷方式不会残留在列表里）。
+        // 一次 binder 查询 + 少量图标解码，成本可忽略。
+        if (drawerOpen) viewModel.syncPinnedShortcuts()
+    }
     val drawerAlpha = homeListMotion.drawer.value.x
     val homeLift = homeListMotion.home.value.y
     val drawerLift = homeListMotion.drawer.value.y
@@ -791,6 +799,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             topSpace = drawerTop,
             onLaunchApp = { app -> launchApp(app) },
             onAppDetails = viewModel::openAppDetails,
+            // v2.9.141：快捷方式项长按 = 移除（确认后 unpin，原生桌面同步消失）
+            onRemoveShortcut = { app -> shortcutToRemove = app },
             onAppShortcuts = { app, bounds -> overlay = LauncherOverlay.Shortcuts(app, bounds) },
             rowGestures = rowGestures,
             // 上游 AppDrawerScreen.kt:171 同构：装饰后的文件夹图标项（图标设计器产出）
@@ -831,6 +841,53 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             modifier = Modifier.retainedPage(visible = drawerOpen && !searchOpen && !pickerOpen)
                 .graphicsLayer { alpha = drawerAlpha; translationY = drawerLift * pageLiftDistance }.statusBarContentFade(),
         )
+
+        // ---- v2.9.141：快捷方式移除确认（抽屉长按快捷方式项触发）----
+        shortcutToRemove?.let { target ->
+            // 配色必须走 MaterialTheme 的 onSurface/primary —— 容器色是 colorScheme.surface，
+            // 而 LauncherAppearance.text 是"壁纸对比色"（浅壁纸=深字、深壁纸=浅字），
+            // 配 surface 会出现白底白字（装机实锤：对话框一片空白只有卡片形状）。
+            val scheme = androidx.compose.material3.MaterialTheme.colorScheme
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { shortcutToRemove = null },
+                title = {
+                    androidx.compose.material3.Text(
+                        text = androidx.compose.ui.res.stringResource(com.homemode4miui.R.string.shortcut_remove_title),
+                        color = scheme.onSurface,
+                    )
+                },
+                text = {
+                    androidx.compose.material3.Text(
+                        text = androidx.compose.ui.res.stringResource(com.homemode4miui.R.string.shortcut_remove_message),
+                        color = scheme.onSurfaceVariant,
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        viewModel.removeShortcut(target)
+                        shortcutToRemove = null
+                    }) {
+                        androidx.compose.material3.Text(
+                            text = androidx.compose.ui.res.stringResource(com.homemode4miui.R.string.shortcut_remove_action),
+                            color = scheme.error,
+                        )
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { shortcutToRemove = null }) {
+                        androidx.compose.material3.Text(
+                            // 不能用 R.string.cancel：模块该 string 的 id 0x7f0b002b 与宿主
+                            // com.miui.home 的 integer/config_itemShakeTime(=400) 撞号，
+                            // 经宿主 Resources 解析会渲染成 "400"（装机截图实锤）。
+                            // 新增字符串的 id 位于模块独有区间，不会与宿主冲突。
+                            text = androidx.compose.ui.res.stringResource(com.homemode4miui.R.string.shortcut_remove_cancel),
+                            color = scheme.onSurface,
+                        )
+                    }
+                },
+                containerColor = scheme.surface,
+            )
+        }
 
         // ---- 字母索引 rail（P2）：常驻右侧，scrub 即跳；hotfix3 接 hideAlphabet ----
         // hotfix4 对齐原版 LauncherScreen.kt:837 语义：hideAlphabet ≠ 移除 rail，

@@ -73,6 +73,12 @@ fun AppDrawerScreen(
     onLaunchApp: (LauncherApp) -> Unit,
     onAppDetails: (LauncherApp) -> Unit,
     onAppShortcuts: (LauncherApp, Rect) -> Unit,
+    /**
+     * v2.9.141：快捷方式项长按 = 移除（长按普通应用仍是应用信息）。
+     * pin 快捷方式并入应用列表后原本长按只会打开"创建它的应用"的系统详情页，
+     * 用户反馈"快捷方式不能删除"（实锤）。
+     */
+    onRemoveShortcut: (LauncherApp) -> Unit = {},
     rowGestures: AppRowGestures = AppRowGestures(),
     modifier: Modifier = Modifier,
     onOpenFolder: (LauncherFolder, Rect) -> Unit = { _, _ -> },
@@ -141,7 +147,11 @@ fun AppDrawerScreen(
                     is DrawerItem.App -> LauncherAppRow(
                         app = item.app,
                         onClick = { onLaunchApp(item.app) },
-                        onLongClick = { onAppDetails(item.app) },
+                        // v2.9.141：快捷方式项长按 → 移除；普通应用长按 → 应用信息
+                        onLongClick = {
+                            if (item.app.shortcut != null) onRemoveShortcut(item.app)
+                            else onAppDetails(item.app)
+                        },
                         onSwipeRight = { onAppShortcuts(item.app, it) },
                         gestures = rowGestures,
                         // 上游同步 v1.1.8：名字可见性 + 通知按 shortcutsFolders 策略过滤

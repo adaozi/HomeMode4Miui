@@ -311,6 +311,9 @@ fun LauncherSettingsScreen(
                     }
                     SettingsPage.IconDesignerApp -> AppSelectionSettings(
                         uiState, actions, back, title = stringResource(R.string.icon_designer_choose_app), tag = "icon_designer",
+                        // v2.9.154：快捷方式也进图标设计器（含桌面 pin 的快捷方式，清单由宿主快照回带）
+                        apps = (uiState.allApps + uiState.shortcutApps).distinctBy { it.key },
+                        includeShortcuts = true,
                         selectedKey = navController.previousBackStackEntry?.savedStateHandle?.get<String>("icon_designer_app"),
                         onSelect = { key ->
                             if (isCurrent() && key != null) {

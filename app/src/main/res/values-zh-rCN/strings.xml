@@ -751,4 +751,8 @@
     <string name="settings_folder_auto_hide">自动隐藏内部的应用</string>
     <string name="settings_folder_auto_hide_summary">从应用列表隐藏当前和今后加入的应用。移出后仍会保留手动设置的隐藏状态。</string>
     <string name="settings_palette_style">调色板风格</string>
+    <string name="shortcut_remove_title">移除快捷方式？</string>
+    <string name="shortcut_remove_message">该快捷方式会同时从这个桌面和系统原生桌面上移除。</string>
+    <string name="shortcut_remove_cancel">取消</string>
+    <string name="shortcut_remove_action">移除</string>
 </resources>

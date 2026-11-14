@@ -79,10 +79,12 @@ object RootKeepAlive {
                     return false
                 }
                 ModLog.i("RootKeepAlive: su granted, applying keep-alive")
+                // 清理优先：历史上写入的开机脚本会卡死启动流程，必须最先摘掉，
+                // 不能因为后面某项 su 失败而被跳过（2026-11-12 整机反复重启实锤）。
+                removeLegacyBootScript()
                 applyDozeWhitelist()
                 applyPowerKeeperPolicy()
                 applyAutostart()
-                removeLegacyBootScript()
                 applied = true
                 true
             }.onFailure { ModLog.e("RootKeepAlive: apply failed", it) }.getOrDefault(false)
@@ -135,11 +137,21 @@ object RootKeepAlive {
      *    保活完全依赖主链路 pokeFromHost（用户回桌面即拉起，零延迟）+ Doze 白名单 +
      *    PowerKeeper 策略；旧设备残留由 removeLegacyBootScript() 自动清理。
      */
-    /** 清理历史版本写入的 service.d 保活脚本残留（幂等，每次 apply 顺手执行）。 */
+    /** 清理历史版本写入的 service.d 保活脚本残留（幂等，每次 apply 最先执行）。 */
     private fun removeLegacyBootScript() {
-        val out = su("rm -f /data/adb/service.d/hm4m_keepalive.sh")
-        if (out != null) {
-            ModLog.i("RootKeepAlive: legacy service.d keepalive script removed if present")
+        val cmd = listOf(
+            "/data/adb/service.d/hm4m_keepalive.sh",
+            "/data/adb/post-fs-data.d/hm4m_keepalive.sh",
+        ).joinToString("; ") { p -> "if [ -f $p ]; then rm -f $p; echo removed:$p; fi" }
+        val out = su(cmd)
+        if (out == null) {
+            ModLog.i("RootKeepAlive: legacy boot script check failed (su)")
+        } else if (out.contains("removed:")) {
+            // 命中残留 = 用户设备曾因此反复重启，必须留痕（后续排障的唯一线索）
+            ModLog.i("RootKeepAlive: legacy boot script REMOVED -> "
+                    + out.lineSequence().filter { it.contains("removed:") }.joinToString(", "))
+        } else {
+            ModLog.i("RootKeepAlive: no legacy boot script (clean)")
         }
     }
 

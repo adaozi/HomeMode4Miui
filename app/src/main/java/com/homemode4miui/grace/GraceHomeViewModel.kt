@@ -45,6 +45,8 @@ import android.os.Process
 import android.provider.AlarmClock
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.galaxyrio.gracelauncher.data.AppRepository
@@ -99,9 +101,9 @@ data class GraceHomeUiState(
     val isLoadingApps: Boolean = true,
     val appLoadFailed: Boolean = false,
     /** 同步揭示门控（装机反馈：时钟/文件夹先出、应用后跳的分层加载观感）——
-     *  收藏子集就绪（两段式 phase 1）/ 全量就绪（无已存收藏序）/ 装载失败（空态兜底）
-     *  三条路径置 true；后续包变化刷新不重置（桌面已显示，不闪断）。首页内容
-     *  （时钟/widget/收藏区/Grace 按钮）在 Route 侧按此门控统一出现。 */
+     *  单段装载下 = 全量（含系统图标解码）就绪 / 装载失败（空态兜底）两条路径置 true；
+     *  后续包变化刷新不重置（桌面已显示，不闪断）。首页内容（时钟/widget/收藏区/
+     *  Grace 按钮）在 Route 侧按此门控统一出现。 */
     val homeReady: Boolean = false,
     /** P4：LauncherApps.hasShortcutHostPermission（弹层快捷方式可用性，HOME 角色决定）。 */
     val hasShortcutAccess: Boolean = false,
@@ -132,6 +134,14 @@ data class GraceHomeUiState(
      * "固定到主屏幕"的 pin 快捷方式桌面上有、应用列表里查不到（装机实锤）。
      */
     val shownShortcutKeys: Set<String> = emptySet(),
+    /**
+     * v2.9.141：pin 快捷方式的真实图标（itemKey → 位图）。
+     * saved_shortcuts 表不存位图，此前抽屉/搜索里快捷方式一律显示"所属应用"图标
+     * （用户实锤：和原生桌面上那个快捷方式图标不一样）。宿主进程持 HOME 角色，
+     * syncPinnedShortcuts 用 LauncherApps.getShortcutBadgedIconDrawable 解码后存这里
+     * （仅内存，冷启动/refreshApps 重新解码），UI 优先用它，取不到才回落应用图标。
+     */
+    val shortcutIcons: Map<String, androidx.compose.ui.graphics.ImageBitmap> = emptyMap(),
     /** 上游 LauncherUiState.folderApps 同构：装饰后的文件夹图标项（key = folder id）。
      *  图标设计器（FolderEditor → IconDesigner）对文件夹的产出存 item_icons
      *  （key "folder:<id>"），经 ItemIconStore.apply 渲染成位图 —— 主页/抽屉文件夹行消费。 */
@@ -193,15 +203,19 @@ data class GraceHomeUiState(
      */
     /**
      * showInAppList 的已保存快捷方式（pin 到桌面的第三方快捷方式并入主列表）。
-     * 图标：saved_shortcuts 不存位图，用所属应用图标顶替（上游 decorate 同语义）。
+     * 图标：优先 shortcutIcons（syncPinnedShortcuts 解码的系统快捷方式图标，与原生
+     * 桌面一致）；未解码到时才回落所属应用图标（上游 decorate 同语义）。
      */
     val shownShortcutApps: List<LauncherApp>
         get() {
             if (shownShortcutKeys.isEmpty() || savedShortcutApps.isEmpty()) return emptyList()
             return savedShortcutApps.filter { it.key in shownShortcutKeys }.map { entry ->
+                if (entry.icon != null) return@map entry
+                val real = shortcutIcons[entry.key]
+                if (real != null) return@map entry.copy(icon = real)
                 val owner = apps.firstOrNull { it.componentName == entry.componentName }
                     ?: apps.firstOrNull { it.packageName == entry.packageName }
-                if (entry.icon == null && owner?.icon != null) entry.copy(icon = owner.icon) else entry
+                if (owner?.icon != null) entry.copy(icon = owner.icon) else entry
             }
         }
 
@@ -351,6 +365,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     )
 
     private var appLoadJob: Job? = null
+    /** 装载失败自愈重试计数：成功装载后归零，连败不重试（防失败-重试循环）。 */
+    private var appLoadRetryCount = 0
     /** P3：设置流常驻收集（Room 行变化驱动 settings）；shutdown 显式取消 */
     private var settingsJob: Job? = null
     /** hotfix7：隐藏应用键流（Room hidden_apps 表；设置页 SET_HIDDEN_APPS 落库后实时到达） */
@@ -382,10 +398,70 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private var decorationThemeStamp: String? = null
     /** 「读内存列表 → 装饰 → 原子换入」串行化：iconsJob 重装饰与 refreshApps 收尾互斥。 */
     private val decorateMutex = Mutex()
+    /**
+     * 应用装载代际（每次 refreshApps 自增）。
+     *
+     * 根因（2026-10-28 装机实锤：重启桌面后有概率"收藏有图标、抽屉全是字母占位"）：
+     * 两段式装载的 phase1 把 isLoadingApps 置 false 后，iconsJob 的快照重装饰
+     * （applyItemIconSnapshot）就能进来 —— 它读 [LauncherUiState.apps]（此刻是只解码了
+     * 收藏子集的 phase1 partial）、在 IO 上装饰、再整体写回。若它的读发生在 phase2
+     * 换入全量带图标列表之前、写发生在之后，就会把全量结果覆盖回 partial：
+     * 收藏子集有图标、抽屉/搜索其余全是字母占位，且 itemsDecoratedWith 已被标记成
+     * "已装饰"，此后不再自愈（要等图标设计/壁纸/包变化触发 refreshApps）。
+     * 修复：decorateMutex 内做「读 → 校验代际 → 写」，装载换入同样在锁内进行，
+     * 代际变化即说明有更新的一次装载接管，旧装饰结果直接丢弃。
+     *
+     * 2026-11-14：两段式已回归单段装载（phase1 不复存在，上述覆盖窗口自然消失），
+     * 但代际 + 互斥仍保留 —— iconsJob 重装饰与包变化刷新并发时仍是同一类竞态。
+     */
+    @Volatile
+    private var appLoadGeneration = 0
     /** hotfix folders2：已保存快捷方式流（saved_shortcuts 表） */
     private var savedShortcutsJob: Job? = null
     /** P6：图标包开关变化 → 重刷应用列表（渲染装饰跟随包顺序）。 */
     private var lastIconPacks: List<String>? = null
+
+    // ---- 桥快照摄入节流（v2.9.125-notif-burst）----
+    /**
+     * 宿主桌面是否在前台（GraceHomeView.onHomeAttached / onHomePaused 同步）。
+     *
+     * 装机实锤症状：长时间不打开桌面后突然回桌面，通知预览会把这期间的历史整批
+     * 逐条回放一遍，最后才停在最新一条。根因：模块进程在桌面后台期间每有一条
+     * 通知变化就发一次广播（指纹去重只挡内容相同的重复），宿主侧 onReceive 又
+     * 逐条直写 uiState —— 桌面进程被 MIUI 冻结/限流时这批广播在主线程排队，
+     * 解冻（回桌面）后逐条 deliver，每条都触发一次重组/布局 → 视觉上就是"回放"。
+     * 修复：后台只把最新一份滚动进 pending（不产生任何 state 变更），回前台一次性
+     * 应用；前台则做 80ms 合并窗口，把同一批投递压成一次更新。
+     * hook 5b 未命中的宿主版本上本标志恒 true，行为等同旧版（安全降级）。
+     */
+    @Volatile
+    private var hostForeground = true
+    /** 后台期间/合并窗口内到达的最新通知快照（滚动覆盖，只保留最后一份）。 */
+    private var pendingNotifications: Map<String, List<AppNotification>>? = null
+    /** 同上，媒体快照（含 artChanged，应用时仍要按 revision 沿用旧封面）。 */
+    private var pendingMedia: Pair<NowPlaying?, Boolean>? = null
+    private var snapshotFlushScheduled = false
+    /** 回前台宽限期截止时刻（uptimeMillis）：系统可能正在把冻结期间积压的广播逐条投递。 */
+    private var graceUntilUptime = 0L
+    private var graceFlushJob: Job? = null
+    /** 上次向模块进程拉全量的时刻（uptimeMillis），防可见性抖动反复拉取。 */
+    private var lastSnapshotPullUptime = 0L
+
+    // ---- 日程失效链（v2.9.126-agenda-live）----
+    /** CalendarProvider 变更监听（宿主进程注册一次；shutdown 注销）。 */
+    private var calendarObserver: android.database.ContentObserver? = null
+    private var agendaRefreshJob: Job? = null
+
+    private companion object {
+        /** 桥快照合并窗口：同批广播（回桌面后逐条 deliver / 通知风暴）压成一次更新。 */
+        const val SNAPSHOT_COALESCE_MS = 80L
+        /** 回桌面宽限期：冻结期积压的投递通常在这段时间内排空，期间只应用最后一份。 */
+        const val SNAPSHOT_GRACE_MS = 700L
+        /** 回前台拉全量的最小间隔（可见性抖动/连续 onResume 去重）。 */
+        const val SNAPSHOT_PULL_MIN_INTERVAL_MS = 3_000L
+        /** 日历写库防抖：批量导入/删除会连发多次 notifyChange。 */
+        const val AGENDA_DEBOUNCE_MS = 800L
+    }
     // 审计修缮（2026-10-16）：删除 iconPacksDecorating —— 全仓无置位（承诺的
     // "刷新完成后置 true" 逻辑不存在）也无收集，上游装饰中提示的移植半成品。
 
@@ -395,6 +471,44 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             if (intent?.action == Intent.ACTION_PACKAGE_REMOVED && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
             refreshApps()
         }
+    }
+
+    // ---- v2.9.153：快捷方式实时跟随（LauncherApps.Callback）----
+    private var launcherAppsRef: android.content.pm.LauncherApps? = null
+    /** onShortcutsChanged 常成批到达（一次 pin 多条回调）→ 600ms 合并。 */
+    private var lastShortcutSyncAt = 0L
+    /**
+     * 系统侧 shortcut 变化回调（require launcher/HOME 角色，宿主满足）。
+     * 用户明确要求"其他地方删了快捷方式，模块桌面不能还留着" —— 这是主动推送面，
+     * resume / 抽屉打开的对账是被动兜底。
+     */
+    private val launcherAppsCallback = object : android.content.pm.LauncherApps.Callback() {
+        override fun onShortcutsChanged(
+            packageName: String,
+            shortcuts: MutableList<android.content.pm.ShortcutInfo>,
+            user: android.os.UserHandle,
+        ) {
+            try {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (now - lastShortcutSyncAt < 600L) return
+                lastShortcutSyncAt = now
+                ModLog.i("shortcutsChanged: pkg=$packageName count=${shortcuts.size}")
+                syncPinnedShortcuts()
+            } catch (t: Throwable) {
+                ModLog.e("GraceHomeViewModel onShortcutsChanged failed", t)
+            }
+        }
+
+        override fun onPackageRemoved(packageName: String, user: android.os.UserHandle) = Unit
+        override fun onPackageAdded(packageName: String, user: android.os.UserHandle) = Unit
+        override fun onPackageChanged(packageName: String, user: android.os.UserHandle) = Unit
+        override fun onPackagesAvailable(
+            packageNames: Array<out String>, user: android.os.UserHandle, replacing: Boolean,
+        ) = Unit
+
+        override fun onPackagesUnavailable(
+            packageNames: Array<out String>, user: android.os.UserHandle, replacing: Boolean,
+        ) = Unit
     }
 
     init {
@@ -439,6 +553,15 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 if (lastIconPacks != null && observed.enabledIconPackPackages != lastIconPacks) refreshApps()
             }
         }
+        // v2.9.153：系统 shortcut 变化实时回调（pin/unpin/动态快捷方式更新）。
+        // 宿主持 HOME 角色 → LauncherApps.registerCallback 生效；onShortcutsChanged 是
+        // "别处删了快捷方式、模块桌面还留着"的实时解（resume/抽屉打开只是被动补充）。
+        // 注册失败（非默认桌面等）静默降级，不影响其余刷新路径。
+        runCatching {
+            val launcher = application.getSystemService(android.content.pm.LauncherApps::class.java)
+            launcher?.registerCallback(launcherAppsCallback)
+            launcherAppsRef = launcher
+        }.onFailure { ModLog.e("GraceHomeViewModel register LauncherApps.callback failed", it) }
         refreshApps()
         // perf2（功耗/冷启动专项）：shortcut/media 权限探测各含一次【同步 binder 往返】
         // （hasShortcutHostPermission / isNotificationListenerAccessGranted 查询），
@@ -571,40 +694,16 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 ModLog.e("GraceHomeViewModel observeItemIcons failed", error)
             }
         }
-        // hotfix folders2：已保存快捷方式跟随（文件夹成员里的 shortcut key 解析用；
-        // 图标跨进程为空 —— 成员行用默认图标，登记降级）
+        // hotfix folders2：已保存快捷方式跟随（文件夹成员里的 shortcut key 解析用）
         savedShortcutsJob = viewModelScope.launch {
             try {
                 LauncherDatabase.getInstance(application).itemsDao().shortcuts().collect { rows ->
-                    // 落库行可能没有 activity（pin 请求里 ShortcutInfo.getActivity() 常为 null，
-                    // e.g. 应用自发布的动态快捷方式）：不能整行丢弃，否则 pin 快捷方式永远
-                    // 进不了列表（装机实锤）。activity 缺失时用 packageName 占位，启动走
-                    // LauncherApps.startShortcut(pkg, id) 本就不需要 activity。
-                    val built = rows.mapNotNull { row ->
-                        val activity = row.activity.takeIf { it.isNotBlank() }
-                            ?.let(android.content.ComponentName::unflattenFromString)
-                        val component = activity
-                            ?: row.packageName.takeIf { it.isNotBlank() }
-                                ?.let { android.content.ComponentName(it, "") }
-                            ?: return@mapNotNull null
-                        val shortcut = LauncherShortcut(
-                            id = row.shortcutId, packageName = row.packageName, label = row.label,
-                            icon = null, activity = activity,
-                        )
-                        LauncherApp(componentName = component, label = row.label.ifBlank { row.shortcutId },
-                            icon = null, shortcut = shortcut) to row.showInAppList
-                    }
+                    val (apps, shownKeys) = buildShortcutApps(rows)
                     com.homemode4miui.util.ModLog.i(
-                        "savedShortcuts: rows=" + rows.size + " built=" + built.size +
-                        " shown=" + built.count { it.second } +
-                        " keys=" + built.filter { it.second }.map { it.first.key })
+                        "savedShortcuts: rows=" + rows.size + " dismissed=" + rows.count { it.dismissed } +
+                        " built=" + apps.size + " shown=" + shownKeys.size + " keys=" + shownKeys)
                     _uiState.update {
-                        it.copy(
-                            savedShortcutApps = built.map { entry -> entry.first },
-                            // showInAppList=true（pin 到桌面的快捷方式）→ 并入抽屉/搜索主列表
-                            shownShortcutKeys = built.filter { entry -> entry.second }
-                                .map { entry -> entry.first.key }.toSet(),
-                        )
+                        it.copy(savedShortcutApps = apps, shownShortcutKeys = shownKeys)
                     }
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
@@ -632,33 +731,105 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val app = getApplication<Application>()
                 val launcher = app.getSystemService(android.content.pm.LauncherApps::class.java) ?: return@launch
-                val shortcuts = withContext(Dispatchers.IO) {
+                val density = app.resources.displayMetrics.densityDpi
+                val dao = LauncherDatabase.getInstance(app).itemsDao()
+                val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        launcher.getShortcuts(
+                        val raw = launcher.getShortcuts(
                             android.content.pm.LauncherApps.ShortcutQuery()
                                 .setQueryFlags(android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED),
                             android.os.Process.myUserHandle(),
                         )
+                        // 查询返回 null（无权限/服务未就绪）≠ 系统里没有 pin：不能拿空集合去对账
+                        // 清库，否则一次查询失败会把用户所有快捷方式抹掉。
+                        if (raw == null) return@runCatching null
+                        val shortcuts = raw
+                        val pinnedKeys = shortcuts.map { info ->
+                            shortcutItemKey(info.`package`.orEmpty(), info.id)
+                        }.toSet()
+                        val existing = dao.readShortcuts()
+                        // 文件夹/弹层成员引用保护：被引用的行不能删（成员解析会找不到应用）
+                        val referenced = runCatching {
+                            dao.readPopups().flatMap { PopupItem.decode(it.itemsJson) }
+                                .map { it.key }.toSet()
+                        }.getOrDefault(emptySet())
+
+                        // ① 对账清理（"第四桌面显示两个"实锤修复）：系统的 pinned 集合是权威 ——
+                        //    不在集合里的行说明已在原生桌面被删/被系统回收；用户主动移除
+                        //    (dismissed) 的行在系统 unpin 后也在这里彻底忘掉（重新 pin 可再出现）。
+                        //    只清理"因 pin 而存在"的行（showInAppList 或 dismissed），
+                        //    弹层里手动保存、从未 pin 过的快捷方式（showInAppList=false）不动。
+                        var purged = 0
+                        var demoted = 0
+                        existing.filter { row ->
+                            // 只对账当前用户的行：work profile 的 key 带 "profile:<serial>:" 前缀，
+                            // 而本查询（Process.myUserHandle）只覆盖当前用户 —— 混进来会被误删。
+                            !row.itemKey.startsWith("profile:") &&
+                                row.itemKey !in pinnedKeys && (row.showInAppList || row.dismissed)
+                        }.forEach { row ->
+                            if (row.itemKey in referenced) {
+                                if (row.showInAppList) { dao.hideShortcutFromAppList(row.itemKey); demoted++ }
+                            } else {
+                                dao.deleteShortcut(row.itemKey); purged++
+                            }
+                        }
+
+                        // ② 图标解码：与原生桌面一致 —— 之前抽屉一律拿"创建快捷方式的应用"
+                        //    图标顶替（用户实锤不对）。现在取系统快捷方式图标（含角标），
+                        //    再套 MIUI 自己的图标样式遮罩 IconCustomizer.generateIconStyleDrawable
+                        //    —— 原生桌面就是用这套把快捷方式图标裁成与普通应用一致的形状，
+                        //    不套的话观感就是"应用原始图标 vs 桌面图标"（用户原话）。
+                        val icons = HashMap<String, androidx.compose.ui.graphics.ImageBitmap>()
+                        shortcuts.forEach { info ->
+                            val pkg = info.`package` ?: return@forEach
+                            val key = shortcutItemKey(pkg, info.id)
+                            val bitmap = runCatching {
+                                val raw = launcher.getShortcutBadgedIconDrawable(info, density)
+                                    ?: return@runCatching null
+                                val drawable = miuiIconStyle(raw)
+                                val fallback = (96 * density / 160).coerceAtLeast(1)
+                                val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: fallback
+                                val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: fallback
+                                drawable.toBitmap(w, h)
+                            }.getOrNull()
+                            if (bitmap != null) {
+                                icons[key] = bitmap.asImageBitmap()
+                            }
+                        }
+
+                        // ③ upsert（保留 dismissed 记忆：用户移除过的行不再写回显示）
+                        val blocked = existing.filter { it.dismissed }.map { it.itemKey }.toSet()
+                        shortcuts.forEach { info ->
+                            val pkg = info.`package` ?: return@forEach
+                            val key = shortcutItemKey(pkg, info.id)
+                            if (key in blocked) return@forEach
+                            val label = (info.shortLabel ?: info.longLabel)?.toString().orEmpty()
+                                .ifBlank { info.id }
+                            dao.saveShortcut(com.galaxyrio.gracelauncher.data.SavedShortcutEntity(
+                                itemKey = key,
+                                packageName = pkg,
+                                shortcutId = info.id,
+                                activity = info.activity?.flattenToString().orEmpty(),
+                                label = label,
+                                showInAppList = true,
+                            ))
+                        }
+                        Triple(shortcuts.size, icons, purged to demoted)
                     }.onFailure { ModLog.e("syncPinnedShortcuts query failed", it) }.getOrNull()
                 } ?: return@launch
-                if (shortcuts.isEmpty()) return@launch
-                val dao = LauncherDatabase.getInstance(app).itemsDao()
-                withContext(Dispatchers.IO) {
-                    shortcuts.forEach { info ->
-                        val pkg = info.`package` ?: return@forEach
-                        val label = (info.shortLabel ?: info.longLabel)?.toString().orEmpty()
-                            .ifBlank { info.id }
-                        dao.saveShortcut(com.galaxyrio.gracelauncher.data.SavedShortcutEntity(
-                            itemKey = "shortcut:$pkg/" + android.net.Uri.encode(info.id),
-                            packageName = pkg,
-                            shortcutId = info.id,
-                            activity = info.activity?.flattenToString().orEmpty(),
-                            label = label,
-                            showInAppList = true,
-                        ))
-                    }
+                val (pinned, icons, purge) = result
+                // 图标更新后必须重建整批展示项（含装饰）：savedShortcutApps 里的
+                // LauncherApp 是上一步 decorateApps 的产物，不能只替换 icon 字段
+                // 否则图标设计器/主题化产出会被冲掉。
+                _uiState.update { it.copy(shortcutIcons = icons) }
+                val rows = withContext(Dispatchers.IO) {
+                    runCatching { dao.readShortcuts() }.getOrDefault(emptyList())
                 }
-                ModLog.i("syncPinnedShortcuts: pinned=${shortcuts.size}")
+                val (apps, shownKeys) = buildShortcutApps(rows)
+                _uiState.update {
+                    it.copy(savedShortcutApps = apps, shownShortcutKeys = shownKeys)
+                }
+                ModLog.i("syncPinnedShortcuts: pinned=$pinned icons=${icons.size} purged=${purge.first} demoted=${purge.second}")
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -667,9 +838,120 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /** 与 GracePinItemHook.persist 的 key 逐字一致：shortcut:<pkg>/<Uri.encode(id)>。 */
+    private fun shortcutItemKey(pkg: String, id: String): String =
+        "shortcut:$pkg/" + android.net.Uri.encode(id)
+
+    /**
+     * MIUI 图标样式遮罩（v2.9.154）。
+     *
+     * `miui.content.res.IconCustomizer.generateIconStyleDrawable(Drawable)` 是 MIUI 桌面
+     * 自己把任意图标裁成当前主题图标形状（圆/圆角/主题蒙版）的入口 —— 快捷方式图标
+     * 来自应用自带的位图，不经系统 `getBadgedIcon` 的主题化，所以必须显式过一遍，
+     * 否则与桌面上的普通应用图标形状/风格不一致（用户实锤："相当于应用图标 vs 桌面图标"）。
+     *
+     * 反射调用：模块编译期没有 miui 系统 API 桩；宿主进程内该类可用。
+     * 任何失败（非 MIUI / 方法签名漂移）都原样返回，绝不影响图标可用性。
+     */
+    private fun miuiIconStyle(raw: android.graphics.drawable.Drawable): android.graphics.drawable.Drawable =
+        runCatching {
+            val cls = Class.forName("miui.content.res.IconCustomizer")
+            val method = cls.getMethod(
+                "generateIconStyleDrawable", android.graphics.drawable.Drawable::class.java,
+            )
+            (method.invoke(null, raw) as? android.graphics.drawable.Drawable) ?: raw
+        }.getOrDefault(raw)
+
+    /**
+     * saved_shortcuts 行 → 展示项（**含图标装饰**）。
+     *
+     * v2.9.154（User 实锤）：此前快捷方式只拿到"系统原始快捷方式图标"，没走
+     * `decorateApps`，与抽屉里普通应用（主题化图标 / 图标包 / 图标设计器产出）
+     * 观感不一致 —— 用户描述"相当于应用的图标 vs 桌面的图标的区别"。
+     * 现在快捷方式与应用共用同一条装饰链路，item_icons 的 key 就是
+     * `shortcut:<pkg>/<id>`，因此图标设计器给快捷方式做的设计也会在这里生效。
+     */
+    private suspend fun buildShortcutApps(
+        rows: List<com.galaxyrio.gracelauncher.data.SavedShortcutEntity>,
+    ): Pair<List<LauncherApp>, Set<String>> {
+        // 落库行可能没有 activity（pin 请求里 ShortcutInfo.getActivity() 常为 null，
+        // 例如应用自发布的动态快捷方式）：不能整行丢弃。activity 缺失时用 packageName
+        // 占位 —— 启动走 LauncherApps.startShortcut(pkg, id)，本就不需要 activity。
+        // dismissed 行（用户主动移除的 pin）不参与任何 UI 面。
+        val icons = _uiState.value.shortcutIcons
+        val built = rows.filterNot { it.dismissed }.mapNotNull { row ->
+            val activity = row.activity.takeIf { it.isNotBlank() }
+                ?.let(android.content.ComponentName::unflattenFromString)
+            val component = activity
+                ?: row.packageName.takeIf { it.isNotBlank() }
+                    ?.let { android.content.ComponentName(it, "") }
+                ?: return@mapNotNull null
+            val icon = icons[row.itemKey]
+            val shortcut = LauncherShortcut(
+                id = row.shortcutId, packageName = row.packageName, label = row.label,
+                icon = icon, activity = activity,
+            )
+            LauncherApp(componentName = component, label = row.label.ifBlank { row.shortcutId },
+                icon = icon, shortcut = shortcut) to row.showInAppList
+        }
+        val decorated = decorateApps(built.map { it.first })
+        // showInAppList=true（pin 到桌面的快捷方式）→ 并入抽屉/搜索主列表
+        val shown = built.filter { it.second }.map { it.first.key }.toSet()
+        return decorated to shown
+    }
+
+    /**
+     * 用户主动移除快捷方式（v2.9.141）：先标 dismissed（UI 立即消失，不依赖系统结果），
+     * 再 unpin —— 用户明确要求"模块桌面删除 = 原生桌面也删除"。
+     *
+     * 为什么不直接删行：syncPinnedShortcuts 每次 refreshApps/resume 都按系统 pinned
+     * 集合 upsert，删行会被自愈写回（"快捷方式删不掉"实锤根因）。dismissed 行不参与
+     * UI；系统 unpin 生效后下一轮对账会把它彻底删除（重新 pin 时以 pin hook 写入的
+     * dismissed=false 新行为准，可正常恢复）。
+     */
+    fun removeShortcut(app: LauncherApp) {
+        val shortcut = app.shortcut ?: return
+        viewModelScope.launch {
+            try {
+                val appContext = getApplication<Application>()
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        LauncherDatabase.getInstance(appContext).itemsDao().dismissShortcut(app.key)
+                    }.onFailure { ModLog.e("removeShortcut dismiss failed: ${app.key}", it) }
+                    // 系统层 unpin：原生桌面上的那个快捷方式一起消失（用户要求）。
+                    // LauncherApps 的公开面只有 pinShortcuts(pkg, 全量 id 列表, user) ——
+                    // 传该应用剩余的 pinned id 集合即等于"取消 pin 掉目标这条"（空列表 = 全清）。
+                    // 查询失败时绝不下发（否则会把该应用所有 pin 一起清掉）。
+                    val launcher = appContext.getSystemService(android.content.pm.LauncherApps::class.java)
+                    val user = Process.myUserHandle()
+                    val remaining = runCatching {
+                        launcher?.getShortcuts(
+                            android.content.pm.LauncherApps.ShortcutQuery()
+                                .setQueryFlags(android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+                                .setPackage(shortcut.packageName),
+                            user,
+                        )?.map { it.id }?.filter { it != shortcut.id }
+                    }.getOrNull()
+                    val unpinOk = if (launcher != null && remaining != null) {
+                        runCatching {
+                            launcher.pinShortcuts(shortcut.packageName, remaining, user)
+                        }.onFailure { ModLog.e("removeShortcut unpin failed: ${app.key}", it) }.isSuccess
+                    } else false
+                    ModLog.i("removeShortcut: ${app.key} unpinOk=$unpinOk remaining=${remaining?.size}")
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                ModLog.e("removeShortcut failed: ${app.key}", error)
+            }
+        }
+    }
+
     fun refreshApps() {
         syncPinnedShortcuts()
         appLoadJob?.cancel()
+        // 代际自增必须在启动新 job 之前（旧 job 可能正在锁内换入，读到新代际即让位）
+        val generation = ++appLoadGeneration
         appLoadJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingApps = true, appLoadFailed = false) }
             try {
@@ -680,42 +962,81 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 // 应用图标设计器产出（item_icons）+ 全局面设计 + 主题化在入库前套用。
                 // 快照在装饰前取定：装载期间 icons 流前进的场景由尾部补偿轮处理。
                 val snapshotAtDecorate = iconsSnapshot
-                // 两段式装载（宿主性能适配，装机实锤：重启桌面后时钟/文件夹先出、应用要等
-                // 1-2 秒 —— 200+ 应用串行 getBadgedIcon 解码，收藏行又依赖全量列表）：
-                // ① 枚举全量骨架（不解码系统图标）→ 并行解码收藏子集 → 先换入
-                //    （收藏区随时钟/文件夹立即绘制，无自定义的应用走 decorateApps 骨架跳过）；
-                // ② 全量解码在后台继续，完成后整体换入（抽屉/搜索等全量表面就绪）。
-                // 首装无已存收藏序（currentOrder()=null）时跳过①：默认收藏要由
-                // favoritesFor 基于全量列表生成，两段无收益。
+                // 单段装载（2026-11-14 User 实锤：重启手机后收藏图标正常、抽屉整屏字母占位）。
+                //
+                // 历史包袱：曾为"时钟/文件夹先出、应用晚 1-2 秒到"做两段式 —— phase1 只解
+                // 收藏子集立即换入、phase2 后台解全量。两段各起一批 getBadgedIcon，冷启动
+                // 在 MIUI IconCustomizer 的主题资源锁上互相踩踏 + 各自吃一份解码超时：
+                // 收藏子集（20 个）先拿到锁、正常出图；全量（200+）撞上超时被整批判死 →
+                // 抽屉永久骨架态（字母占位）。诊断实锤"收藏正常 / 抽屉全占位"正是这个形态。
+                //
+                // 回归单段：枚举 → 全量解码 → 装饰 → 一次换入。首帧晚 1-2 秒（时钟、文件夹、
+                // 收藏一起出现），代价可接受；换来抽屉图标不再整批丢失。
                 val inventory = appRepository.enumerateApps(packs)
-                val savedOrder = favoritesStore.currentOrder()
-                if (savedOrder != null) {
-                    val partial = inventory.withIcons(savedOrder.toSet())
-                    val apps = decorateApps(partial)
-                    val folderApps = decorateFolders(_uiState.value.folders, snapshotAtDecorate)
-                    _uiState.update {
-                        it.copy(apps = apps, folderApps = folderApps, favoriteOrder = savedOrder,
-                            isLoadingApps = false, homeReady = true)
+                ModLog.i("refreshApps: enumerated=" + inventory.apps.size
+                        + " at=" + android.os.SystemClock.uptimeMillis())
+                var full = inventory.withIcons(inventory.apps.map(LauncherApp::key).toSet())
+                ModLog.i("refreshApps: icons done at=" + android.os.SystemClock.uptimeMillis()
+                        + " missing=" + full.count { it.icon == null } + "/" + full.size)
+                // 解码瞬时失败自愈：MIUI 系统刚启动时 PackageManager 资源未就绪，
+                // getBadgedIcon 可能整批抛错（解码器内 runCatching 静默为 null）。
+                // 缺失超过 5% 时重试一次（解码是纯函数，重复调用无副作用，第二轮已暖
+                // IconCustomizer 缓存，明显更快），仍失败则如实记录，便于日志定位。
+                run {
+                    val missing = full.filter { it.icon == null }.map(LauncherApp::key)
+                    // 无条件打点：图标缺失是"抽屉字母占位"的唯一判据，缺 1 个也值得留痕
+                    if (missing.isNotEmpty()) {
+                        com.homemode4miui.util.ModLog.i(
+                            "refreshApps: icon missing=" + missing.size + "/" + full.size)
                     }
-                    itemsDecoratedWith = snapshotAtDecorate
+                    if (missing.isNotEmpty() && missing.size * 20 >= full.size) {
+                        com.homemode4miui.util.ModLog.i(
+                            "refreshApps: retry icon decode missing=" + missing.size + "/" + full.size)
+                        full = inventory.withIcons(missing.toSet(), parallelism = 2)
+                        com.homemode4miui.util.ModLog.i(
+                            "refreshApps: after retry missing=" + full.count { it.icon == null } +
+                                "/" + full.size)
+                    }
                 }
-                val full = inventory.withIcons(inventory.apps.map(LauncherApp::key).toSet())
+                // 开机后首次装载的兜底（2026-11-02 User 实测："再重启一次桌面图标就回来"）：
+                // 系统刚开机时内存紧张 + PackageManager/主题资源未就绪，整批解码失败；
+                // 此时不折腾用户手动重启桌面，按 6s/15s 退避自动整表重装，最多两轮。
+                val missingAfterRetry = full.count { it.icon == null }
+                if (missingAfterRetry * 5 >= full.size && appLoadRetryCount < 2) {
+                    appLoadRetryCount += 1
+                    val delayMs = if (appLoadRetryCount == 1) 6_000L else 15_000L
+                    ModLog.i("refreshApps: schedule auto-retry #" + appLoadRetryCount
+                            + " in " + delayMs + "ms (missing=" + missingAfterRetry + "/" + full.size + ")")
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(delayMs)
+                        if (generation == appLoadGeneration && !_uiState.value.isLoadingApps) refreshApps()
+                    }
+                } else if (missingAfterRetry == 0) {
+                    appLoadRetryCount = 0
+                }
                 val apps = decorateApps(full)
+                ModLog.i("refreshApps: decorated at=" + android.os.SystemClock.uptimeMillis()
+                        + " iconMissing=" + apps.count { it.icon == null } + "/" + apps.size)
                 val folderApps = decorateFolders(_uiState.value.folders, snapshotAtDecorate)
                 // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
                 // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
                 val order = favoritesStore.favoritesFor(apps)
                 // 上游同步 v1.1.8 S8a：工作资料枚举（无 managed profile 时零开销静默跳过）。
-                // 两段式下归入②：收藏区不依赖工作资料，phase 1 不为它买单。
                 val workProfiles = appRepository.workProfiles()
                 val workProfileApps = if (workProfiles.isNotEmpty()) {
                     appRepository.loadWorkApps(workProfiles, packs)
                 } else emptyList()
-                _uiState.update {
-                    it.copy(apps = apps, folderApps = folderApps, favoriteOrder = order,
-                        isLoadingApps = false, homeReady = true,
-                        workProfiles = workProfiles, workProfileApps = workProfileApps)
+                // 锁内换入（与 applyItemIconSnapshot 串行，见 appLoadGeneration 注释）
+                decorateMutex.withLock {
+                    if (generation != appLoadGeneration) return@launch
+                    _uiState.update {
+                        it.copy(apps = apps, folderApps = folderApps, favoriteOrder = order,
+                            isLoadingApps = false, homeReady = true,
+                            workProfiles = workProfiles, workProfileApps = workProfileApps)
+                    }
                 }
+                // appLoadRetryCount 的归零放在 missing 判定分支（本文件上部）：
+                // 只有"零缺失"的成功装载才清零，否则退避重试计数会被每次装载重置成 0。
                 itemsDecoratedWith = snapshotAtDecorate
                 // 装载期间 icons 流前进过（iconsJob 因 isLoadingApps 让路）：
                 // 以最新快照补一轮内存重装饰，否则新快照要等下次 emission 才生效。
@@ -724,8 +1045,19 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 throw error
             } catch (error: Exception) {
                 ModLog.e("GraceHomeViewModel loadApps failed", error)
-                // 装载失败也揭示首页（收藏空态兜底），不能让桌面永久空白
-                _uiState.update { it.copy(isLoadingApps = false, appLoadFailed = true, homeReady = true) }
+                // 已有列表（上一轮装载结果）时不得置 appLoadFailed —— 那会让
+                // favorites/appListApps 双双空化，比"图标未解出"严重得多。
+                val hasList = _uiState.value.apps.isNotEmpty()
+                _uiState.update { it.copy(isLoadingApps = false, appLoadFailed = !hasList, homeReady = true) }
+                // 半装载自愈：枚举/解码中途抛错会留下旧列表，且没有任何兜底能唤醒 ——
+                // 延迟重试一次（仅一次，避免失败-重试循环）。
+                if (hasList && appLoadRetryCount < 1 && generation == appLoadGeneration) {
+                    appLoadRetryCount += 1
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(3000)
+                        if (generation == appLoadGeneration && !_uiState.value.isLoadingApps) refreshApps()
+                    }
+                }
             }
         }
     }
@@ -754,10 +1086,23 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         if (_uiState.value.isLoadingApps) return false
         return decorateMutex.withLock {
             try {
+                val generation = appLoadGeneration
                 val state = _uiState.value
                 val apps = decorateApps(state.apps)
                 val folderApps = decorateFolders(state.folders, iconsSnapshot)
-                _uiState.update { it.copy(apps = apps, folderApps = folderApps) }
+                // v2.9.154：快捷方式同样重装饰（图标设计器改快捷方式图标后即时生效，
+                // 不必等下一次 refreshApps / 重开抽屉）
+                val (shortcutApps, shownKeys) = runCatching {
+                    val rows = LauncherDatabase.getInstance(getApplication()).itemsDao().readShortcuts()
+                    buildShortcutApps(rows)
+                }.getOrElse { state.savedShortcutApps to state.shownShortcutKeys }
+                // 装饰期间新一次装载接管（代际前进 / isLoadingApps 已置位）：本轮基于旧
+                // apps 的结果直接丢弃 —— 写回去会把在途装载的换入结果盖成旧快照的骨架。
+                if (generation != appLoadGeneration || _uiState.value.isLoadingApps) return@withLock false
+                _uiState.update {
+                    it.copy(apps = apps, folderApps = folderApps,
+                        savedShortcutApps = shortcutApps, shownShortcutKeys = shownKeys)
+                }
                 itemsDecoratedWith = iconsSnapshot
                 true
             } catch (error: kotlinx.coroutines.CancellationException) {
@@ -804,9 +1149,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             apps.map { app ->
                 runCatching {
                     val special = icons[app.key]
-                    // 骨架应用（两段式装载 phase 1，系统图标尚未解码）：无 per-item 选择 +
-                    // 无全局面设计时跳过渲染 —— 否则 systemDrawable 兜底会对 200+ 骨架触发
-                    // 全量重渲染（风暴复现）；phase 2 解码全量后统一装饰兜底。
+                    // 骨架应用（系统图标解码失败/未解出）：无 per-item 选择 + 无全局面设计
+                    // 时直接跳过 —— 否则 systemDrawable 兜底会对 200+ 骨架触发全量重渲染
+                    // （风暴复现）；解码成功的应用走下面正常装饰。
                     // 宿主性能适配（装机实锤 v2.9.51 后每次重启桌面字母条滑动卡顿）：
                     // 无 per-item 选择 + 无全局面设计 + 未开主题化的应用，applyDesign 仍会走
                     // "默认设计全量重渲染"——systemDrawable binder 往返 + 144px 多层位图渲染 +
@@ -1123,14 +1468,59 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             _uiState.update { it.copy(events = emptyList(), scheduleStatus = GraceScheduleStatus.PermissionRequired) }
             return
         }
+        // 真正要读数据时挂失效监听（无权限/开关关闭时不注册，省一次 provider 观察）
+        ensureCalendarObserver()
         viewModelScope.launch {
-            _uiState.update { it.copy(scheduleStatus = GraceScheduleStatus.Loading) }
+            // 静默刷新：已有数据时不切 Loading（AgendaSheet 只在 events 空时用 Loading 占位，
+            // 但日程行本身也读 status —— 未变化的刷新不该让行消失/闪烁）
+            if (_uiState.value.events.isEmpty()) {
+                _uiState.update { it.copy(scheduleStatus = GraceScheduleStatus.Loading) }
+            }
             runCatching { calendarRepository.upcomingEvents() }
                 .onSuccess { events -> _uiState.update { it.copy(events = events, scheduleStatus = GraceScheduleStatus.Ready) } }
                 .onFailure { error ->
                     ModLog.e("GraceHomeViewModel loadAgenda failed", error)
                     _uiState.update { it.copy(events = emptyList(), scheduleStatus = GraceScheduleStatus.Error) }
                 }
+        }
+    }
+
+    /**
+     * 日程失效监听（2026-10-28 补：此前 events 只在 VM 挂载 / Grace Button Agenda /
+     * 开关打开时各读一次 —— 在系统日历里新增、编辑、删除事件，或第三方日历同步写库后，
+     * 桌面那条"下一日程"始终停在旧数据，正是"更新不及时"的来源）。
+     *
+     * CalendarProvider 的 notifyChange 经 ContentService 跨进程派发，宿主进程注册即可收到；
+     * 注册 authority 根 URI + descendants 覆盖 Calendars/Events/Instances 全部表，
+     * 不漏"只改 calendar 行"的场景（如日历颜色/同步开关）。
+     */
+    private fun ensureCalendarObserver() {
+        if (calendarObserver != null) return
+        val context = getApplication<Application>()
+        val observer = object : android.database.ContentObserver(
+            android.os.Handler(android.os.Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: android.net.Uri?) {
+                if (uri != null && uri.authority != android.provider.CalendarContract.AUTHORITY) return
+                scheduleAgendaRefresh()
+            }
+        }
+        val registered = runCatching {
+            context.contentResolver.registerContentObserver(
+                android.provider.CalendarContract.CONTENT_URI, true, observer)
+        }.onFailure { ModLog.e("GraceHomeViewModel calendar observer register failed", it) }.isSuccess
+        if (registered) {
+            calendarObserver = observer
+            ModLog.i("calendar observer registered (agenda live updates on)")
+        }
+    }
+
+    /** 日历写库防抖（批量导入/删除连发多次 notifyChange → 合并成一次查询）。 */
+    private fun scheduleAgendaRefresh() {
+        agendaRefreshJob?.cancel()
+        agendaRefreshJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(AGENDA_DEBOUNCE_MS)
+            ModLog.i("calendar changed: refreshAgenda")
+            refreshAgenda()
         }
     }
 
@@ -1151,6 +1541,79 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     // ---- 桥快照摄入（GraceBridgeReceiver 转发）----
 
     fun onBridgeMedia(media: NowPlaying?, artChanged: Boolean) {
+        pendingMedia = media to artChanged
+        if (!hostForeground) return          // 后台：只滚动 pending，零重组
+        if (inResumeGrace()) return          // 回桌面宽限期：由宽限收尾统一应用最后一份
+        scheduleSnapshotFlush()
+    }
+
+    fun onBridgeNotifications(notifications: Map<String, List<AppNotification>>) {
+        // 与"目标状态"（后台/合并窗口内以 pending 为准，否则以当前 uiState 为准）相同
+        // 说明没有新信息，直接丢弃。不能比 Map equals：AppNotification.icon 是 Icon 对象，
+        // 每次解码都是新实例，引用不等会让"内容相同"判定失效 —— 用 key + revision 指纹。
+        val target = pendingNotifications ?: _uiState.value.notifications
+        if (sameNotifications(target, notifications)) return
+        pendingNotifications = notifications
+        if (!hostForeground) return          // 后台：只滚动 pending，零重组
+        if (inResumeGrace()) return          // 回桌面宽限期：同上
+        scheduleSnapshotFlush()
+    }
+
+    /** 通知快照语义相等（key + revision 已能唯一确定一条通知的内容版本）。 */
+    private fun sameNotifications(
+        a: Map<String, List<AppNotification>>,
+        b: Map<String, List<AppNotification>>,
+    ): Boolean {
+        if (a === b) return true
+        if (a.size != b.size) return false
+        for ((pkg, left) in a) {
+            val right = b[pkg] ?: return false
+            if (left.size != right.size) return false
+            for (i in left.indices) {
+                if (left[i].key != right[i].key || left[i].revision != right[i].revision) return false
+            }
+        }
+        return true
+    }
+
+    /** 是否处于"刚回桌面"的宽限期（见 SNAPSHOT_GRACE_MS 注释）。 */
+    private fun inResumeGrace(): Boolean =
+        graceUntilUptime > 0L && android.os.SystemClock.uptimeMillis() < graceUntilUptime
+
+    /**
+     * 快照合并落状态（前台路径）。
+     *
+     * 同一批广播（回桌面后主线程序列 deliver、或通知风暴）在 [SNAPSHOT_COALESCE_MS]
+     * 窗口内只应用最后一份 —— 逐条应用会让通知预览把历史整串闪一遍。80ms 对通知
+     * 预览的观感不可感知（远低于一次通知切换的人类可辨阈值），但足以把一整批投递
+     * 压成一次 uiState 变更。
+     */
+    private fun scheduleSnapshotFlush() {
+        if (snapshotFlushScheduled) return
+        snapshotFlushScheduled = true
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(SNAPSHOT_COALESCE_MS)
+            snapshotFlushScheduled = false
+            applyPendingSnapshots()
+        }
+    }
+
+    /** 立即应用 pending（回前台路径：不等待合并窗口，首帧就要最新内容）。 */
+    private fun applyPendingSnapshots() {
+        pendingNotifications?.let { next ->
+            pendingNotifications = null
+            _uiState.update {
+                if (sameNotifications(it.notifications, next)) it else it.copy(notifications = next)
+            }
+        }
+        pendingMedia?.let { (media, artChanged) ->
+            pendingMedia = null
+            applyMedia(media, artChanged)
+        }
+    }
+
+    /** 媒体快照应用（原 onBridgeMedia 主体：封面未随包变化时沿用旧封面）。 */
+    private fun applyMedia(media: NowPlaying?, artChanged: Boolean) {
         _uiState.update { current ->
             // 封面未随包变化时沿用旧封面（artKey = sessionId+revision 的引擎侧去重约定）
             val merged = if (media != null && !artChanged && media.artwork == null) {
@@ -1163,8 +1626,52 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun onBridgeNotifications(notifications: Map<String, List<AppNotification>>) {
-        _uiState.update { it.copy(notifications = notifications) }
+    /**
+     * 宿主桌面退后台（GraceHomeView.onHomePaused → Launcher.onPause，perf3 同链）。
+     * 之后到达的桥快照只进 pending：后台不产生重组，也避免冻结解冻后整批回放。
+     */
+    fun onHostPaused() {
+        if (!hostForeground) return          // 幂等（visibility 与 onPause 双通道都会打进来）
+        hostForeground = false
+        ModLog.i("host paused: bridge snapshots now coalesced (no recompose)")
+    }
+
+    /**
+     * 宿主桌面回前台（GraceHomeView.onHomeAttached 复用分支 / onVisibilityAggregated）。
+     *
+     * 处理顺序：
+     * ① 立即应用后台期间已滚动到 pending 的最新一份（冻结前收到的最后状态）；
+     * ② 开一个 [SNAPSHOT_GRACE_MS] 宽限期 —— 冻结期间积压的广播通常在解冻后紧接着
+     *    逐条 deliver，宽限期内只滚动 pending 不落 state，收尾时一次性应用最后一份，
+     *    视觉上直接停在最新通知，不再"整段回放"；
+     * ③ 向模块进程拉一次全量（长时间后台可能被省电策略冻结甚至杀进程，期间的通知
+     *    变化根本没送达，只靠 pending 会停在旧内容）。引擎侧 refreshSnapshots 清指纹
+     *    重发，内容相同则被相等短路，无 UI 抖动。
+     */
+    fun onHostResumed() {
+        val wasBackground = !hostForeground
+        hostForeground = true
+        applyPendingSnapshots()
+        if (!wasBackground) return
+        ModLog.i("host resumed: grace=${SNAPSHOT_GRACE_MS}ms (stale burst suppressed)")
+        // 回桌面补读日程：后台期间日历可能被改（ContentObserver 之外的兜底 ——
+        // 宿主进程被冻结时 observer 回调同样会排队/丢失）。静默刷新不闪。
+        refreshAgenda()
+        graceUntilUptime = android.os.SystemClock.uptimeMillis() + SNAPSHOT_GRACE_MS
+        graceFlushJob?.cancel()
+        graceFlushJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(SNAPSHOT_GRACE_MS)
+            graceUntilUptime = 0L
+            applyPendingSnapshots()
+            ModLog.i("host resume grace flush: apps=" +
+                _uiState.value.notifications.size + " entries=" +
+                _uiState.value.notifications.values.sumOf(List<*>::size))
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastSnapshotPullUptime >= SNAPSHOT_PULL_MIN_INTERVAL_MS) {
+                lastSnapshotPullUptime = now
+                sendBridgeCommand(GraceBridge.Cmd.SNAPSHOT_REFRESH)
+            }
+        }
     }
 
     /**
@@ -1244,6 +1751,17 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         hiddenAppsJob?.cancel()
         foldersJob?.cancel()
         savedShortcutsJob?.cancel()
+        // v2.9.153：LauncherApps shortcut 回调解绑（VM 每次 attach 新建）
+        runCatching { launcherAppsRef?.unregisterCallback(launcherAppsCallback) }
+            .onFailure { ModLog.e("GraceHomeViewModel unregister LauncherApps.callback failed", it) }
+        launcherAppsRef = null
+        // v2.9.126：日程失效监听解绑（VM 每次 attach 新建，dispose 即终态）
+        agendaRefreshJob?.cancel()
+        calendarObserver?.let { o ->
+            runCatching { getApplication<Application>().contentResolver.unregisterContentObserver(o) }
+                .onFailure { ModLog.e("GraceHomeViewModel calendar observer unregister failed", it) }
+            calendarObserver = null
+        }
         // B6.2：天气引擎停摆（反注册 ContentObserver；VM 每次 attach 新建，dispose 即终态）
         runCatching { weatherHostEngine.dispose() }
             .onFailure { ModLog.e("GraceHomeViewModel weatherHostEngine.dispose failed", it) }

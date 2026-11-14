@@ -119,6 +119,9 @@ class GraceHomeView(launcher: Activity) :
                 if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                     lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
                 }
+                // notif-burst：回前台先把后台积压的桥快照一次性应用，再向模块进程拉全量 ——
+                // 否则冻结期间逐条 deliver 的通知快照会在桌面首帧后继续回放历史。
+                homeViewModel?.onHostResumed()
                 // pin 快捷方式补同步：应用内"添加到主屏幕" → AddItemActivity 关闭 → 回桌面
                 // 走本复用分支。MIUI 的 accept 链路不一定触发旁听 hook，这里按公开
                 // FLAG_MATCH_PINNED 拉一次（幂等），保证快捷方式立刻出现在应用列表。
@@ -256,6 +259,23 @@ class GraceHomeView(launcher: Activity) :
     }
 
     /**
+     * notif-burst：桌面可见性第二通道（不依赖 Launcher.onPause hook 命中）。
+     *
+     * hook 5b 在部分宿主版本上找不到目标方法（安全降级为"永不 onPause"），此时
+     * 只靠 lifecycle 无法判断前后台，桥快照会在退后台期间继续逐条落 state。改为
+     * 同时听 View 层的聚合可见性：窗口可见性由系统直接 dispatch，与宿主方法签名
+     * 无关。两条通道都调用同一对方法（幂等），先到者生效。
+     */
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        try {
+            if (isVisible) homeViewModel?.onHostResumed() else homeViewModel?.onHostPaused()
+        } catch (t: Throwable) {
+            ModLog.e("GraceHomeView onVisibilityAggregated sync failed", t)
+        }
+    }
+
+    /**
      * perf3（功耗专项）：Launcher.onPause 同步 —— 自定义桌面退后台。
      * 生命周期推到 STOPPED：HomeScreen / TimeText 的时钟循环（repeatOnLifecycle
      * STARTED 包裹）整体挂起、widget 宿主 stopListening（rememberWidgetHost 观察
@@ -265,6 +285,8 @@ class GraceHomeView(launcher: Activity) :
      */
     override fun onHomePaused() {
         try {
+            // notif-burst：先标记后台（桥快照只滚动不落 state），再推生命周期。
+            homeViewModel?.onHostPaused()
             if (lifecycleRegistry.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                 lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
             }

@@ -36,6 +36,7 @@ import com.galaxyrio.gracelauncher.data.icons.IconPackRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -43,6 +44,52 @@ import kotlinx.coroutines.withContext
 
 /** 上游同步 v1.1.8 S8a：工作资料 profile 描述（仅 managed type，MIUI 双开/clone 永不进入）。 */
 data class WorkProfile(val user: android.os.UserHandle, val serial: Long)
+
+/**
+ * 图标解码边长（px）。
+ *
+ * 模块侧根因修复（2026-10-28 装机实锤）：`Drawable.toBitmap()` 不传尺寸时按 intrinsic
+ * 出图 —— `getBadgedIcon(0)`（density=0）返回的 MIUI 主题/自适应图标 intrinsic 可达
+ * 300px+（108dp × 440dpi），200+ 应用全量并发解码时峰值位图 ≈ 70MB+（drawable 内部
+ * 位图与目标位图并存时翻倍）。重启手机后系统内存紧张 → 整批解码抛 OutOfMemoryError，
+ * 被解码器里的 runCatching 吞成 null → 桌面退化为字母占位（收藏区正常、抽屉全占位：
+ * phase1 只解收藏子集未触发上限）。
+ *
+ * 固定 144px：覆盖 48dp@3x 的显示尺寸，内存降到约 1/4，同时绕开 intrinsic 为 -1 时
+ * `toBitmap()` 抛 IllegalArgumentException 的坑。
+ */
+private const val ICON_DECODE_PX = 144
+
+/**
+ * 单块解码的应用数：块内共享一个超时窗口（见 AppInventory.withIcons）。
+ *
+ * 历史：整批共用一个 2500ms 硬超时。冷启动首解（MIUI IconCustomizer 主题图标，
+ * 80-150ms/个）200+ 应用必然超时 → 整批图标被判"卡死"丢弃 → 抽屉整屏字母占位。
+ * 分块后单块超时只丢该块的图标，其余块照常出图，最坏情况也只是少几个图标。
+ */
+private const val ICON_CHUNK_SIZE = 24
+
+/** 单块解码超时下限（ms）。 */
+private const val ICON_CHUNK_MIN_TIMEOUT_MS = 1_500L
+
+/** 单图标时间预算（ms，按并行度折算出块超时）。冷启动实测 80-150ms/个。 */
+private const val ICON_PER_ICON_BUDGET_MS = 150L
+
+/** 固定尺寸解码（见 ICON_DECODE_PX）；任何失败返回 null，由消费方按"图标缺失"处理。 */
+private fun android.graphics.drawable.Drawable.toIconBitmap(): android.graphics.Bitmap? = try {
+    toBitmap(ICON_DECODE_PX, ICON_DECODE_PX)
+} catch (t: Throwable) {
+    // 诊断留痕（前 3 次）：图标缺失此前被 runCatching 完全静默 —— OOM / intrinsic 非法
+    // 这类"整批失败"在现场看不出原因。tag 与宿主 ModLog 一致，logcat 可直接过滤。
+    if (iconDecodeFailureLogBudget.getAndDecrement() > 0) {
+        android.util.Log.w("HomeMode4Miui", "icon decode failed: "
+            + t.javaClass.simpleName + ": " + t.message)
+    }
+    null
+}
+
+/** 解码失败日志预算（避免 200+ 条失败刷屏，前 3 条足够定位异常类型）。 */
+private val iconDecodeFailureLogBudget = java.util.concurrent.atomic.AtomicInteger(3)
 
 class AppRepository(
     private val context: Context,
@@ -52,10 +99,13 @@ class AppRepository(
     private val launcherApps = context.getSystemService(LauncherApps::class.java)
 
     /**
-     * 两段式装载骨架（宿主性能适配，装机实锤：重启桌面后时钟/文件夹先出、应用要等
-     * 1-2 秒 —— 根因是 200+ 个应用串行 getBadgedIcon 解码，而收藏行要等全量列表就绪）。
-     * 枚举返回应用骨架（label/key/包图标就绪，系统图标延后解码）＋按 key 的惰性解码句柄；
-     * 消费方先 `withIcons(收藏子集)` 立即出收藏区，再后台 `withIcons(全量)` 换入。
+     * 装载骨架：枚举返回应用骨架（label/key/包图标就绪，系统图标延后解码）＋按 key 的
+     * 惰性解码句柄，消费方用 `withIcons(keys)` 决定解哪些。
+     *
+     * 2026-11-14 回归单段装载：曾用"先解收藏子集出首屏、再解全量"的两段式换首帧，
+     * 但两段各起一批 getBadgedIcon，冷启动时在 IconCustomizer 主题资源锁上互相踩踏，
+     * phase2 整批超时被放弃 → 重启后收藏有图标、抽屉全字母占位。现由消费方一次性
+     * `withIcons(全量)`：首帧晚 1-2 秒，但抽屉图标不再整批丢失。
      */
     /** 解码产物：系统图标 + 上游 v1.1.9 的 originalIconColor/isAdaptiveIcon 顺带采样。 */
     internal class IconDecode(
@@ -68,19 +118,51 @@ class AppRepository(
         val apps: List<LauncherApp>,
         private val decoders: Map<String, suspend () -> IconDecode?>,
     ) {
-        /** 并行解码指定 key 的系统图标并回填（icon 仍为空的项；有包图标的保持包图标）。 */
+        /**
+         * 并行解码指定 key 的系统图标并回填（icon 仍为空的项；有包图标的保持包图标）。
+         *
+         * 超时兜底（2026-10-31 装机实锤：首页收藏图标正常、抽屉整屏字母占位）：
+         * MIUI 的 `getBadgedIcon` 走 IconCustomizer（主题图标），在主题资源锁/主线程
+         * 繁忙时会**阻塞在 binder 上不可中断**。结构化等待（awaitAll）会因单个卡死
+         * 拖死整批，所以改成"非结构化 + 超时"。
+         *
+         * 2026-11-14 修正超时粒度：原实现是**整批一个 2500ms 窗口**，冷启动 200+ 应用
+         * 首解时长本就超过它 → 超时后整批被判卡死，抽屉全字母占位（而收藏子集在另一段
+         * 装载里单独拿到新窗口，所以正常）。现改为**按块**解码、每块独立超时：
+         * 单块最多丢 ICON_CHUNK_SIZE 个图标，其余块不受牵连。
+         */
         @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
         suspend fun withIcons(keys: Set<String>, parallelism: Int = 4): List<LauncherApp> {
             if (keys.isEmpty() || decoders.isEmpty()) return apps
-            val limited = Dispatchers.IO.limitedParallelism(parallelism)
-            val decoded = coroutineScope {
-                decoders.filterKeys { it in keys }
-                    .map { (key, decode) ->
-                        async(limited) {
-                            key to runCatching { decode() }.getOrNull()
-                        }
-                    }.awaitAll()
-            }.toMap()
+            val targets = decoders.filterKeys { it in keys }.toList()
+            if (targets.isEmpty()) return apps
+            val decoded = HashMap<String, IconDecode>(targets.size)
+            var abandoned = 0
+            targets.chunked(ICON_CHUNK_SIZE).forEach { chunk ->
+                // 每块独立 scope + 独立限流：本块的卡死协程只吃满本块的并行额度
+                val scope = kotlinx.coroutines.CoroutineScope(
+                    kotlinx.coroutines.SupervisorJob() + Dispatchers.IO.limitedParallelism(parallelism))
+                val jobs = chunk.map { (key, decode) ->
+                    key to scope.async { runCatching { decode() }.getOrNull() }
+                }
+                val budget = maxOf(ICON_CHUNK_MIN_TIMEOUT_MS,
+                    chunk.size.toLong() * ICON_PER_ICON_BUDGET_MS / parallelism.coerceAtLeast(1))
+                val done: List<Pair<String, IconDecode?>> =
+                    kotlinx.coroutines.withTimeoutOrNull(budget) {
+                        jobs.map { (key, deferred) -> key to deferred.await() }
+                    } ?: jobs.mapNotNull { (key, deferred) ->
+                        // 超时：只收本块已完成的结果，卡住的协程随 scope.cancel 放弃
+                        if (!deferred.isCompleted) null
+                        else runCatching { key to deferred.getCompleted() }.getOrNull()
+                    }
+                done.forEach { (key, icon) -> if (icon != null) decoded[key] = icon }
+                abandoned += chunk.size - done.size
+                scope.cancel()
+            }
+            if (abandoned > 0) {
+                android.util.Log.w("HomeMode4Miui", "icon decode abandoned=" + abandoned + "/"
+                    + targets.size + " (stuck decoders on MIUI IconCustomizer)")
+            }
             if (decoded.isEmpty()) return apps
             return apps.map { app ->
                 val icon = decoded[app.key] ?: return@map app
@@ -127,7 +209,7 @@ class AppRepository(
                 Entry(app, if (app.icon == null) {
                     {
                         val drawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
-                        val bitmap = drawable?.toBitmap()?.asImageBitmap()
+                        val bitmap = drawable?.toIconBitmap()?.asImageBitmap()
                         IconDecode(bitmap,
                             bitmap?.let { runCatching { IconDominantColor.of(it.asAndroidBitmap()) }.getOrNull() },
                             drawable is AdaptiveIconDrawable)
@@ -147,7 +229,7 @@ class AppRepository(
                 val app = makeApp(component, label, null, packs, activity.applicationInfo.flags)
                 Entry(app) {
                     val drawable = runCatching { resolve.loadIcon(pm) }.getOrNull()
-                    val bitmap = drawable?.toBitmap()?.asImageBitmap()
+                    val bitmap = drawable?.toIconBitmap()?.asImageBitmap()
                     IconDecode(bitmap,
                         bitmap?.let { runCatching { IconDominantColor.of(it.asAndroidBitmap()) }.getOrNull() },
                         drawable is AdaptiveIconDrawable)
@@ -218,7 +300,7 @@ class AppRepository(
                         val component = info.componentName ?: return@mapNotNull null
                         val label = info.label.toString().trim().ifBlank { return@mapNotNull null }
                         val drawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
-                        val icon = drawable?.toBitmap()?.asImageBitmap()
+                        val icon = drawable?.toIconBitmap()?.asImageBitmap()
                         makeApp(component, label, icon, packs, info.applicationInfo.flags)
                             .copy(user = profile.user, userSerial = profile.serial, isWorkProfile = true,
                                 originalIconColor = icon?.let {

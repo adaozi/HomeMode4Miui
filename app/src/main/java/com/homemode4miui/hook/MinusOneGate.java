@@ -4,96 +4,85 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
+import android.os.SystemClock;
 import android.os.UserManager;
 
 import java.lang.reflect.Member;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.homemode4miui.util.ModLog;
+
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
-import com.homemode4miui.util.ModLog;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
- * 负一屏 Widget 自愈 —— u0 FBE 解锁前延迟 PA overlay 连接（2026-11-07 定案）。
+ * 负一屏时序对齐 —— 第四桌面模式复用原生的负一屏初始化方法（v7，2026-11-12）。
  *
- * 根因（双模式对照实验实锤，fuxi OS2 RELEASE-5.39.40.10843）：
- *   模块桌面模式开机时宿主启动开销（hook + GraceHomeView + Room）改变开机竞态——
- *   PA（personalassistant）冷启动预载 widget 恢复（开机后 ~11s，宿主 connect PA 触发）
- *   早于 u0 FBE unlock 完成（~18-20s）→ CE 区 widget provider 未注册
- *   （AppWidgetService 注册表仅 9 个 DE 区残留，正常 522）→ PA restoreWidget 的
- *   bindAppWidgetId 被拒（"No widget provider ... for profile 0"）→ PA 判死
- *   removeInvalidWidgets（删系统 widget id + 删 PA 库记录）→ 负一屏
- *   "无法添加微件"/空白且永久失效。原生桌面模式开机（启动轻）unlock 恰先于预载
- *   → bind 成功 → widget 自动恢复（这就是"切原生重启就好了"的原因）。
+ * 原生桌面模式开机为什么一切正常：
+ *   u0 unlock 完成 → CE 区 widget provider 注册就绪 → 宿主 connect PA →
+ *   PA 预载 → bindAppWidgetId 成功 → widget 恢复（含 notes 内容映射）。
  *
- * 修复：gate LauncherClient.connect()（com.miui.launcher.overlay.client.LauncherClient
- *   基类明文方法；PersistentLauncherClient（PA 主链）/FeedLauncherClient/
- *   SearchLauncherClient/AssistantLauncherClient 全部子类汇聚此入口，OS2/OS3 同构）——
- *   u0 未 FBE 解锁时不发起连接：PA 不被 bind、不被拉起、预载判死无从发生；
- *   同时注册 ACTION_USER_UNLOCKED 动态接收器，解锁后按序重放全部挂起的 connect()。
- *   重放即原生健康路径：unlock 后 provider 注册完成（实测 unlock 后 ~5s 内 bind 成功）
- *   → widget 自动恢复，无需用户重加。
+ * 第四桌面模式此前为什么失败（v1~v5 的教训，补丁链全部回退）：
+ *   宿主启动开销使 connect 早于 provider 就绪 → PA 预载判死。此前在 PA 恢复
+ *   流程下游打的补丁（延迟重放时机/kill 重载/删除拦截）与 PA 内部状态机反复
+ *   冲突，越修越糟。
  *
- * 感知性：锁屏期间负一屏本就 lockToHideOverlay 隐藏（AssistantOverlayWindow），
- *   gate 期间用户无法交互负一屏，延迟连接零感知。
+ * v6（对齐原生时序）：u0 未解锁 → defer connect；USER_UNLOCKED → toggle 补注册 →
+ *   轮询到就绪 → 重放 connect。
  *
- * 降级：OS3 类名/方法名漂移时 findAndHookMethod 抛错，由 MainHook.tryHook 隔离，
- *   仅损失自愈能力不破坏宿主。isUserUnlocked 探测异常时放行（宁可回退旧竞态也不
- *   阻断宿主连接）。
+ * v7（2026-11-12，RE_MINUS_ONE_KEEPALIVE §6.2 —— 与保活方案配套）：
+ *   v6 的 gate 有"无限期吞 connect"的副作用：只要 sReady 未置位，四条 connect 通道
+ *   （queueIdle / setClientOptions / AssistantConnectMessage / PackageDataClear）
+ *   全被吞，PA 永远起不来 —— 与"PA 常驻"的目标直接冲突。v7 把 gate 降级为
+ *   **一次性启动门**：
+ *     1. 只有"解锁未完成或注册未就绪"的启动窗口内才 defer；
+ *     2. 无论是否就绪，**最多等 25s（v8 由 8s 上调，见 READY_TIMEOUT_MS 注释）** 就放行（原为 60s + 逐秒轮询）；
+ *     3. 放行后 sOpen 永久为 true，此后不再拦截任何 connect（含 reconnect 与
+ *        事件通道）—— gate 彻底退出，PA 的生命周期交还原生。
+ *   toggle 也改为"仅在已知 provider 不可见时才做"（已就绪的普通重启不再白等）。
+ *
+ * 干预面：只在 connect 的发起时机上做一次 gate，PA 进程零干预，MIUI 恢复流程原样运行。
  */
 public final class MinusOneGate {
 
-    private static final String TAG = "HomeMode4Miui";
     private static final String CLIENT_CLS = "com.miui.launcher.overlay.client.LauncherClient";
+    /** 就绪阈值：本机全量 522，缩水态 9~17，toggle 后 25 → 边界取 20。 */
+    private static final int READY_MIN_PROVIDERS = 20;
+    private static final long READY_POLL_INTERVAL_MS = 500L;
+    /**
+     * 就绪兜底上限（v8）：8s → 25s。8s 在慢开机上会**早于** CE 区 provider 注册完成就放行
+     * PA，PA 恢复 widget 时 bind 失败 → AMS 侧 provider 为空 → 渲染"无法添加微件"
+     * （2026-11-13 装机实锤：dumpsys appwidget 里 PA 的 4 个 widget 只有 host、没有 provider）。
+     * 正常路径仍以 targetedReady() 为准、就绪即放行，此值只是"绝不永久卡死"的上限。
+     */
+    private static final long READY_TIMEOUT_MS = 45_000L;
+    /** 诊断采样：每 5s 打一次注册表读数，确认 launcher 侧到底能不能看到 provider。 */
+    private static final int DIAG_EVERY_POLLS = 10;
 
-    /** 已 defer、待解锁后重放的 client 实例（宿主主线程串行访问为主，仍加锁兜底）。 */
     private static final List<Object> sPending = new ArrayList<>();
-    /** defer 时捕获的 connect Method（重放用）。 */
     private static volatile Member sConnectMethod;
     private static volatile boolean sReceiverRegistered = false;
-    private static volatile boolean sUnlockSeen = false;
-
-    /** 重放就绪判定：provider 注册表阈值（本机全量 522，缩水态 9~17，toggle 后 25 → 取 20）。 */
-    private static final int READY_MIN_PROVIDERS = 20;
-    /** 就绪轮询节奏与超时（超时强制重放 = 回退旧竞态行为，绝不永久卡死）。 */
-    private static final long READY_POLL_INTERVAL_MS = 1000L;
-    private static final long READY_TIMEOUT_MS = 120_000L;
-    /** toggle 后注册补全的固定等待（实测 PACKAGE_CHANGED 重扫 ~16s，取 20s 留余量）。 */
-    private static final long TOGGLE_SETTLE_MS = 20_000L;
-    private static final android.os.Handler sHandler =
-            new android.os.Handler(android.os.Looper.getMainLooper());
-    private static volatile long sReadyPollStart = 0L;
-    private static volatile boolean sToggleTried = false;
-    /** toggle 完成时刻（elapsedRealtime）。重放需在 toggle 后留足注册补全时间（实测 ~16s）。 */
-    private static volatile long sToggleAt = 0L;
-    /** 就绪标志：true = connect 已可放行/已重放。MinusOneEntry 据此挡状态机兜底。 */
-    private static volatile boolean sReady = false;
-
-    /**
-     * 已知负一屏 widget 包（每包 toggle 一个组件即可触发整包 provider 重注册，
-     * 2026-11-07 15:38 实测：misettings/notes toggle 后 9→17 全量回归）。
-     * 组件名来自 exp4 原生模式注册表 dumpsys 精确记录。
-     */
-    private static final String[][] TOGGLE_TARGETS = {
-            {"com.xiaomi.misettings",
-                    "com.xiaomi.misettings.usagestats.widget.desktop.widget.SimpleUsageStatsWidget"},
-            {"com.miui.notes", "com.miui.notes.widget.NoteWidgetProvider_4x2"},
-            {"com.android.camera",
-                    "com.android.camera2.compat.theme.custom.cv.widget.CameraFiltersWidgetProvider"},
-            {"com.android.fileexplorer", "com.android.fileexplorer.widget.SimplePinFileWidget"},
-            {"com.android.quicksearchbox",
-                    "com.android.quicksearchbox.widget.Miui13SearchWidget"},
-    };
+    private static volatile boolean sPreparing = false;
+    private static volatile boolean sPolling = false;
+    /** 唯一放行标志：置位即永久放行（gate 退出，不再拦截任何 connect）。 */
+    private static volatile boolean sOpen = false;
 
     private MinusOneGate() {
     }
 
-    /** 供 MinusOneEntry 查询：gate 正在延迟期（解锁后 provider 未就绪）→ open 不落状态机。 */
-    public static boolean isDeferring() {
-        return !sReady;
+    /** 供 MinusOneEntry 查询：false 时 open 应等待（PA 尚未放行）。 */
+    public static boolean isReady() {
+        return sOpen;
+    }
+
+    /** 供 MinusOneEntry 在 gate 未放行时提前预热（等同一次 connect 触发的准备流程）。 */
+    public static void poke() {
+        prepareAsync();
     }
 
     /** MainHook 挂载入口。 */
@@ -102,14 +91,8 @@ public final class MinusOneGate {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
                 try {
-                    if (sUnlockSeen) return; // 解锁后：所有 connect 直接放行
-                    if (isUserUnlocked()) {
-                        sUnlockSeen = true;
-                        sReady = true; // 解锁即放行 = 无缩水场景（原生路径），开放使用
-                        ModLog.i("MinusOneGate: unlocked already, connect passthrough");
-                        return;
-                    }
-                    // 未解锁：吞掉本次 connect，挂起实例等待解锁重放
+                    if (sOpen) return; // 已放行：永久交还原生（含重连与事件通道）
+                    // 启动窗口内：吞掉本次 connect，挂起等解锁 + 注册确认
                     synchronized (sPending) {
                         if (!sPending.contains(param.thisObject)) {
                             sPending.add(param.thisObject);
@@ -119,33 +102,44 @@ public final class MinusOneGate {
                         sConnectMethod = param.method;
                     }
                     param.setResult(null);
-                    ModLog.i("MinusOneGate: connect deferred (u0 locked), pending="
+                    ModLog.i("MinusOneGate: connect deferred (startup window), pending="
                             + sPending.size());
-                    registerUnlockReceiver();
+                    prepareAsync();
                 } catch (Throwable t) {
-                    // 自愈组件自身故障绝不阻断宿主连接：放行并永久停用 gate
-                    sUnlockSeen = true;
-                    sReady = true; // 降级：gate 失效则完全放行，isDeferring 不得挡 open
+                    // gate 自身故障：降级放行并停用，绝不阻断宿主
+                    sOpen = true;
                     ModLog.e("MinusOneGate: gate error, passthrough + disabled", t);
                 }
             }
         });
-        ModLog.i("MinusOneGate: installed (connect gate on " + CLIENT_CLS + ")");
+        ModLog.i("MinusOneGate: installed (v7 one-shot startup gate, cap "
+                + READY_TIMEOUT_MS + "ms)");
     }
 
-    private static boolean isUserUnlocked() {
-        try {
-            Context app = currentApplication();
-            if (app == null) return true; // Application 未就绪（不应发生）：放行
-            UserManager um = (UserManager) app.getSystemService(Context.USER_SERVICE);
-            if (um == null) return true;
-            boolean unlocked = um.isUserUnlocked(Process.myUserHandle());
-            return unlocked;
-        } catch (Throwable t) {
-            sReady = true; // 探测失败降级放行
-            ModLog.e("MinusOneGate: isUserUnlocked probe failed, passthrough", t);
-            return true;
+    /** 准备流程（一次性）：已解锁 → 补 provider 后开轮询；未解锁 → 等 USER_UNLOCKED。 */
+    private static void prepareAsync() {
+        synchronized (MinusOneGate.class) {
+            if (sPreparing || sOpen) return;
+            sPreparing = true;
         }
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (isUserUnlocked()) {
+                        ModLog.i("MinusOneGate: already unlocked -> preparing providers");
+                        prepareProviders();
+                        startPoll();
+                    } else {
+                        ModLog.i("MinusOneGate: locked -> waiting USER_UNLOCKED");
+                        registerUnlockReceiver();
+                    }
+                } catch (Throwable t) {
+                    ModLog.e("MinusOneGate: prepare error, passthrough", t);
+                    release("prepare-error");
+                }
+            }
+        });
     }
 
     private static Context currentApplication() {
@@ -159,18 +153,73 @@ public final class MinusOneGate {
         }
     }
 
-    /** 第一次 defer 时注册；USER_UNLOCKED 到达后重放全部挂起的 connect()。 */
+    /** u0 是否已 FBE 解锁（探测异常视为已解锁，降级放行）。 */
+    private static boolean isUserUnlocked() {
+        try {
+            Context app = currentApplication();
+            if (app == null) return true;
+            UserManager um = (UserManager) app.getSystemService(Context.USER_SERVICE);
+            return um == null || um.isUserUnlocked(Process.myUserHandle());
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * 定向就绪：PA 实际要绑的 provider 包（负一屏第三方 widget 的来源）在注册表
+     * 可见即视为就绪 —— 比"全量注册"快得多（全量重扫 ~16s，定向逐包先行）。
+     * 包清单与 toggleKnownProviders 的已知负一屏 widget 来源一致。
+     */
+    private static boolean targetedReady() {
+        try {
+            Context app = currentApplication();
+            if (app == null) return false;
+            android.appwidget.AppWidgetManager mgr =
+                    android.appwidget.AppWidgetManager.getInstance(app);
+            List<?> l = mgr.getInstalledProvidersForProfile(Process.myUserHandle());
+            if (l == null) return false;
+            int hit = 0;
+            for (Object o : l) {
+                if (o instanceof android.appwidget.AppWidgetProviderInfo) {
+                    final String pkg = ((android.appwidget.AppWidgetProviderInfo) o)
+                            .provider.getPackageName();
+                    if ("com.xiaomi.misettings".equals(pkg)
+                            || "com.miui.notes".equals(pkg)) {
+                        hit++;
+                    }
+                }
+            }
+            return hit >= 2; // 两个已知来源包各至少一个 provider 可见
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 宿主进程内统计注册表规模（缩水态 9~17，toggle 后 ~25，全量 522）。 */
+    private static int countProviders() {
+        try {
+            Context app = currentApplication();
+            if (app == null) return 0;
+            android.appwidget.AppWidgetManager mgr =
+                    android.appwidget.AppWidgetManager.getInstance(app);
+            List<?> l = mgr.getInstalledProvidersForProfile(Process.myUserHandle());
+            return l == null ? 0 : l.size();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     private static void registerUnlockReceiver() {
         if (sReceiverRegistered) return;
         synchronized (MinusOneGate.class) {
             if (sReceiverRegistered) return;
             Context app = currentApplication();
-            if (app == null) return; // 下次 defer 再试
+            if (app == null) return;
             try {
                 app.registerReceiver(new BroadcastReceiver() {
                     @Override
                     public void onReceive(Context context, Intent intent) {
-                        onUnlocked();
+                        onUserUnlocked();
                     }
                 }, new IntentFilter(Intent.ACTION_USER_UNLOCKED));
                 sReceiverRegistered = true;
@@ -181,54 +230,96 @@ public final class MinusOneGate {
         }
     }
 
-    /**
-     * 解锁：不立即重放 —— v1 实测（2026-11-07 verify-gate）unlock 后 provider 注册
-     * 本身还需数秒，PA 起来+预载快于注册完成 → 竞态窗口仍在。v2 改为轮询注册表
-     * 就绪（>= READY_MIN_PROVIDERS）后再重放；超时强制重放兜底（绝不永久卡死）。
-     */
-    private static void onUnlocked() {
-        sUnlockSeen = true;
-        synchronized (sPending) {
-            if (sPending.isEmpty()) {
-                ModLog.i("MinusOneGate: unlocked, no pending connect");
-                return;
-            }
-        }
-        sReadyPollStart = android.os.SystemClock.elapsedRealtime();
-        ModLog.i("MinusOneGate: unlocked, polling provider registry readiness (pending="
-                + sPending.size() + ")");
-        sHandler.postDelayed(MinusOneGate::pollReady, READY_POLL_INTERVAL_MS);
+    /** 解锁：补注册（模拟系统 CE 扫描）后开轮询；放行前 connect 持续 defer。 */
+    private static void onUserUnlocked() {
+        ModLog.i("MinusOneGate: USER_UNLOCKED -> preparing providers");
+        prepareProviders();
+        startPoll();
     }
 
-    /** 就绪轮询：注册表 < 阈值时先做一轮组件 toggle（重注册触发器），再继续等。 */
-    private static void pollReady() {
-        if (sPending.isEmpty()) return;
-        final int n = countInstalledProviders();
-        final long elapsed = android.os.SystemClock.elapsedRealtime() - sReadyPollStart;
-        // 重放双条件：① 注册表恢复到阈值；② toggle 后留足注册补全时间（实测 ~16s 取 20s）
-        // —— v3 教训：toggle 刚发就重放，PA 预载撞未完成的注册窗口再次判死（16:33:55）。
-        final long sinceToggle = sToggleAt == 0L
-                ? Long.MAX_VALUE : android.os.SystemClock.elapsedRealtime() - sToggleAt;
-        final boolean registryReady = n >= READY_MIN_PROVIDERS;
-        final boolean toggleSettled = sinceToggle >= TOGGLE_SETTLE_MS;
-        if ((registryReady && toggleSettled) || elapsed >= READY_TIMEOUT_MS) {
-            sReady = true;
-            ModLog.i("MinusOneGate: ready (providers=" + n + ", waited=" + elapsed
-                    + "ms, sinceToggle=" + (sinceToggle == Long.MAX_VALUE ? -1 : sinceToggle)
-                    + ", timeout=" + (elapsed >= READY_TIMEOUT_MS) + ") -> replaying "
-                    + sPending.size() + " connect()");
-            replayAll();
+    /** 已知 provider 齐全就不 toggle（普通重启路径不再白等 PACKAGE_CHANGED 重注册）。 */
+    private static void prepareProviders() {
+        if (targetedReady()) {
+            ModLog.i("MinusOneGate: known providers visible, toggle skipped");
             return;
         }
-        // 缩水态（模块桌面模式开机的 CE 扫描缺失）：做一轮组件 toggle 触发重注册。
-        // 15:38 实测有效（9→17，目标 provider 全回）；权限不足（SecurityException）
-        // 时置位 sToggleTried 不再重复，退化为纯轮询 + 超时重放兜底。
-        if (!sToggleTried) {
-            sToggleTried = true;
-            sToggleAt = android.os.SystemClock.elapsedRealtime();
-            toggleKnownProviders();
+        toggleKnownProviders();
+    }
+
+    /** 就绪轮询（一次性）：就绪或 25s 超时都放行，永不无限期 defer。 */
+    private static void startPoll() {
+        synchronized (MinusOneGate.class) {
+            if (sPolling || sOpen) return;
+            sPolling = true;
         }
-        sHandler.postDelayed(MinusOneGate::pollReady, READY_POLL_INTERVAL_MS);
+        final Handler h = new Handler(Looper.getMainLooper());
+        final long start = SystemClock.elapsedRealtime();
+        final Runnable[] poll = new Runnable[1];
+        final int[] polls = new int[1];
+        poll[0] = new Runnable() {
+            @Override
+            public void run() {
+                if (sOpen) return;
+                final int n = countProviders();
+                final long elapsed = SystemClock.elapsedRealtime() - start;
+                // 诊断采样（v9）：每 5s 一条，用来判定"launcher 侧读不到 provider"
+                // 到底是永久缺陷还是启动早段的窗口 —— 决定后续是等信号还是换方案。
+                polls[0]++;
+                if (polls[0] % DIAG_EVERY_POLLS == 0) {
+                    ModLog.i("MinusOneGate diag: providers=" + n
+                            + " targeted=" + targetedReady()
+                            + " elapsed=" + elapsed + "ms");
+                }
+                // 定向就绪优先：PA 实际绑的 provider（misettings/notes）可见即放行，
+                // 不等全量注册（原生即开即用的关键）。全量阈值作为兜底信号。
+                if (targetedReady() || n >= READY_MIN_PROVIDERS) {
+                    ModLog.i("MinusOneGate: registry ready (providers=" + n
+                            + ", waited=" + elapsed + "ms)");
+                    release("ready");
+                    return;
+                }
+                if (elapsed >= READY_TIMEOUT_MS) {
+                    // 降级：超时放行（回退旧竞态，绝不长期卡住 PA）
+                    ModLog.i("MinusOneGate: ready timeout (" + n + " after "
+                            + elapsed + "ms) -> passthrough");
+                    release("timeout");
+                    return;
+                }
+                h.postDelayed(poll[0], READY_POLL_INTERVAL_MS);
+            }
+        };
+        h.postDelayed(poll[0], READY_POLL_INTERVAL_MS);
+    }
+
+    /** 永久放行 + 按序重放挂起的 connect()（主线程，与原生调用线程一致）。 */
+    private static void release(String reason) {
+        sOpen = true;
+        final List<Object> pending;
+        synchronized (sPending) {
+            pending = new ArrayList<>(sPending);
+            sPending.clear();
+        }
+        ModLog.i("MinusOneGate: gate OPEN (" + reason + "), replaying "
+                + pending.size() + " connect()");
+        final Member connect = sConnectMethod;
+        for (final Object client : pending) {
+            try {
+                Object destroyed = XposedHelpers.callMethod(client, "isDestroyed");
+                if (destroyed instanceof Boolean && (Boolean) destroyed) {
+                    ModLog.i("MinusOneGate: skip destroyed client");
+                    continue;
+                }
+                if (connect != null) {
+                    XposedBridge.invokeOriginalMethod(connect, client, new Object[0]);
+                } else {
+                    XposedHelpers.callMethod(client, "connect");
+                }
+                ModLog.i("MinusOneGate: replayed connect on "
+                        + client.getClass().getSimpleName());
+            } catch (Throwable t) {
+                ModLog.e("MinusOneGate: replay connect failed", t);
+            }
+        }
     }
 
     /** 逐包 disable→enable 已知 widget 组件：PACKAGE_CHANGED 触发整包重注册。 */
@@ -236,9 +327,20 @@ public final class MinusOneGate {
         final Context app = currentApplication();
         if (app == null) return;
         final android.content.pm.PackageManager pm = app.getPackageManager();
-        for (final String[] t : TOGGLE_TARGETS) {
+        final String[][] targets = {
+                {"com.xiaomi.misettings",
+                        "com.xiaomi.misettings.usagestats.widget.desktop.widget.SimpleUsageStatsWidget"},
+                {"com.miui.notes", "com.miui.notes.widget.NoteWidgetProvider_4x2"},
+                {"com.android.camera",
+                        "com.android.camera2.compat.theme.custom.cv.widget.CameraFiltersWidgetProvider"},
+                {"com.android.fileexplorer", "com.android.fileexplorer.widget.SimplePinFileWidget"},
+                {"com.android.quicksearchbox",
+                        "com.android.quicksearchbox.widget.Miui13SearchWidget"},
+        };
+        for (final String[] t : targets) {
             try {
-                final android.content.ComponentName cn = new android.content.ComponentName(t[0], t[1]);
+                final android.content.ComponentName cn =
+                        new android.content.ComponentName(t[0], t[1]);
                 pm.setComponentEnabledSetting(cn,
                         android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                         android.content.pm.PackageManager.DONT_KILL_APP);
@@ -250,74 +352,6 @@ public final class MinusOneGate {
                 ModLog.e("MinusOneGate: toggle failed " + t[0]
                         + " (" + t2.getClass().getSimpleName() + ")", t2);
             }
-        }
-    }
-
-    /** 宿主进程内统计当前 AppWidgetService 注册表规模（缩水态 9~17，全量 522）。 */
-    private static int countInstalledProviders() {
-        try {
-            Context app = currentApplication();
-            if (app == null) return 0;
-            android.appwidget.AppWidgetManager mgr =
-                    android.appwidget.AppWidgetManager.getInstance(app);
-            java.util.List<?> l = mgr.getInstalledProvidersForProfile(Process.myUserHandle());
-            return l == null ? 0 : l.size();
-        } catch (Throwable t) {
-            return 0;
-        }
-    }
-
-    /** 重放全部挂起的 connect()（原生调用线程即主线程，此处同为 Handler 主线程）。 */
-    private static void replayAll() {
-        sReady = true;
-        final List<Object> pending;
-        synchronized (sPending) {
-            if (sPending.isEmpty()) return;
-            pending = new ArrayList<>(sPending);
-            sPending.clear();
-        }
-        final Member connect = sConnectMethod;
-        for (final Object client : pending) {
-            try {
-                // 已销毁的 client 不重放（feed/search 等短生命周期实例可能在等待期被释放）
-                Object destroyed = XposedHelpers.callMethod(client, "isDestroyed");
-                if (destroyed instanceof Boolean && (Boolean) destroyed) {
-                    ModLog.i("MinusOneGate: skip destroyed client "
-                            + client.getClass().getSimpleName());
-                    continue;
-                }
-                if (connect != null) {
-                    XposedBridge.invokeOriginalMethod(connect, client, new Object[0]);
-                } else {
-                    XposedHelpers.callMethod(client, "connect");
-                }
-                ModLog.i("MinusOneGate: replayed connect on "
-                        + client.getClass().getSimpleName());
-            } catch (Throwable t) {
-                ModLog.e("MinusOneGate: replay connect failed on "
-                        + client.getClass().getSimpleName(), t);
-            }
-        }
-        // 自愈收尾：重放前 PA 若已在缩水窗口跑过预载，视图会停在判死占位（数据已就绪
-        // 而视图未刷新，2026-11-07 17:23 实测）。force-stop PA 触发干净重载 —— 此时
-        // provider 已就绪，重起后的预载一步到位（bind 成功、无判死）。权限不足则跳过，
-        // 用户重开负一屏时由 MinusOneEntry 的 attach 链自然恢复。
-        sHandler.postDelayed(MinusOneGate::forceStopPa, 2000L);
-    }
-
-    /** 反射 ActivityManager.forceStopPackage（@hide）：priv-app 持有签名权限则生效。 */
-    private static void forceStopPa() {
-        try {
-            final Context app = currentApplication();
-            if (app == null) return;
-            XposedHelpers.callStaticMethod(
-                    XposedHelpers.findClass("android.app.ActivityManager",
-                            MinusOneGate.class.getClassLoader()),
-                    "forceStopPackage", "com.miui.personalassistant");
-            ModLog.i("MinusOneGate: force-stopped PA for clean reload (providers ready)");
-        } catch (Throwable t) {
-            ModLog.i("MinusOneGate: forceStopPA unavailable ("
-                    + t.getClass().getSimpleName() + "), skipping");
         }
     }
 }

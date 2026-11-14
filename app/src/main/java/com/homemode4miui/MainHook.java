@@ -42,6 +42,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *  5b. Launcher.onPause()                             after  → 桌面退后台省电同步：
  *     HomeView.onHomePaused 推 Compose 生命周期到 STOPPED（时钟循环挂起/widget
  *     宿主停听）—— perf3 功耗专项；回前台由 5.onResume 自动恢复（同上路由）
+ *  6. LauncherClient.connect()                        before → 负一屏启动时序门（一次性）：
+ *     解锁前后 provider 注册未就绪时 defer 一次，就绪或 ≤8s 即永久放行
+ *     （hook/MinusOneGate.java）
+ *  7. overlay 连接 setStopped(true)                   before → 负一屏保活：PA 绑定
+ *     贯穿桌面进程生命周期，不再 unbind（hook/OverlayKeepAlive.java）
  *  9. SuperDraglayer.findActiveController             before → 手势隔离闸门：
  *     自定义模式激活时宿主手势控制器（下拉搜索/上滑抽屉/横滑负一屏/下拉通知栏）
  *     永不认领手势流，消除与挂载视图的手势互相捣乱；负一屏恒定隔离（已固化，无开关），
@@ -222,6 +227,17 @@ public class MainHook implements IXposedHookLoadPackage {
         tryHook("6.MinusOneGate (负一屏解锁前延迟连接)", new HookTask() {
             @Override public void run() {
                 com.homemode4miui.hook.MinusOneGate.install(cl);
+            }
+        });
+        // 7. 负一屏保活（2026-11-12，RE_MINUS_ONE_KEEPALIVE）：恢复原生 PA 绑定语义 ——
+        //    吞掉 overlay 连接的 setStopped(true)（mStopped 恒 false → cleanUp() 的
+        //    unbind 永不命中），绑定贯穿桌面进程生命周期；PA 被 LMK 杀掉后系统按
+        //    binding 重启 → onServiceConnected 自愈，不再"滑出即冷启动 6s+ /
+        //    微件显示无法添加微件"。onBindingDied 另有 2s/6s/15s 有界补绑。
+        //    桌面退后台仍照常 setActivityState 通知 PA，后台耗电影响与原生一致。
+        tryHook("7.OverlayKeepAlive (负一屏持久绑定保活)", new HookTask() {
+            @Override public void run() {
+                com.homemode4miui.hook.OverlayKeepAlive.install(cl);
             }
         });
         tryHook("9.SuperDraglayer.findActiveController (手势隔离)", new HookTask() {

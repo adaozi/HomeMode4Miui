@@ -782,4 +782,8 @@
     <string name="grace_button_size">Button size</string>
     <string name="grace_button_position_hint">Drag the button to change its position</string>
     <string name="palette_vibrant">Vibrant</string>
+    <string name="shortcut_remove_title">Remove shortcut?</string>
+    <string name="shortcut_remove_message">The shortcut will be removed from this launcher and from the system home screen.</string>
+    <string name="shortcut_remove_cancel">Cancel</string>
+    <string name="shortcut_remove_action">Remove</string>
 </resources>

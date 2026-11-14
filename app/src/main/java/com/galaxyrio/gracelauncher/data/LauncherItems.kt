@@ -76,6 +76,14 @@ data class ItemIconEntity(@PrimaryKey val itemKey: String, val iconJson: String)
 data class SavedShortcutEntity(
     @PrimaryKey val itemKey: String, val packageName: String, val shortcutId: String,
     val activity: String, val label: String, val showInAppList: Boolean = false,
+    /**
+     * 用户主动移除（v2.9.141）：行保留但不再出现在抽屉/搜索/弹层。
+     * 不能直接 DELETE —— syncPinnedShortcuts 每次 refreshApps 都会按系统 pinned
+     * 集合 upsert，删行会被立刻自愈回来（"快捷方式删不掉"实锤根因）。
+     * 系统侧 unpin 后（key 不再出现在 pinned 集合）由对账真正删除，用户重新 pin
+     * 时该 key 已无记忆 → 正常出现。
+     */
+    val dismissed: Boolean = false,
 )
 
 @Entity(tableName = "app_popups")
@@ -86,13 +94,21 @@ abstract class LauncherItemsDao {
     @Query("SELECT * FROM item_icons") abstract fun icons(): Flow<List<ItemIconEntity>>
     @Query("SELECT * FROM item_icons") abstract suspend fun readIcons(): List<ItemIconEntity>
     @Query("SELECT * FROM saved_shortcuts") abstract fun shortcuts(): Flow<List<SavedShortcutEntity>>
+    /** v2.9.141：宿主对账（syncPinnedShortcuts）读全量行，非 Flow。 */
+    @Query("SELECT * FROM saved_shortcuts") abstract suspend fun readShortcuts(): List<SavedShortcutEntity>
     @Query("SELECT * FROM app_popups") abstract fun popups(): Flow<List<AppPopupEntity>>
+    @Query("SELECT * FROM app_popups") abstract suspend fun readPopups(): List<AppPopupEntity>
     @Query("SELECT * FROM app_popups WHERE ownerKey = :key") abstract suspend fun popup(key: String): AppPopupEntity?
     @Query("SELECT * FROM saved_shortcuts WHERE itemKey = :key") abstract suspend fun shortcut(key: String): SavedShortcutEntity?
     @Upsert abstract suspend fun saveIcon(value: ItemIconEntity)
     @Query("DELETE FROM item_icons WHERE itemKey = :key") abstract suspend fun resetIcon(key: String)
     @Query("DELETE FROM item_icons WHERE itemKey IN (:keys)") abstract suspend fun resetIcons(keys: List<String>)
     @Upsert abstract suspend fun saveShortcut(value: SavedShortcutEntity)
+    @Query("DELETE FROM saved_shortcuts WHERE itemKey = :key") abstract suspend fun deleteShortcut(key: String)
+    /** 用户移除（保留记忆 + 不再显示）；系统 unpin 后由宿主对账真正删行。 */
+    @Query("UPDATE saved_shortcuts SET dismissed = 1 WHERE itemKey = :key") abstract suspend fun dismissShortcut(key: String)
+    /** 系统已 unpin 但仍被文件夹/弹层引用：保留行用于成员解析，只从应用列表撤出。 */
+    @Query("UPDATE saved_shortcuts SET showInAppList = 0 WHERE itemKey = :key") abstract suspend fun hideShortcutFromAppList(key: String)
     @Upsert abstract suspend fun savePopup(value: AppPopupEntity)
     @Query("DELETE FROM app_popups WHERE ownerKey = :key") abstract suspend fun deletePopup(key: String)
 }

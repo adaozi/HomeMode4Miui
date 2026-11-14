@@ -134,7 +134,7 @@ abstract class LauncherSettingsDao {
     entities = [LauncherSettingsEntity::class, HiddenAppEntity::class,
         LauncherFolderEntity::class, ItemIconEntity::class,
         SavedShortcutEntity::class, AppPopupEntity::class],
-    version = 23,
+    version = 24,
     exportSchema = true,
 )
 abstract class LauncherDatabase : RoomDatabase() {
@@ -314,6 +314,17 @@ abstract class LauncherDatabase : RoomDatabase() {
         }
 
         /**
+         * v2.9.141（快捷方式三连修）：saved_shortcuts 加 dismissed 列 ——
+         * 用户移除的 pin 快捷方式保留记忆但不再显示（纯删行会被 syncPinnedShortcuts
+         * 按系统 pinned 集合自愈回来，"删不掉"实锤根因）。
+         */
+        val Migration23To24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE saved_shortcuts ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
          * 宿主适配：库文件落 databases/custom/grace_launcher.db（对齐底座独立 DB 目录惯例）。
          * hotfix1（装机 2026-10-08 实锤）：getDatabasePath("custom/x.db") 走 ContextImpl
          * makeFilename —— 无条件拒绝带路径分隔符的名字，直接 IllegalArgumentException
@@ -341,7 +352,7 @@ abstract class LauncherDatabase : RoomDatabase() {
                 // Room 降级无迁移路径 → snapshot build 全挂（第四桌面应用/设置装载失败）。
                 // 仅降级时销毁重建（升级仍走迁移链），用户数据以桌面重置为代价换取功能恢复。
                 .fallbackToDestructiveMigrationOnDowngrade()
-                .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22, Migration22To23).build().also { instance = it }
+                .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22, Migration22To23, Migration23To24).build().also { instance = it }
         }
     }
 }

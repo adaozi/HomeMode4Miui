@@ -47,6 +47,10 @@ public final class MinusOneEntry {
     private static final int CLIENT_HEAL_ATTEMPTS = 20;
     /** 同一时间只允许一条 open 重试链（避免连点/手势抖动叠加多次 showOverlay）。 */
     private static boolean sOpenInFlight = false;
+    /** gate 预热期的 open 重试节奏与上限（500ms × 20 ≈ 10s；gate 兜底上限 25s）。 */
+    private static final long GATE_RETRY_INTERVAL_MS = 500L;
+    private static final int GATE_RETRY_MAX = 20;
+    private static int sGateRetry = 0;
     /** 本进程是否已做过一次"冷启动强制 reattach"（重启后修复 PA 微件绑定，见 showViaClient）。 */
     private static boolean sReattachDone = false;
 
@@ -70,14 +74,32 @@ public final class MinusOneEntry {
             ModLog.e("MinusOneEntry.open: launcher is null", null);
             return false;
         }
-        // 负一屏自愈联动（2026-11-07）：gate 延迟期（解锁后 provider 注册补全中），
-        // 状态机兜底会触发 connect → PA 提前起 → 预载撞未完成注册窗口 → 判死删库
-        // （第三方 provider 以旧 appWidgetId 为键的内容映射随之作废，笔记需重新绑定）。
-        // deferring 期间直接拒绝 open，等 gate ready 后再开即为健康路径。
-        if (com.homemode4miui.hook.MinusOneGate.isDeferring()) {
-            ModLog.i("MinusOneEntry.open: gate deferring (provider warming up), skip");
-            return false;
+        if (!MinusOneGate.isReady()) {
+            // v7（2026-11-12）：gate 是"一次性启动门"，放行窗口最长 8s —— 不再直接把
+            // 用户的手势丢掉，而是预热 gate + 有界重试（≤8s），放行瞬间自动续上。
+            MinusOneGate.poke();
+            if (sGateRetry >= GATE_RETRY_MAX) {
+                sGateRetry = 0;
+                ModLog.i("MinusOneEntry.open: gate still warming after "
+                        + GATE_RETRY_MAX + " retries, skip");
+                return false;
+            }
+            sGateRetry++;
+            ModLog.i("MinusOneEntry.open: gate warming, retry #" + sGateRetry
+                    + " in " + GATE_RETRY_INTERVAL_MS + "ms");
+            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (launcher.isFinishing() || launcher.isDestroyed()) {
+                        sGateRetry = 0;
+                        return;
+                    }
+                    open(launcher);
+                }
+            }, GATE_RETRY_INTERVAL_MS);
+            return true;
         }
+        sGateRetry = 0;
         if (isShowing(launcher)) {
             ModLog.i("MinusOneEntry.open: already showing");
             return true;

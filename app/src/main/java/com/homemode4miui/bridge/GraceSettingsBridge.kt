@@ -313,6 +313,8 @@ object GraceSettingsBridge {
          * 应用在"隐藏应用"页找不到）→ 快照回带宿主清单，设置页按 key 补差集。
          */
         val appCatalog: List<AppWire> = emptyList(),
+        /** v2.9.154：桌面已保存/已 pin 的快捷方式（图标设计器选择面）。 */
+        val savedShortcuts: List<ShortcutWire> = emptyList(),
     )
 
     /** 应用清单单项（LauncherApp 跨桥裁剪版：位图/组件对象不可序列化）。 */
@@ -357,6 +359,15 @@ object GraceSettingsBridge {
             s.appCatalog.forEach { a ->
                 put(JSONObject().put("c", a.component).put("l", a.label)
                     .put("s", a.serial ?: JSONObject.NULL))
+            }
+        })
+        // v2.9.154：桌面上的快捷方式清单（图标设计器要给快捷方式做图标，设置页
+        // 模块进程读不到宿主 saved_shortcuts 表，必须随快照回带）。
+        .put("shc", JSONArray().apply {
+            s.savedShortcuts.forEach { w ->
+                put(JSONObject().put("k", w.key).put("p", w.packageName)
+                    .put("i", w.shortcutId).put("a", w.activity ?: JSONObject.NULL)
+                    .put("l", w.label))
             }
         })
         .toString()
@@ -410,6 +421,18 @@ object GraceSettingsBridge {
                             label = a.optString("l"),
                             serial = a.opt("s") as? Long,
                         ).takeIf { it.component.isNotBlank() }
+                    }.getOrNull()
+                }
+            } ?: emptyList(),
+            savedShortcuts = v.optJSONArray("shc")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i ->
+                    runCatching {
+                        val w = arr.getJSONObject(i)
+                        ShortcutWire(
+                            appKey = w.optString("p"), key = w.optString("k"),
+                            packageName = w.optString("p"), shortcutId = w.optString("i"),
+                            activity = w.opt("a") as? String, label = w.optString("l"),
+                        ).takeIf { it.key.isNotBlank() }
                     }.getOrNull()
                 }
             } ?: emptyList(),
