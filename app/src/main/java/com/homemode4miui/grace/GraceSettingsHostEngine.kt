@@ -245,20 +245,38 @@ class GraceSettingsHostEngine(
                         GraceSettingsBridge.PrivateSpaceWire(it.supported, it.serial, it.locked, it.accessible, it.revision, it.lockVersion)
                     },
                     appCatalog = runCatching { appCatalog() }.getOrDefault(emptyList()),
-                    // v2.9.154：桌面快捷方式清单（图标设计器选择面；模块进程无宿主 DB 可见性）
+                    // v2.9.154/155：桌面快捷方式清单（图标设计器选择面；模块进程无宿主 DB
+                    // 与快捷方式图标权限，清单 + 缩略图都靠快照回带）
                     savedShortcuts = runCatching {
-                        dao?.readShortcuts().orEmpty()
+                        val rows = dao?.readShortcuts().orEmpty()
                             .filterNot { it.dismissed || it.itemKey.startsWith("profile:") }
-                            .map { row ->
-                                GraceSettingsBridge.ShortcutWire(
-                                    appKey = row.packageName,
-                                    key = row.itemKey,
-                                    packageName = row.packageName,
-                                    shortcutId = row.shortcutId,
-                                    activity = row.activity.takeIf { it.isNotBlank() },
-                                    label = row.label.ifBlank { row.shortcutId },
-                                )
-                            }
+                        // 缩略图优先复用桌面 VM 解好的缓存（同一张 MIUI 样式化图标）；
+                        // 缓存未命中（如设置页先于桌面同步打开）就在此解码一次。
+                        if (rows.any { ShortcutIconCache.get(it.itemKey) == null }) {
+                            runCatching {
+                                context.getSystemService(android.content.pm.LauncherApps::class.java)
+                                    ?.let { launcher ->
+                                        ShortcutIconCache.putAll(ShortcutIconCache.decodePinned(
+                                            launcher, context.resources.displayMetrics.densityDpi))
+                                    }
+                            }.onFailure { ModLog.e("snapshot shortcut icon decode failed", it) }
+                        }
+                        rows.mapIndexed { index, row ->
+                            GraceSettingsBridge.ShortcutWire(
+                                appKey = row.packageName,
+                                key = row.itemKey,
+                                packageName = row.packageName,
+                                shortcutId = row.shortcutId,
+                                activity = row.activity.takeIf { it.isNotBlank() },
+                                label = row.label.ifBlank { row.shortcutId },
+                                // 广播 ≤1MB：缩略图最多回带 8 个（160px PNG ≈ 20~40KB），
+                                // 超出部分留 null（设计器列表退化为无图，不影响功能）
+                                iconPng = if (index < 8) {
+                                    ShortcutIconCache.get(row.itemKey)
+                                        ?.let { ShortcutIconCache.thumbnailPng(it) }
+                                } else null,
+                            )
+                        }
                     }.getOrDefault(emptyList()),
                 )
             }.onSuccess { sendSnapshot(it) }

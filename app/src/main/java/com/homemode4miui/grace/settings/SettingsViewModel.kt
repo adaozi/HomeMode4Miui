@@ -25,6 +25,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import com.galaxyrio.gracelauncher.data.AppRepository
 import com.galaxyrio.gracelauncher.data.ClockStyle
 import com.galaxyrio.gracelauncher.data.ItemIcon
@@ -167,9 +169,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         send(GraceSettingsBridge.Cmd.WEATHER_REFRESH)
     }
 
+    /**
+     * 宿主回带的快捷方式缩略图（Base64 PNG）→ ImageBitmap。
+     * v2.9.155：图标设计器列表/预览需要真实图标，而模块进程没有 LauncherApps
+     * 快捷方式图标权限（只有宿主有）；失败返回 null，列表退化为无图（可接受降级）。
+     */
+    private fun decodeShortcutThumbnail(png: String?): ImageBitmap? {
+        if (png.isNullOrBlank()) return null
+        return runCatching {
+            val bytes = android.util.Base64.decode(png, android.util.Base64.NO_WRAP)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        }.getOrNull()
+    }
+
     /** 快照 → uiState（模块本地查询面保留，桥面覆盖）。 */
-    private fun applySnapshot(snapshot: GraceSettingsBridge.Snapshot) {
-        val previousWeatherLocationId = _uiState.value.settings.weatherLocationId
+    private fun applySnapshot(snapshot: GraceSettingsBridge.Snapshot) {        val previousWeatherLocationId = _uiState.value.settings.weatherLocationId
         // 宿主应用清单（补本地枚举差集，refreshApps 尾部合并）
         bridgedCatalog = snapshot.appCatalog.mapNotNull { wire ->
             val component = android.content.ComponentName.unflattenFromString(wire.component)
@@ -194,13 +208,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val activity = wire.activity?.let { android.content.ComponentName.unflattenFromString(it) }
             val component = activity
                 ?: android.content.ComponentName(wire.packageName, "")
+            // v2.9.155：宿主回带的缩略图（MIUI 样式化图标，与桌面同一张）→ 设计器列表/预览
+            val icon = decodeShortcutThumbnail(wire.iconPng)
             com.galaxyrio.gracelauncher.data.LauncherApp(
                 componentName = component,
                 label = wire.label.ifBlank { wire.shortcutId },
-                icon = null,
+                icon = icon,
                 shortcut = com.galaxyrio.gracelauncher.data.LauncherShortcut(
                     id = wire.shortcutId, packageName = wire.packageName,
-                    label = wire.label, icon = null, activity = activity,
+                    label = wire.label, icon = icon, activity = activity,
                 ),
             )
         }

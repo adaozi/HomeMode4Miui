@@ -770,32 +770,22 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                             if (row.itemKey in referenced) {
                                 if (row.showInAppList) { dao.hideShortcutFromAppList(row.itemKey); demoted++ }
                             } else {
-                                dao.deleteShortcut(row.itemKey); purged++
+                                // 行彻底删除 → 图标设计器对该快捷方式的产出也一起清掉
+                                // （v2.9.156：否则 item_icons 留下孤儿行，设置页残留且
+                                //  同一 shortcutId 重新 pin 时会套用旧设计）
+                                dao.deleteShortcut(row.itemKey)
+                                runCatching { dao.resetIcon(row.itemKey) }
+                                purged++
                             }
                         }
 
                         // ② 图标解码：与原生桌面一致 —— 之前抽屉一律拿"创建快捷方式的应用"
                         //    图标顶替（用户实锤不对）。现在取系统快捷方式图标（含角标），
-                        //    再套 MIUI 自己的图标样式遮罩 IconCustomizer.generateIconStyleDrawable
-                        //    —— 原生桌面就是用这套把快捷方式图标裁成与普通应用一致的形状，
-                        //    不套的话观感就是"应用原始图标 vs 桌面图标"（用户原话）。
-                        val icons = HashMap<String, androidx.compose.ui.graphics.ImageBitmap>()
-                        shortcuts.forEach { info ->
-                            val pkg = info.`package` ?: return@forEach
-                            val key = shortcutItemKey(pkg, info.id)
-                            val bitmap = runCatching {
-                                val raw = launcher.getShortcutBadgedIconDrawable(info, density)
-                                    ?: return@runCatching null
-                                val drawable = miuiIconStyle(raw)
-                                val fallback = (96 * density / 160).coerceAtLeast(1)
-                                val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: fallback
-                                val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: fallback
-                                drawable.toBitmap(w, h)
-                            }.getOrNull()
-                            if (bitmap != null) {
-                                icons[key] = bitmap.asImageBitmap()
-                            }
-                        }
+                        //    再套 MIUI 图标样式遮罩（ShortcutIconCache.miuiStyle，原生桌面
+                        //    同一入口）；结果同时落进程内缓存，供设置侧图标设计器缩略图复用。
+                        val bitmaps = ShortcutIconCache.decodePinned(launcher, density)
+                        ShortcutIconCache.putAll(bitmaps)
+                        val icons = bitmaps.mapValues { entry -> entry.value.asImageBitmap() }
 
                         // ③ upsert（保留 dismissed 记忆：用户移除过的行不再写回显示）
                         val blocked = existing.filter { it.dismissed }.map { it.itemKey }.toSet()
@@ -841,26 +831,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** 与 GracePinItemHook.persist 的 key 逐字一致：shortcut:<pkg>/<Uri.encode(id)>。 */
     private fun shortcutItemKey(pkg: String, id: String): String =
         "shortcut:$pkg/" + android.net.Uri.encode(id)
-
-    /**
-     * MIUI 图标样式遮罩（v2.9.154）。
-     *
-     * `miui.content.res.IconCustomizer.generateIconStyleDrawable(Drawable)` 是 MIUI 桌面
-     * 自己把任意图标裁成当前主题图标形状（圆/圆角/主题蒙版）的入口 —— 快捷方式图标
-     * 来自应用自带的位图，不经系统 `getBadgedIcon` 的主题化，所以必须显式过一遍，
-     * 否则与桌面上的普通应用图标形状/风格不一致（用户实锤："相当于应用图标 vs 桌面图标"）。
-     *
-     * 反射调用：模块编译期没有 miui 系统 API 桩；宿主进程内该类可用。
-     * 任何失败（非 MIUI / 方法签名漂移）都原样返回，绝不影响图标可用性。
-     */
-    private fun miuiIconStyle(raw: android.graphics.drawable.Drawable): android.graphics.drawable.Drawable =
-        runCatching {
-            val cls = Class.forName("miui.content.res.IconCustomizer")
-            val method = cls.getMethod(
-                "generateIconStyleDrawable", android.graphics.drawable.Drawable::class.java,
-            )
-            (method.invoke(null, raw) as? android.graphics.drawable.Drawable) ?: raw
-        }.getOrDefault(raw)
 
     /**
      * saved_shortcuts 行 → 展示项（**含图标装饰**）。
@@ -916,7 +886,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 val appContext = getApplication<Application>()
                 withContext(Dispatchers.IO) {
                     runCatching {
-                        LauncherDatabase.getInstance(appContext).itemsDao().dismissShortcut(app.key)
+                        val dao = LauncherDatabase.getInstance(appContext).itemsDao()
+                        dao.dismissShortcut(app.key)
+                        // v2.9.156（User 要求）：图标设计器给这条快捷方式做的设计（item_icons
+                        // 以 "shortcut:<pkg>/<id>" 为 key）一并删除 —— 否则是孤儿数据，
+                        // 将来同一 shortcutId 重新 pin 时会莫名其妙套用旧设计，设置页也残留。
+                        dao.resetIcon(app.key)
                     }.onFailure { ModLog.e("removeShortcut dismiss failed: ${app.key}", it) }
                     // 系统层 unpin：原生桌面上的那个快捷方式一起消失（用户要求）。
                     // LauncherApps 的公开面只有 pinShortcuts(pkg, 全量 id 列表, user) ——

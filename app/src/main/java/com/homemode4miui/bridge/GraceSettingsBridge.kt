@@ -95,6 +95,9 @@ object GraceSettingsBridge {
     data class ShortcutWire(
         val appKey: String, val key: String, val packageName: String,
         val shortcutId: String, val activity: String?, val label: String,
+        /** v2.9.155：缩略图 PNG（Base64，NO_WRAP）。仅快照回带时填 —— 模块进程没有
+         *  快捷方式图标权限，图标设计器列表/预览需要宿主解码后的同一张图。 */
+        val iconPng: String? = null,
     )
 
     const val ACTION_SHORTCUTS_RESULT = "com.homemode4miui.ACTION_GRACE_SHORTCUTS_RESULT"
@@ -367,7 +370,7 @@ object GraceSettingsBridge {
             s.savedShortcuts.forEach { w ->
                 put(JSONObject().put("k", w.key).put("p", w.packageName)
                     .put("i", w.shortcutId).put("a", w.activity ?: JSONObject.NULL)
-                    .put("l", w.label))
+                    .put("l", w.label).put("ip", w.iconPng ?: JSONObject.NULL))
             }
         })
         .toString()
@@ -432,6 +435,7 @@ object GraceSettingsBridge {
                             appKey = w.optString("p"), key = w.optString("k"),
                             packageName = w.optString("p"), shortcutId = w.optString("i"),
                             activity = w.opt("a") as? String, label = w.optString("l"),
+                            iconPng = w.opt("ip") as? String,
                         ).takeIf { it.key.isNotBlank() }
                     }.getOrNull()
                 }

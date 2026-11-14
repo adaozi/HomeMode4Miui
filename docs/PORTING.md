@@ -770,3 +770,26 @@ DIFF vs 桩文件:
 - [x] **回归（User 真机验收四项全通过）**：① 图标与原生桌面一致；② 图标设计器可选中快捷方式且设计即时生效；
   ③ 长按移除 + 原生桌面同步消失；④ 别处删除 → 模块实时消失。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.154-shortcut-icon-design-170.apk`。
+
+### shortcut-thumb + icon-cleanup（v2.9.155 / v2.9.156 / vc171~172，2026-11-14）—— 设计器缩略图回带 + 删除时清理设计数据
+
+- [x] **v2.9.155（User 实锤：设计器列表里快捷方式那行缩略图是空的）**：
+  模块进程**没有快捷方式图标权限**（`LauncherApps` 只认默认桌面/HOME 角色），拿不到图。
+  做法：宿主解码 → 随快照回带。
+  - 新增 `grace/ShortcutIconCache`：`decodePinned(launcher, density)` 统一解码 + `miuiStyle()`
+    套 `IconCustomizer.generateIconStyleDrawable`，**桌面抽屉与设计器列表共用同一份位图**
+    （避免两张不一致的图）；`thumbnailPng(bitmap, 160)` → Base64 PNG。
+  - `GraceSettingsBridge.ShortcutWire` 加 `iconPng`；Snapshot 的 `shc` 数组编解码带 `ip` 字段。
+  - 宿主 `pushSnapshot`：优先复用缓存（桌面 VM 已填），miss 时现场解码；**最多回带 8 个缩略图**
+    （160px PNG ≈ 20~40KB/个，广播上限 1MB），超出留 null。
+  - 模块 `SettingsViewModel.decodeShortcutThumbnail()` 解 Base64 → `ImageBitmap` 填
+    `LauncherApp.icon`，设计器列表行与预览底图都有图。真机验收通过。
+- [x] **v2.9.156（User 要求：删除快捷方式时图标设计器里的数据也要删）**：
+  - `removeShortcut`：`dismissShortcut` 后追加 `resetIcon(app.key)` —— 清 `item_icons`
+    里 `shortcut:<pkg>/<id>` 的设计行。
+  - `syncPinnedShortcuts` 对账 `purged` 分支同样 `resetIcon`（覆盖"在原生桌面删掉"的路径）。
+  - 为什么必须删：孤儿设计行会让**同一 shortcutId 重新 pin 时自动套用旧设计**（PWA 类快捷
+    方式 id 固定），用户会以为"删了没删干净"；设置页也会残留不可达条目。
+  - 真机验收：删除后设计器列表该条消失，重新创建为默认图标。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.155-shortcut-thumb-171.apk`、
+  `.build/out/HomeMode4Miui-v2.9.156-shortcut-icon-cleanup-172.apk`。

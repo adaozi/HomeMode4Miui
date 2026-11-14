@@ -14,8 +14,8 @@ android {
         applicationId "com.homemode4miui"
         minSdk 33          // 与宿主一致（com.miui.home minSdk 33）
         targetSdk 34
-        versionCode 170
-        versionName "2.9.154-shortcut-icon-design"
+        versionCode 172
+        versionName "2.9.156-shortcut-icon-cleanup"
     }
 
     sourceSets {
