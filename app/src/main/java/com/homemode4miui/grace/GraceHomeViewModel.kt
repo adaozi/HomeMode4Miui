@@ -464,6 +464,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         const val SNAPSHOT_PULL_MIN_INTERVAL_MS = 3_000L
         /** 日历写库防抖：批量导入/删除会连发多次 notifyChange。 */
         const val AGENDA_DEBOUNCE_MS = 800L
+        /** 回桌面触发的 pinned 对账最小间隔（系统推送走 force=true，不受限）。 */
+        const val PINNED_SYNC_MIN_INTERVAL_MS = 5_000L
     }
     // 审计修缮（2026-10-16）：删除 iconPacksDecorating —— 全仓无置位（承诺的
     // "刷新完成后置 true" 逻辑不存在）也无收集，上游装饰中提示的移植半成品。
@@ -480,6 +482,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private var launcherAppsRef: android.content.pm.LauncherApps? = null
     /** onShortcutsChanged 常成批到达（一次 pin 多条回调）→ 600ms 合并。 */
     private var lastShortcutSyncAt = 0L
+    /** syncPinnedShortcuts 的「回桌面路径」节流时刻（uptimeMillis，见方法内注释）。 */
+    private var lastPinnedSyncAt = 0L
     /**
      * 系统侧 shortcut 变化回调（require launcher/HOME 角色，宿主满足）。
      * 用户明确要求"其他地方删了快捷方式，模块桌面不能还留着" —— 这是主动推送面，
@@ -496,7 +500,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 if (now - lastShortcutSyncAt < 600L) return
                 lastShortcutSyncAt = now
                 ModLog.i("shortcutsChanged: pkg=$packageName count=${shortcuts.size}")
-                syncPinnedShortcuts()
+                syncPinnedShortcuts(force = true)
             } catch (t: Throwable) {
                 ModLog.e("GraceHomeViewModel onShortcutsChanged failed", t)
             }
@@ -729,7 +733,14 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      * FLAG_MATCH_PINNED 是 LauncherApps 的公开查询面，宿主持 HOME 角色可直接读，
      * 与 MIUI 内部实现无关；upsert 幂等，重启/装包即自愈。
      */
-    fun syncPinnedShortcuts() {
+    fun syncPinnedShortcuts(force: Boolean = false) {
+        // 2026-11-15 perf：调用方是 GraceHomeView 的每次回桌面（Launcher.onResume 复用分支）
+        // 与 onShortcutsChanged。前者是纯对账，5s 内重复跑没有意义 —— 全量 getShortcuts +
+        // 位图解码 + DB upsert 每次都做一遍，是 resume 路径上的固定开销。
+        // onShortcutsChanged（系统主动推送）传 force=true 绕过节流，实时性不受影响。
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!force && now - lastPinnedSyncAt < PINNED_SYNC_MIN_INTERVAL_MS) return
+        lastPinnedSyncAt = now
         viewModelScope.launch {
             try {
                 val app = getApplication<Application>()
@@ -935,7 +946,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun refreshApps() {
-        syncPinnedShortcuts()
+        // force：包变化/挂载/图标包切换后必须按系统 pinned 重新对账；
+        // 回桌面（GraceHomeView）走默认节流，这里 force 正好覆盖 VM 首次装载那一次。
+        syncPinnedShortcuts(force = true)
         appLoadJob?.cancel()
         // 代际自增必须在启动新 job 之前（旧 job 可能正在锁内换入，读到新代际即让位）
         val generation = ++appLoadGeneration
@@ -1682,7 +1695,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun sendBridgeCommand(cmd: String, arg1: String? = null, arg2: String? = null) {
         runCatching {
-            getApplication<Application>().sendBroadcast(GraceBridge.command(cmd, arg1, arg2))
+            val app = getApplication<Application>()
+            // 2026-11-15：命令附带能力令牌（GraceCommandReceiver 校验，见 BridgeToken）
+            app.sendBroadcast(GraceBridge.command(app, cmd, arg1, arg2))
         }.onFailure { ModLog.e("GraceHomeViewModel sendBridgeCommand($cmd) failed", it) }
     }
 

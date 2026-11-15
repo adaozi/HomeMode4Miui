@@ -17,6 +17,7 @@ package com.homemode4miui.grace
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.homemode4miui.bridge.BridgeTokenClient
 import com.homemode4miui.bridge.GraceBridge
 import com.homemode4miui.bridge.GraceSettingsBridge
 import com.homemode4miui.util.ModLog
@@ -44,14 +45,24 @@ class GraceBridgeReceiver(private val viewModel: GraceHomeViewModel) : Broadcast
             // B6.2 天气不再走广播：provider 白名单（com.miui.home=true /
             // com.homemode4miui=false）使读取上移宿主进程，GraceWeatherHostEngine
             // 进程内直推 viewModel.onWeatherState；设置页经快照 weatherJson 回带。
-            // C 组（C3）：设置命令（模块设置页 → 本进程落库）。命令面导出后的信任面
-            // 评估见 GraceSettingsBridge 头注（伪造 = 等同用户操作设置数据，无宿主安全边界）。
-            GraceSettingsBridge.ACTION_SETTINGS_COMMAND -> viewModel.onSettingsCommand(
-                intent.getStringExtra(GraceBridge.EXTRA_CMD),
-                intent.getStringExtra(GraceBridge.EXTRA_ARG1),
-                intent.getStringExtra(GraceBridge.EXTRA_ARG2),
-                intent.getStringExtra(GraceBridge.EXTRA_JSON),
-            )
+            // C 组（C3）：设置命令（模块设置页 → 本进程落库）。2026-11-15 鉴权收敛：
+            // 原头注的信任面评估是错的 —— 该通道含 settings_wipe_data（清空全部桌面
+            // 数据 + killProcess），任意应用一条广播即可触发。改为能力令牌校验
+            // （BridgeTokenClient 向模块 provider 取/验，uid 由内核保证），不通过即丢弃。
+            GraceSettingsBridge.ACTION_SETTINGS_COMMAND -> {
+                val cmd = intent.getStringExtra(GraceBridge.EXTRA_CMD)
+                if (context == null ||
+                    !BridgeTokenClient.verify(context, intent.getStringExtra(GraceBridge.EXTRA_TOKEN))) {
+                    ModLog.i("bridge settings command DROPPED (token invalid): cmd=$cmd")
+                    return
+                }
+                viewModel.onSettingsCommand(
+                    cmd,
+                    intent.getStringExtra(GraceBridge.EXTRA_ARG1),
+                    intent.getStringExtra(GraceBridge.EXTRA_ARG2),
+                    intent.getStringExtra(GraceBridge.EXTRA_JSON),
+                )
+            }
             // 未知 action 忽略：exported 后任意 app 可发广播到本 receiver，
             // 只处理认识的 action（伪造面 = 显示/设置数据污染，见头注信任面评估）
         }

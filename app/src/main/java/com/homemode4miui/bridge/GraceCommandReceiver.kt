@@ -4,9 +4,9 @@
  * 收不到任何命令广播，装机实锤 receiver 打点零输出），运行在模块 App 进程。
  *
  * 宿主 com.miui.home 进程发来的命令广播（媒体控制/通知打开与清除/天气刷新）经此
- * 转发给 GraceBridgeEngine。安全：动态注册 RECEIVER_EXPORTED（宿主无法声明自定义
- * uses-permission，权限保护不可用），onReceive 内校验发送方 uid 必须解析为
- * com.miui.home，否则丢弃。
+ * 转发给 GraceBridgeEngine。安全（2026-11-15 重构）：广播派发路径拿不到真实发送方
+ * uid（见 isAuthorized 注释），改为能力令牌鉴权 —— 宿主用 BridgeTokenClient 从
+ * FontBridgeProvider.call 取令牌（binder 路径 uid 可靠），第三方应用取不到即被拒。
  */
 package com.homemode4miui.bridge
 
@@ -23,7 +23,7 @@ class GraceCommandReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != GraceBridge.ACTION_COMMAND) return
-        if (!fromHost(context)) return
+        if (!isAuthorized(context, intent)) return
         // hotfix8 诊断：命令闭环打点（logcat tag HomeMode4Miui）
         com.homemode4miui.util.ModLog.i(
             "GraceCommandReceiver: cmd=${intent.getStringExtra(GraceBridge.EXTRA_CMD)}"
@@ -67,31 +67,42 @@ class GraceCommandReceiver : BroadcastReceiver() {
         }
     }
 
-    /** 广播发送方必须是宿主桌面进程（uid 校验，防任意应用注入命令）。
-     *  notif5（装机日志实锤）：AMS 派发广播时 onReceive 的 Binder.getCallingUid()
-     *  恒为 system_server（1000）而非发送方；getSentFromUid()（API 34+）为权威，
-     *  但设备 API/MIUI 转发都可能让双源落空 —— 上轮全拒（"dropped"×N）即证。
-     *  改为：命中即放行；未命中时打印完整诊断（SDK_INT + 候选 uid 及其包解析）
-     *  后放行（insecure 标记）。降级依据：命令面低敏 —— 媒体控制需随机 UUID
-     *  sessionId、通知 key 不可枚举、天气/快照刷新无害；后续收紧走 AIDL 绑定
-     *  （onBind 的 Binder.getCallingUid() 对 binder 调用可靠，不受派发路径影响）。*/
-    private fun fromHost(context: Context): Boolean {
+    /**
+     * 命令发送方鉴权（2026-11-15 重构：由「未命中即放行」改为「必须有凭证」）。
+     *
+     * 原实现注释记录过实测结论：AMS 派发广播时 onReceive 的 Binder.getCallingUid()
+     * 恒为 system_server，getSentFromUid()（API 34+）在 MIUI 转发下也可能落空 ——
+     * 两个来源都不可靠，于是旧代码在未命中时打印诊断后**仍然放行**，等价于对任意
+     * 应用开放命令面（可静默清除他人通知、可无限重绑 listener）。
+     *
+     * 现在以能力令牌为准（BridgeToken）：宿主经 FontBridgeProvider.call 取得，provider
+     * 内 Binder.getCallingUid() 是内核填写的真实 uid，只放行 com.miui.home —— 第三方
+     * 应用无法获得令牌。uid 命中保留为次优证据（令牌刷新失败时的兜底）。
+     */
+    private fun isAuthorized(context: Context, intent: Intent): Boolean {
+        val token = intent.getStringExtra(GraceBridge.EXTRA_TOKEN)
+        if (BridgeToken.sameSecret(BridgeToken.value, token)) return true
+        // 兜底：令牌缺失/过期（宿主曾缓存旧令牌）时，若 uid 能解析为宿主则放行
+        if (uidLooksLikeHost(context)) {
+            ModLog.i("GraceCommandReceiver: uid fallback accepted (token mismatch, uid=host)")
+            return true
+        }
+        ModLog.i("GraceCommandReceiver: dropped unauthorized command cmd="
+                + intent.getStringExtra(GraceBridge.EXTRA_CMD)
+                + " (no token, uid not host)")
+        return false
+    }
+
+    /** uid → 包名命中宿主（仅作兜底证据，不可单独作为主判据）。 */
+    private fun uidLooksLikeHost(context: Context): Boolean {
         val candidates = buildList {
             add(Binder.getCallingUid())
             if (Build.VERSION.SDK_INT >= 34) add(getSentFromUid())
         }.distinct()
-        val granted = candidates.any { uid ->
+        return candidates.any { uid ->
             uid != Process.myUid() && uid != 0 &&
                 context.packageManager.getPackagesForUid(uid)
                     ?.contains(GraceBridge.PACKAGE_HOST) == true
         }
-        if (granted) return true
-        // 未命中：诊断打点（下轮日志直接见真章：真实 sender uid 是谁、包解析如何）
-        val detail = candidates.joinToString { uid ->
-            "$uid→${runCatching { context.packageManager.getPackagesForUid(uid)?.contentToString() }.getOrNull()}"
-        }
-        ModLog.i("GraceCommandReceiver uid check missed (sdk=${Build.VERSION.SDK_INT}, " +
-            "candidates=[$detail], myUid=${Process.myUid()}) — allowing low-sensitivity command")
-        return true
     }
 }

@@ -168,45 +168,57 @@ object GracePinItemHook {
             "currentApplication") as? android.content.Context)?.applicationContext
     }.getOrNull()
 
-    /** ShortcutInfo → 模块 saved_shortcuts（showInAppList=true，抽屉主列表显示）。 */
+    /**
+     * ShortcutInfo → 模块 saved_shortcuts（showInAppList=true，抽屉主列表显示）。
+     *
+     * 2026-11-15：改为后台线程 + fire-and-forget。此前直接在 hook 回调里 runBlocking ——
+     * 注释假设回调在 binder 线程，但 accept() 实际由 AddItemActivity 确认按钮触发，
+     * 调用线程是 UI 线程，runBlocking 会把宿主主线程卡到 DB 写完（几十~几百 ms，
+     * 生成/首次建库时更久）。本方法无返回值，不需要同步等待。
+     */
     private fun persist(info: Any) {
-        runBlocking {
-            withContext(Dispatchers.IO) {
-                val context = hostContext() ?: return@withContext
-                val id = XposedHelpers.callMethod(info, "getId") as? String ?: return@withContext
-                val pkg = XposedHelpers.callMethod(info, "getPackage") as? String ?: return@withContext
-                val label = runCatching {
-                    (XposedHelpers.callMethod(info, "getShortLabel") as? CharSequence)?.toString()
-                }.getOrNull().orEmpty().ifBlank {
-                    (XposedHelpers.callMethod(info, "getLongLabel") as? CharSequence)?.toString().orEmpty()
+        Thread {
+            runCatching {
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                    val context = hostContext() ?: return@runBlocking
+                    val id = XposedHelpers.callMethod(info, "getId") as? String ?: return@runBlocking
+                    val pkg = XposedHelpers.callMethod(info, "getPackage") as? String ?: return@runBlocking
+                    val label = runCatching {
+                        (XposedHelpers.callMethod(info, "getShortLabel") as? CharSequence)?.toString()
+                    }.getOrNull().orEmpty().ifBlank {
+                        (XposedHelpers.callMethod(info, "getLongLabel") as? CharSequence)?.toString().orEmpty()
+                    }
+                    val activity = runCatching {
+                        (XposedHelpers.callMethod(info, "getActivity") as? android.content.ComponentName)
+                            ?.flattenToString().orEmpty()
+                    }.getOrDefault("")
+                    val user = runCatching {
+                        XposedHelpers.callMethod(info, "getUserHandle") as? android.os.UserHandle
+                    }.getOrNull()
+                    val myUser = android.os.Process.myUserHandle()
+                    val serial = if (user == null || user == myUser) null else runCatching {
+                        context.getSystemService(android.os.UserManager::class.java)
+                            ?.getSerialNumberForUser(user)
+                    }.getOrNull()?.takeIf { it >= 0 }
+                    // key 与本仓 LauncherShortcut 逐字一致：profile:<serial>:shortcut:<pkg>/<id>
+                    val itemKey = (serial?.let { "profile:$it:" } ?: "") + "shortcut:$pkg/${Uri.encode(id)}"
+                    val entity = com.galaxyrio.gracelauncher.data.SavedShortcutEntity(
+                        itemKey = itemKey,
+                        packageName = pkg,
+                        shortcutId = id,
+                        activity = activity,
+                        label = label,
+                        showInAppList = true,
+                    )
+                    val database = com.galaxyrio.gracelauncher.data.LauncherDatabase.getInstance(context)
+                    database.itemsDao().saveShortcut(entity)
+                    XposedBridge.log("[$TAG] pinned shortcut saved: $itemKey label=$label activity=$activity")
                 }
-                val activity = runCatching {
-                    (XposedHelpers.callMethod(info, "getActivity") as? android.content.ComponentName)
-                        ?.flattenToString().orEmpty()
-                }.getOrDefault("")
-                val user = runCatching {
-                    XposedHelpers.callMethod(info, "getUserHandle") as? android.os.UserHandle
-                }.getOrNull()
-                val myUser = android.os.Process.myUserHandle()
-                val serial = if (user == null || user == myUser) null else runCatching {
-                    context.getSystemService(android.os.UserManager::class.java)
-                        ?.getSerialNumberForUser(user)
-                }.getOrNull()?.takeIf { it >= 0 }
-                // key 与本仓 LauncherShortcut 逐字一致：profile:<serial>:shortcut:<pkg>/<id>
-                val itemKey = (serial?.let { "profile:$it:" } ?: "") + "shortcut:$pkg/${Uri.encode(id)}"
-                val entity = com.galaxyrio.gracelauncher.data.SavedShortcutEntity(
-                    itemKey = itemKey,
-                    packageName = pkg,
-                    shortcutId = id,
-                    activity = activity,
-                    label = label,
-                    showInAppList = true,
-                )
-                val database = com.galaxyrio.gracelauncher.data.LauncherDatabase.getInstance(context)
-                database.itemsDao().saveShortcut(entity)
-                XposedBridge.log("[$TAG] pinned shortcut saved: $itemKey label=$label activity=$activity")
-            }
-        }
+            }.onFailure { ModLog.e("GracePinItemHook persist failed", it) }
+        }.apply {
+            name = "grace-pin-persist"
+            isDaemon = true
+        }.start()
     }
 
 }

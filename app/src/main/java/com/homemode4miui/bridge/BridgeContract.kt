@@ -45,7 +45,8 @@ object GraceBridge {
 
     /** notif6：Java 互操作（HomeController.attach 每次挂载拉取快照）。 */
     @JvmStatic
-    fun snapshotRefreshIntent(): android.content.Intent = command(Cmd.SNAPSHOT_REFRESH)
+    fun snapshotRefreshIntent(context: android.content.Context): android.content.Intent =
+        command(context, Cmd.SNAPSHOT_REFRESH)
 
     // ---- 快照下发（模块 App 进程 → 宿主进程）----
     const val ACTION_MEDIA = "com.homemode4miui.ACTION_GRACE_MEDIA"
@@ -65,6 +66,8 @@ object GraceBridge {
     const val EXTRA_CMD = "cmd"
     const val EXTRA_ARG1 = "arg1"
     const val EXTRA_ARG2 = "arg2"
+    /** 能力令牌（见 BridgeToken）：跨进程命令鉴权，第三方应用无法获取。 */
+    const val EXTRA_TOKEN = "bridge_token"
 
     /** 通知快照限幅（hotfix1）：每 app 条数 / 总字节（广播 binder 事务安全区）。 */
     private const val NOTIFICATIONS_PER_APP_LIMIT = 3
@@ -322,11 +325,17 @@ object GraceBridge {
 
     // ================= 命令构造 =================
 
-    fun command(cmd: String, arg1: String? = null, arg2: String? = null) = android.content.Intent(ACTION_COMMAND)
-        .setPackage(PACKAGE_MODULE)
-        .putExtra(EXTRA_CMD, cmd)
-        .putExtra(EXTRA_ARG1, arg1)
-        .putExtra(EXTRA_ARG2, arg2)
+    /**
+     * 宿主 → 模块命令。必须携带能力令牌：模块侧 GraceCommandReceiver 校验不过即丢弃
+     * （广播拿不到真实发送方 uid，令牌是唯一可靠的调用方凭证，见 BridgeToken 头注）。
+     */
+    fun command(context: android.content.Context, cmd: String, arg1: String? = null, arg2: String? = null) =
+        android.content.Intent(ACTION_COMMAND)
+            .setPackage(PACKAGE_MODULE)
+            .putExtra(EXTRA_CMD, cmd)
+            .putExtra(EXTRA_ARG1, arg1)
+            .putExtra(EXTRA_ARG2, arg2)
+            .putExtra(EXTRA_TOKEN, BridgeTokenClient.current(context))
 
     fun mediaCommandName(command: MediaCommand): String = command.name
 

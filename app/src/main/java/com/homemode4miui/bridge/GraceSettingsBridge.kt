@@ -422,7 +422,9 @@ object GraceSettingsBridge {
                         AppWire(
                             component = a.getString("c"),
                             label = a.optString("l"),
-                            serial = a.opt("s") as? Long,
+                            // 2026-11-15：org.json 把能装进 int 的数字解析成 Integer，
+                            // 原 `as? Long` 恒为 null → 跨桥后工作资料 serial 丢失。
+                            serial = (a.opt("s") as? Number)?.toLong(),
                         ).takeIf { it.component.isNotBlank() }
                     }.getOrNull()
                 }
@@ -445,6 +447,11 @@ object GraceSettingsBridge {
 
     // ================= 命令构造（模块 → 宿主）=================
 
+    /**
+     * 设置命令。携带能力令牌 —— 宿主侧 GraceBridgeReceiver 校验失败即丢弃。
+     * 令牌由本进程（模块 App）持有，第三方应用无法获取（出口是 FontBridgeProvider.call
+     * 的 uid 校验），因此伪造广播无法再污染设置数据 / 触发 settings_wipe_data。
+     */
     fun command(cmd: String, arg1: String? = null, arg2: String? = null, json: String? = null) =
         android.content.Intent(ACTION_SETTINGS_COMMAND)
             .setPackage(GraceBridge.PACKAGE_HOST)
@@ -452,6 +459,7 @@ object GraceSettingsBridge {
             .putExtra(GraceBridge.EXTRA_ARG1, arg1)
             .putExtra(GraceBridge.EXTRA_ARG2, arg2)
             .putExtra(GraceBridge.EXTRA_JSON, json)
+            .putExtra(GraceBridge.EXTRA_TOKEN, BridgeToken.value)
 
     fun requestSnapshot() = command(Cmd.REQUEST_SNAPSHOT)
 }

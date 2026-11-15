@@ -109,6 +109,8 @@ import com.galaxyrio.gracelauncher.ui.theme.rememberWallpaperBlurAvailable
 import com.galaxyrio.gracelauncher.ui.widgets.LocalWidgetHost
 import com.galaxyrio.gracelauncher.ui.widgets.WidgetPicker
 import com.galaxyrio.gracelauncher.ui.widgets.rememberWidgetHost
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @Composable
@@ -124,12 +126,17 @@ fun GraceLauncherRoute(viewModel: GraceHomeViewModel, hostActivity: Activity? = 
     }
     // 上游同步 v1.1.8：LocalListAppearance 全局提供（行标签字号/字体/颜色、名字可见性；
     // 对齐上游 LauncherScreen 根 provider 位置）。
-    val listAppearanceState = viewModel.uiState.collectAsState()
+    // 2026-11-15 perf：只订阅 settings 子流并去重 —— 原实现 collectAsState 整个 uiState，
+    // 通知/媒体/时钟等高频字段每次变化都会让根 Composable 重组，且 provider 值被判为
+    // 「已变化」→ 所有读 LocalListAppearance/LocalFontLibrary 的组件跟着重组。
+    val settingsState = remember(viewModel) {
+        viewModel.uiState.map { it.settings }.distinctUntilChanged()
+    }.collectAsState(initial = viewModel.uiState.value.settings)
     androidx.compose.runtime.CompositionLocalProvider(
         androidx.activity.compose.LocalOnBackPressedDispatcherOwner provides backDispatcherOwner,
-        com.galaxyrio.gracelauncher.ui.components.LocalListAppearance provides listAppearanceState.value.settings.listAppearance,
+        com.galaxyrio.gracelauncher.ui.components.LocalListAppearance provides settingsState.value.listAppearance,
         // 上游同步 v1.1.8 S5：字体库全局提供（桌面文本回退链 + 设置页预览共用）
-        com.galaxyrio.gracelauncher.ui.theme.LocalFontLibrary provides listAppearanceState.value.settings.fontLibrary
+        com.galaxyrio.gracelauncher.ui.theme.LocalFontLibrary provides settingsState.value.fontLibrary
     ) {
         GraceLauncherRouteContent(viewModel, hostActivity)
     }
@@ -176,11 +183,21 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
     // 影响字母列表，favorites/其余表面用全量 apps）
     // 上游同步 v1.1.8 S8a：工作资料文件夹进抽屉（无 managed profile 时恒 null，抽屉零变化）
     var workExpanded by rememberSaveable { mutableStateOf(false) }
-    val model = remember(state.appListApps, state.folders, state.workFolder, workExpanded, state.workProfileApps,
-        state.hiddenAppKeys) {
+    // 2026-11-15 perf：appListApps / workFolder / workApps 都是 UiState 上的 get() 计算属性，
+    // 每次**访问**都会全量重算（appListApps 内含 O(savedShortcuts×apps) 查找 + 两次全量过滤）。
+    // 原 remember 的 key 里直接写了 state.appListApps，块内又读一次 —— 每次重组至少算 3 次；
+    // 桌面每秒有多次重组（时钟/媒体/通知），这是可测量的主线程开销。
+    // 改为：key 只用源字段（全是引用读取），派生值只在源变化时算一次。
+    val appListApps = remember(
+        state.apps, state.savedShortcutApps, state.shownShortcutKeys, state.shortcutIcons,
+        state.folders, state.hiddenAppKeys, state.settings.workProfile, state.workProfiles,
+        state.appLoadFailed,
+    ) { state.appListApps }
+    val model = remember(appListApps, state.folders, state.settings.workProfile,
+        state.workProfileApps, workExpanded) {
         // 上游同步 v1.1.9（LauncherScreen.workApps 对齐）：工作资料行同样排除 effective 隐藏
         val workApps = state.workProfileAppsOrdered.filterNot { it.key in state.effectiveHiddenAppKeys }
-        AppListModel(state.appListApps, state.folders, workFolder = state.workFolder,
+        AppListModel(appListApps, state.folders, workFolder = state.workFolder,
             workExpanded = workExpanded, workApps = workApps)
     }
     val drawerState = rememberLazyListState()

@@ -422,13 +422,24 @@ public class MainActivity extends Activity {
         // onCreate 从未创建媒体状态 TextView，mMediaStatusRef 恒 null，此调用链不可达。
     }
 
+    /**
+     * 跨进程广播统一附带能力令牌（MainHook 接收端校验）。
+     * 令牌由本进程（模块 App）持有，出口是 FontBridgeProvider.call 的 uid 校验 ——
+     * 第三方应用无法伪造门禁标志或开关桌面。
+     */
+    private Intent withToken(Intent i) {
+        i.putExtra(com.homemode4miui.bridge.GraceBridge.EXTRA_TOKEN,
+                com.homemode4miui.bridge.BridgeToken.current());
+        return i;
+    }
+
     /** gate1/gate4：root 标志广播（探测成功 / onResume 补发共用） */
     private void sendRootReady(boolean ready) {
         try {
             Intent i = new Intent(MainHook.ACTION_SET_ROOT_READY);
             i.setPackage("com.miui.home");
             i.putExtra(MainHook.EXTRA_READY, ready);
-            sendBroadcast(i);
+            sendBroadcast(withToken(i));
         } catch (Throwable t) {
             android.util.Log.e("HomeMode4Miui", "root-ready broadcast failed", t);
         }
@@ -448,7 +459,7 @@ public class MainActivity extends Activity {
                 Intent i = new Intent(MainHook.ACTION_SET_AUTOSTART_READY);
                 i.setPackage("com.miui.home");
                 i.putExtra(MainHook.EXTRA_READY, ready);
-                sendBroadcast(i);
+                sendBroadcast(withToken(i));
             } catch (Throwable t) {
                 android.util.Log.e("HomeMode4Miui", "autostart-ready broadcast failed", t);
             }
@@ -532,7 +543,7 @@ public class MainActivity extends Activity {
         mHookLive = false;
         try {
             Intent ping = new Intent(MainHook.ACTION_HOOK_PING).setPackage("com.miui.home");
-            sendBroadcast(ping);
+            sendBroadcast(withToken(ping));
         } catch (Throwable t) {
             android.util.Log.e("HomeMode4Miui", "hook ping failed", t);
         }
@@ -721,7 +732,7 @@ public class MainActivity extends Activity {
         Intent i = new Intent(MainHook.ACTION_TOGGLE);
         i.setPackage("com.miui.home"); // 显式广播直达桌面进程
         i.putExtra(MainHook.EXTRA_ON, on);
-        sendBroadcast(i);
+        sendBroadcast(withToken(i));
     }
 
     private int dp(int v) {

@@ -73,11 +73,11 @@ public final class HomeController {
                     log("launcher restart now (custom mode entry, HOME auto-relaunch)");
                     android.os.Process.killProcess(android.os.Process.myPid());
                 } catch (Throwable t) {
-                    log("launcher restart failed: " + t);
+                    logErr("launcher restart failed: ", t);
                 }
             }, 600);
         } catch (Throwable t) {
-            log("scheduleRestartOnEntering failed: " + t);
+            logErr("scheduleRestartOnEntering failed: ", t);
         }
     }
 
@@ -92,7 +92,7 @@ public final class HomeController {
                 detach(launcher);
             }
         } catch (Throwable t) {
-            log("sync failed: " + t);
+            logErr("sync failed: ", t);
         }
     }
 
@@ -144,7 +144,7 @@ public final class HomeController {
                             HomeView v = sView;
                             if (v != null) v.onHomeIntent((Intent) tag);
                         } catch (Throwable t) {
-                            log("home intent sync failed: " + t);
+                            logErr("home intent sync failed: ", t);
                         }
                     }
                 });
@@ -162,13 +162,13 @@ public final class HomeController {
                             HomeView v = sView;
                             if (v != null) v.onHomeIntent(null);
                         } catch (Throwable t) {
-                            log("home intent (already-on-home) sync failed: " + t);
+                            logErr("home intent (already-on-home) sync failed: ", t);
                         }
                     }
                     });
             log("home intent sync installed (onNewIntentWhenAlreadyOnHome)");
         } catch (Throwable t) {
-            log("onNewIntentWhenAlreadyOnHome absent — skip (OS2 属正常) — " + t);
+            logErr("onNewIntentWhenAlreadyOnHome absent — skip (OS2 属正常) — ", t);
         }
     }
 
@@ -179,7 +179,7 @@ public final class HomeController {
         // 此前只在宿主 VM init 发一次 —— 宿主进程存活期内模块 listener 重连/重装
         // 模块 APK 后，宿主可能停在旧快照或空快照上（装机实锤：通知行消失）。
         try {
-            launcher.sendBroadcast(com.homemode4miui.bridge.GraceBridge.snapshotRefreshIntent());
+            launcher.sendBroadcast(com.homemode4miui.bridge.GraceBridge.snapshotRefreshIntent(launcher));
         } catch (Throwable t) {
             ModLog.e("HomeController snapshot refresh send failed", t);
         }
@@ -271,7 +271,7 @@ public final class HomeController {
                         && ((ViewGroup) container).getClipToPadding())
                     + " | screenH=" + screenH);
         } catch (Throwable t) {
-            log("geometry log failed: " + t);
+            logErr("geometry log failed: ", t);
         }
     }
 
@@ -282,20 +282,20 @@ public final class HomeController {
             if (dl instanceof ViewGroup) return (ViewGroup) dl;
             log("getDragLayer() unavailable, trying mDragLayer field");
         } catch (Throwable t) {
-            log("getDragLayer() failed: " + t);
+            logErr("getDragLayer() failed: ", t);
         }
         try {
             Object dl = XposedHelpers.getObjectField(launcher, "mDragLayer");
             if (dl instanceof ViewGroup) return (ViewGroup) dl;
         } catch (Throwable t) {
-            log("mDragLayer field failed: " + t);
+            logErr("mDragLayer field failed: ", t);
         }
         try {
             ViewGroup decor = (ViewGroup) launcher.getWindow().getDecorView();
             log("falling back to DecorView container (native surfaces may stay visible)");
             return decor;
         } catch (Throwable t) {
-            log("decor fallback failed: " + t);
+            logErr("decor fallback failed: ", t);
             return null;
         }
     }
@@ -307,7 +307,7 @@ public final class HomeController {
             try {
                 view.onHomeDetached();
             } catch (Throwable t) {
-                log("onHomeDetached failed: " + t);
+                logErr("onHomeDetached failed: ", t);
             }
             ViewGroup parent = (ViewGroup) view.getParent();
             if (parent != null) parent.removeView(view);
@@ -375,7 +375,7 @@ public final class HomeController {
             log("window: decorFitsSystemWindows(false) enforced, restoreVis=" + sRestoreSystemUi
                     + " decor=" + decor.getWidth() + "x" + decor.getHeight());
         } catch (Throwable t) {
-            log("ensureFullBleedWindow failed: " + t);
+            logErr("ensureFullBleedWindow failed: ", t);
         }
     }
 
@@ -386,7 +386,7 @@ public final class HomeController {
             View decor = launcher.getWindow().getDecorView();
             if (decor != null) decor.setSystemUiVisibility(sRestoreSystemUi);
         } catch (Throwable t) {
-            log("restoreWindowInsets failed: " + t);
+            logErr("restoreWindowInsets failed: ", t);
         } finally {
             sRestoreSystemUi = Integer.MIN_VALUE;
         }
@@ -452,5 +452,10 @@ public final class HomeController {
     // 此前只走 XposedBridge.log，LogExporter 的 logcat 兜底来源看不到 sync/attached 系列宿主日志。
     private static void log(String msg) {
         com.homemode4miui.util.ModLog.i(msg);
+    }
+
+    /** 异常日志：必须带堆栈。log(msg + t) 只留下 Throwable.toString()，栈帧全丢。 */
+    private static void logErr(String msg, Throwable t) {
+        com.homemode4miui.util.ModLog.e(msg, t);
     }
 }

@@ -25,7 +25,6 @@ package com.homemode4miui.bridge
 
 import android.content.Context
 import com.homemode4miui.util.ModLog
-import java.util.concurrent.TimeUnit
 
 object RootKeepAlive {
 
@@ -156,24 +155,8 @@ object RootKeepAlive {
     }
 
     /**
-     * 单条 su 命令：后台线程调用；超时强杀；失败返回 null（含授权框拒绝）。
-     * hotfix：输出经 AtomicReference 跨线程传递（局部捕获变量的可见性无保证）；
-     * waitFor 成功即进程已退出 → 流已 EOF，join 等 reader 赋值完成后读取。
+     * 本模块保活命令统一 10s 超时（su 授权框挂起时尽快放弃，不无限等）。
+     * 实现见 SuShell —— 2026-11-15 起三处重复的 ProcessBuilder 逻辑收敛到一处。
      */
-    private fun su(command: String): String? = runCatching {
-        val process = ProcessBuilder("su", "-c", command)
-            .redirectErrorStream(true)
-            .start()
-        val out = java.util.concurrent.atomic.AtomicReference<String?>(null)
-        val reader = Thread { out.set(process.inputStream.bufferedReader().readText()) }
-        reader.isDaemon = true
-        reader.start()
-        if (!process.waitFor(10, TimeUnit.SECONDS)) {
-            process.destroyForcibly()
-            ModLog.i("RootKeepAlive: su timeout (${command.take(40)})")
-            return null
-        }
-        reader.join(5_000)
-        if (process.exitValue() == 0) out.get() else null
-    }.getOrNull()
+    private fun su(command: String): String? = SuShell.run(command, 10_000L)
 }

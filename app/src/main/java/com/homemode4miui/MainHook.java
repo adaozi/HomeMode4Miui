@@ -98,7 +98,7 @@ public class MainHook implements IXposedHookLoadPackage {
     public static Activity launcher() {
         return sLauncher;
     }
-    private static boolean sReceiverRegistered;
+    private static volatile boolean sReceiverRegistered;
     /** 裁决锚点是否已安装（未安装时 isCustomModeActive 回退为直读 SP 标志） */
     private static volatile boolean sAdjudicationInstalled;
     /** 未生效 hook 清单（tryHook 失败时记录；随 pong/live 广播给模块首页分级提示） */
@@ -164,7 +164,7 @@ public class MainHook implements IXposedHookLoadPackage {
                                     log("gate1: receiver registered + live broadcast sent"
                                             + " (Application.onCreate, host " + HostCompat.label() + ")");
                                 } catch (Throwable t) {
-                                    log("Application.onCreate gate1 failed: " + t);
+                                    logErr("Application.onCreate gate1 failed: ", t);
                                 }
                             }
                         });
@@ -202,7 +202,7 @@ public class MainHook implements IXposedHookLoadPackage {
                             HomeController.sync(launcher, isCustomModeActive());
                             HomeController.notifyPackagesChanged();
                         } catch (Throwable t) {
-                            log("onResume callback failed: " + t);
+                            logErr("onResume callback failed: ", t);
                         }
                     }
                 });
@@ -267,7 +267,7 @@ public class MainHook implements IXposedHookLoadPackage {
                 app.sendBroadcast(liveIntent());
             }
         } catch (Throwable t) {
-            log("hook live broadcast failed: " + t);
+            logErr("hook live broadcast failed: ", t);
         }
     }
 
@@ -281,7 +281,7 @@ public class MainHook implements IXposedHookLoadPackage {
                     + (t.getMessage() != null ? ": " + t.getMessage() : "");
             if (summary.length() > 200) summary = summary.substring(0, 200);
             sFailedHooks.add(summary);
-            log("hook FAILED (degraded): " + name + " -> " + t);
+            logErr("hook FAILED (degraded): " + name, t);
         }
     }
 
@@ -337,7 +337,7 @@ public class MainHook implements IXposedHookLoadPackage {
                             out[orig.length] = CustomLauncherMode.getInstance();
                             param.setResult(out);
                         } catch (Throwable t) {
-                            log("getAllModes callback failed: " + t);
+                            logErr("getAllModes callback failed: ", t);
                         }
                     }
                 });
@@ -383,7 +383,7 @@ public class MainHook implements IXposedHookLoadPackage {
                         java.lang.reflect.Field f = sCurrentModeFieldCached();
                         if (f != null) f.set(null, CustomLauncherMode.getInstance());
                     } catch (Throwable t) {
-                        log("resetcache callback failed: " + t);
+                        logErr("resetcache callback failed: ", t);
                     }
                 }
             });
@@ -427,7 +427,7 @@ public class MainHook implements IXposedHookLoadPackage {
                     param.setResult(CustomLauncherMode.getInstance());
                 }
             } catch (Throwable t) {
-                log("adjudication callback failed: " + t);
+                logErr("adjudication callback failed: ", t);
             }
         }
     };
@@ -499,7 +499,7 @@ public class MainHook implements IXposedHookLoadPackage {
             }
             log(sb.toString());
         } catch (Throwable t) {
-            log("dumpMembers failed: " + t);
+            logErr("dumpMembers failed: ", t);
         }
     }
 
@@ -519,7 +519,7 @@ public class MainHook implements IXposedHookLoadPackage {
             try {
                 HomeController.notifyHomePaused();
             } catch (Throwable t) {
-                log("launcher pause sync callback failed: " + t);
+                logErr("launcher pause sync callback failed: ", t);
             }
         }
     };
@@ -534,7 +534,7 @@ public class MainHook implements IXposedHookLoadPackage {
                 registerToggleReceiver(launcher);
                 HomeController.sync(launcher, isCustomModeActive());
             } catch (Throwable t) {
-                log("launcher ui sync callback failed: " + t);
+                logErr("launcher ui sync callback failed: ", t);
             }
         }
     };
@@ -570,6 +570,12 @@ public class MainHook implements IXposedHookLoadPackage {
             ctx.registerReceiver(new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context c, Intent i) {
+                    // 2026-11-15 鉴权收敛：原实现零校验 —— 任意应用发 ACTION_SET_ROOT_READY
+                    // 即可把 root_ready 标志写进宿主 SP，绕过 PermissionGate 三道门禁；
+                    // 发 ACTION_TOGGLE 可直接开关第四桌面。广播派发路径拿不到真实发送方
+                    // uid（装机实锤），唯一可靠凭证是能力令牌（模块 provider 下发，uid 由
+                    // 内核保证），见 BridgeToken 头注。
+                    if (!trustedSender(c, i)) return;
                     // keep1：首页任何交互都顺带确认模块进程活着（模块死了广播
                     // 本就收不到，此调用只在宿主侧执行 —— 60s 防抖在 poke 内部）
                     com.homemode4miui.bridge.GraceKeepAliveService.pokeFromHost(c);
@@ -584,7 +590,7 @@ public class MainHook implements IXposedHookLoadPackage {
                                     + ", " + pong.getStringExtra(EXTRA_HOST_FAMILY)
                                     + ", failed=" + sFailedHooks.size() + ")");
                         } catch (Throwable t) {
-                            log("hook pong failed: " + t);
+                            logErr("hook pong failed: ", t);
                         }
                         return;
                     }
@@ -619,7 +625,7 @@ public class MainHook implements IXposedHookLoadPackage {
                                     .setPackage("com.homemode4miui")
                                     .putExtra(EXTRA_GATE_REASON, reason));
                         } catch (Throwable t) {
-                            log("toggle-rejected reply failed: " + t);
+                            logErr("toggle-rejected reply failed: ", t);
                         }
                         return;
                     }
@@ -637,8 +643,25 @@ public class MainHook implements IXposedHookLoadPackage {
             sReceiverRegistered = true;
             log("toggle/ping receiver registered (context=" + ctx.getClass().getName() + ")");
         } catch (Throwable t) {
-            log("registerToggleReceiver failed: " + t);
+            logErr("registerToggleReceiver failed: ", t);
         }
+    }
+
+    /** 广播发送方鉴权：能力令牌比对（模块首页广播均携带，第三方应用无法获得）。
+     *  逃生阀：ping 探测与「关闭模式」属安全方向，令牌缺失也放行 —— 模块 APK 被
+     *  卸载/禁用后 provider 不可达，若两条也严格校验，用户会被永久困在第四桌面。 */
+    private static boolean trustedSender(Context ctx, Intent i) {
+        String action = i.getAction();
+        String token = i.getStringExtra(com.homemode4miui.bridge.GraceBridge.EXTRA_TOKEN);
+        if (com.homemode4miui.bridge.BridgeTokenClient.verify(ctx, token)) return true;
+        boolean safeDirection = ACTION_HOOK_PING.equals(action)
+                || (ACTION_TOGGLE.equals(action) && !i.getBooleanExtra(EXTRA_ON, false));
+        if (safeDirection) {
+            log("broadcast accepted without token (safe direction: " + action + ")");
+            return true;
+        }
+        log("broadcast REJECTED: invalid bridge token (action=" + action + ")");
+        return false;
     }
 
     /** 宿主桌面版本号（gate2：pong 回显）。两入口合一：withCode 控制是否附 versionCode。 */
@@ -669,5 +692,10 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private static void log(String msg) {
         ModLog.i(msg);
+    }
+
+    /** 异常日志：必须带堆栈。log(msg + t) 只留下 Throwable.toString()，栈帧全丢。 */
+    private static void logErr(String msg, Throwable t) {
+        ModLog.e(msg, t);
     }
 }

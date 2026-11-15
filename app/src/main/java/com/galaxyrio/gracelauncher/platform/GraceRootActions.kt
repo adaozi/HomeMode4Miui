@@ -34,36 +34,14 @@ internal object GraceRootActions {
     fun perform(action: GraceButtonAction): Boolean {
         val cmd = commandFor[action] ?: return false
         Thread {
-            val ok = try {
-                // hotfix：读流与等待并发（读流放独立线程排水）—— 旧实现 waitFor 在关流
-                // 之前，输出超管道缓冲区（~64KB）会令子进程写阻塞、waitFor 永不返回。
-                // waitFor 带超时强杀 + finally destroy 兜底，杜绝孤儿进程。
-                val process = ProcessBuilder("su", "-c", cmd)
-                    .redirectErrorStream(true)
-                    .start()
-                try {
-                    val reader = Thread { process.inputStream.bufferedReader().readText() }
-                    reader.isDaemon = true
-                    reader.start()
-                    val exit = if (process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
-                        // 进程已退出 → 流已 EOF，reader 收尾即完成
-                        reader.join(2_000)
-                        runCatching { process.exitValue() }.getOrDefault(-1)
-                    } else {
-                        process.destroyForcibly()
-                        ModLog.i("GraceRootActions root timeout cmd=$cmd")
-                        Int.MIN_VALUE
-                    }
-                    if (exit != 0) ModLog.i("GraceRootActions root exit=$exit cmd=$cmd")
-                    exit == 0
-                } finally {
-                    runCatching { process.destroy() }
+            // 统一 su 协议（SuShell 内含排水线程 + 超时强杀 + finally destroy）。
+            // 2026-11-15 收敛前此处另有一份 ProcessBuilder 实现，三份已漂移。
+            val ok = runCatching { com.homemode4miui.bridge.SuShell.run(cmd) != null }
+                .onFailure {
+                    // IOException = 无 su（未 root 或 Magisk 未装）；SecurityException = 授权策略拒绝
+                    ModLog.i("GraceRootActions root unavailable, fallback to a11y: ${it.javaClass.simpleName}")
                 }
-            } catch (t: Throwable) {
-                // IOException = 无 su（未 root 或 Magisk 未装）；SecurityException = 授权策略拒绝
-                ModLog.i("GraceRootActions root unavailable, fallback to a11y: ${t.javaClass.simpleName}")
-                false
-            }
+                .getOrDefault(false)
             if (!ok) mainHandler.post {
                 // 兜底：无障碍服务（若已授权且连接）。performGlobalAction 走主线程投递。
                 if (!GraceAccessibilityService.perform(action)) {

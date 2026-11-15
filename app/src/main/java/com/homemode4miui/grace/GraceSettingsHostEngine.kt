@@ -40,6 +40,8 @@ import com.homemode4miui.bridge.GraceSettingsBridge
 import com.homemode4miui.util.ModLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,12 +81,17 @@ class GraceSettingsHostEngine(
     suspend fun currentWeatherLocationId(): String? =
         settingsRepository?.snapshots?.first()?.settings?.weatherLocationId
 
-    /** GraceBridgeReceiver 转发入口（onReceive 主线程；落库走 scope 协程）。 */
+    /** GraceBridgeReceiver 转发入口（onReceive 主线程；解析/落库都不占主线程）。 */
     fun handle(cmd: String?, arg1: String?, arg2: String?, json: String?) {
         scope.launch {
-            val applied = runCatching { apply(cmd, arg1, arg2, json) }
-                .onFailure { ModLog.e("GraceSettingsHostEngine: $cmd failed", it) }
-                .getOrDefault(false)
+            // JSON 解析与分支判定是 CPU 工作（隐藏应用/文件夹 delta 可达数百 key），
+            // 原实现全程跑在主线程 —— 大批量设置变更会掉帧。落库本身是 suspend DAO
+            // （Room 自行切 IO），故只需要把解析段挪到 Default。
+            val applied = withContext(Dispatchers.Default) {
+                runCatching { apply(cmd, arg1, arg2, json) }
+                    .onFailure { ModLog.e("GraceSettingsHostEngine: $cmd failed", it) }
+                    .getOrDefault(false)
+            }
             if (applied) {
                 pushSnapshot()
                 onMutated()
@@ -212,9 +219,19 @@ class GraceSettingsHostEngine(
         }
     }
 
-    /** 快照回推（模块设置页打开期间动态 receiver 接收；桌面未挂载时本引擎不存活）。 */
+    /**
+     * 快照回推（模块设置页打开期间动态 receiver 接收；桌面未挂载时本引擎不存活）。
+     *
+     * 合并窗口（2026-11-15）：每落库一条命令都会回推全量快照（应用清单 + 最多 8 张
+     * Base64 缩略图编码），拖滑块/连续改多项时几十 ms 内连发多次 —— CPU 与广播风暴。
+     * 改为 80ms 合并（新请求取消旧 job），语义仍是「最终一定推一份最新」。
+     */
+    private var snapshotJob: Job? = null
+
     fun pushSnapshot() {
-        scope.launch {
+        snapshotJob?.cancel()
+        snapshotJob = scope.launch {
+            delay(SNAPSHOT_PUSH_COALESCE_MS)
             val repo = settingsRepository ?: run {
                 sendSnapshot(GraceSettingsBridge.Snapshot(ok = false)); return@launch
             }
@@ -339,14 +356,46 @@ class GraceSettingsHostEngine(
         }
     }
 
+    /**
+     * 快照回推（模块设置页打开期间动态 receiver 接收；桌面未挂载时本引擎不存活）。
+     *
+     * 体积预算（2026-11-15）：快照含宿主全量应用清单（数百项）+ 最多 8 张 Base64
+     * 缩略图 + itemIcons/popups，可达数百 KB。广播走 binder 事务（进程共享 1MB），
+     * 超限时 TransactionTooLargeException 会被调用方 runCatching 静默吞掉 ——
+     * 表现为「设置页打开后一片空白」。这里按可裁剪性分级降级：先丢图片、再丢
+     * 应用清单、最后丢天气/弹层原文，仍超硬阈值则放弃本次推送并留日志。
+     */
     private fun sendSnapshot(snapshot: GraceSettingsBridge.Snapshot) {
         runCatching {
+            var trimmed = snapshot
+            var json = GraceSettingsBridge.encodeSnapshot(trimmed)
+            if (json.length > SNAPSHOT_SOFT_LIMIT) {
+                trimmed = trimmed.copy(savedShortcuts = trimmed.savedShortcuts.map { it.copy(iconPng = null) })
+                json = GraceSettingsBridge.encodeSnapshot(trimmed)
+                ModLog.i("snapshot trimmed-1: shortcut thumbnails dropped (len=${json.length})")
+            }
+            if (json.length > SNAPSHOT_SOFT_LIMIT) {
+                trimmed = trimmed.copy(appCatalog = emptyList())
+                json = GraceSettingsBridge.encodeSnapshot(trimmed)
+                ModLog.i("snapshot trimmed-2: app catalog dropped (len=${json.length})")
+            }
+            if (json.length > SNAPSHOT_SOFT_LIMIT) {
+                trimmed = trimmed.copy(weatherJson = null, popupsJson = emptyMap())
+                json = GraceSettingsBridge.encodeSnapshot(trimmed)
+                ModLog.i("snapshot trimmed-3: weather/popups dropped (len=${json.length})")
+            }
+            if (json.length > SNAPSHOT_HARD_LIMIT) {
+                // 仍超限（极端：几千个图标/收藏）：宁可这次不推，也不让系统抛
+                ModLog.e("snapshot too large, dropped (len=${json.length})", null)
+                return@runCatching
+            }
             context.sendBroadcast(
                 Intent(GraceSettingsBridge.ACTION_SETTINGS_SNAPSHOT)
                     .setPackage(GraceBridge.PACKAGE_MODULE)
-                    .putExtra(GraceBridge.EXTRA_JSON, GraceSettingsBridge.encodeSnapshot(snapshot)),
+                    .putExtra(GraceBridge.EXTRA_JSON, json),
             )
-            ModLog.i("GraceSettingsHostEngine: snapshot pushed (ok=${snapshot.ok}, ${snapshot.settings.clockStyle.layout})")
+            ModLog.i("GraceSettingsHostEngine: snapshot pushed (ok=${trimmed.ok}, "
+                    + "len=${json.length}, ${trimmed.settings.clockStyle.layout})")
         }.onFailure { ModLog.e("GraceSettingsHostEngine: snapshot send failed", it) }
     }
 
@@ -367,4 +416,15 @@ class GraceSettingsHostEngine(
         val array = JSONArray(json ?: "[]")
         (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
     }.getOrDefault(emptyList())
+
+    private companion object {
+        /**
+         * 快照体积阈值（字符数）。Parcel 写 String 按 UTF-16（2B/char），binder 事务
+         * 共用 1MB 缓冲 → 软阈值 200K chars(≈400KB) 触发裁剪，硬阈值 380K 放弃推送。
+         */
+        const val SNAPSHOT_SOFT_LIMIT = 200_000
+        const val SNAPSHOT_HARD_LIMIT = 380_000
+        /** 快照回推合并窗口：连续设置变更压成一次全量构建 + 一次广播。 */
+        const val SNAPSHOT_PUSH_COALESCE_MS = 80L
+    }
 }

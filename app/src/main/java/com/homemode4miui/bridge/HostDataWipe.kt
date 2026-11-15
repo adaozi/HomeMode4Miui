@@ -28,7 +28,6 @@ package com.homemode4miui.bridge
 
 import android.os.Handler
 import android.os.Looper
-import java.util.concurrent.TimeUnit
 
 object HostDataWipe {
 
@@ -69,7 +68,8 @@ object HostDataWipe {
      */
     private val CMD: String = buildString {
         repeat(3) { append("am force-stop $HOST; sleep 0.4; ${rmAndCheck()}") }
-        append("if [ -z \"\$left\" ]; then echo wiped; else echo \"WIPE_LEFT:\$left\"; fi; ")
+        // 成功标记用全大写唯一前缀：原 "wiped" 子串匹配可能被任意含该词的输出误命中
+        append("if [ -z \"\$left\" ]; then echo WIPE_OK; else echo \"WIPE_LEFT:\$left\"; fi; ")
         append("am force-stop $HOST")
     }
 
@@ -79,7 +79,7 @@ object HostDataWipe {
             val out = runCatching { su(CMD) }
                 .onFailure { com.homemode4miui.util.ModLog.e("HostDataWipe failed", it) }
                 .getOrNull()
-            val ok = out?.contains("wiped") == true
+            val ok = out?.contains("WIPE_OK") == true
             // 原始输出打点：WIPE_LEFT 残留清单 / su 拒绝 / 超时，全部可从 logcat 判读
             com.homemode4miui.util.ModLog.i(
                 "HostDataWipe: wipe -> $ok, su output: ${out?.lineSequence()?.lastOrNull()?.take(300) ?: "null (denied/timeout)"}")
@@ -93,20 +93,6 @@ object HostDataWipe {
         wipe { callback.accept(it) }
     }
 
-    /** RootKeepAlive/FontCrossProcess 同款 su 协议（独立实现，互不耦合）。 */
-    private fun su(command: String): String? = runCatching {
-        val process = ProcessBuilder("su", "-c", command)
-            .redirectErrorStream(true)
-            .start()
-        val out = java.util.concurrent.atomic.AtomicReference<String?>(null)
-        val reader = Thread { out.set(process.inputStream.bufferedReader().readText()) }
-        reader.isDaemon = true
-        reader.start()
-        if (!process.waitFor(15, TimeUnit.SECONDS)) {
-            process.destroyForcibly()
-            return null
-        }
-        reader.join(5_000)
-        if (process.exitValue() == 0) out.get() else null
-    }.getOrNull()
+    /** 统一 su 协议（见 SuShell）：wipe 脚本含 3 轮 force-stop + sleep，给足 15s。 */
+    private fun su(command: String): String? = SuShell.run(command, SuShell.DEFAULT_TIMEOUT_MS)
 }
