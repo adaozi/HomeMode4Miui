@@ -240,6 +240,17 @@ public class MainHook implements IXposedHookLoadPackage {
                 com.homemode4miui.hook.OverlayKeepAlive.install(cl);
             }
         });
+        // 12. 返回桌面动画统一（2026-11-15）：MIUI 关闭动画会去宿主 Workspace 找
+        //     "当前显示的图标 View"当飞行目标，命中就有图标回位动画、命中不到就缩到
+        //     屏幕中部消失 —— 模块 Compose 桌面下宿主图标与自绘图标不重合，于是同一台
+        //     机器上两种返回动画随机出现。自定义模式下统一返回 null，两条关闭路径
+        //     （NavStubView 手势 / WindowAnimParamsProvider 远程动画）都由原生回落
+        //     DeviceConfig.getClosingAppDefaultDisappearRect()，与上游观感一致。
+        tryHook("12.AppCloseAnim (返回动画统一)", new HookTask() {
+            @Override public void run() {
+                com.homemode4miui.hook.AppCloseAnim.install(cl);
+            }
+        });
         tryHook("9.SuperDraglayer.findActiveController (手势隔离)", new HookTask() {
             @Override public void run() { GestureIsolator.inject(cl); }
         });

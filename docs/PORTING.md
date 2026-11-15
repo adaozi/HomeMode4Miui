@@ -841,3 +841,27 @@ DIFF vs 桩文件:
   `normalized()` 保证 `bottomPercent > topPercent`（上下限填反自动修正）。
 - [x] **验证**：装机后字母条按设置值定位，scrub 跳转正常，用户确认"已经可以了"。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.159-alphabet-rail-position-175.apk`。
+
+### close-anim-uniform（v2.9.160 / versionCode 176，2026-11-15）—— 返回桌面动画一半飞图标、一半缩小消失
+
+- [x] **症状（User 实锤）**：从应用返回桌面，部分应用窗口缩小后**飞进桌面图标位置**，另一部分
+  则是窗口缩到屏幕中部消失；上游（GraceLauncher 作为第三方桌面）在 MIUI 上恒为后者。
+- [x] **根因（OS2/OS3 dex 逆向，两版本同构）**：MIUI 关闭动画的飞行目标由
+  `com.miui.home.recents.CloseShortcutIconUtils.getCloseShortcutIcon(ComponentName, userId, Launcher|BaseLauncher)`
+  解析 —— 内部 `launcher.getShowingItem(flatten, userId, 0)` + `launcher.getClosingShortcutIcon()`，
+  即"在**宿主自己的** Workspace 里找当前正在显示的图标 View"。本模块桌面是 Compose 自绘盖在宿主
+  Workspace 之上，宿主图标与模块图标位置不重合且多被遮住：
+  - 宿主 `getShowingItem` 恰好命中 → 返回图标 View → 窗口飞向**宿主的**图标位置；
+  - 命中不到 → null → 原生回落 `DeviceConfig.getClosingAppDefaultDisappearRect()`
+    （缩到屏幕中部消失，即上游观感）。
+  ⇒ "宿主是否能命中图标"成了随机分界线 → 两种返回动画混现。
+- [x] **修复**：新增 `hook/AppCloseAnim.java`，`MainHook` gate 12 安装；`XposedBridge.hookAllMethods`
+  钩 `CloseShortcutIconUtils#getCloseShortcutIcon`（两版本参数表不同，按名字匹配），自定义桌面模式下
+  `setResult(null)`。两个调用方都原生兜底 null，无 NPE 风险：
+  - `NavStubView.findClosingShortcutIcon` → `mAppToHomeTargetRect.set(getClosingAppDefaultDisappearRect(mTouchRange))`；
+  - `WindowAnimParamsProvider.getClosingShortcutIcon` → `findClosingAnimTarget` 返回 null →
+    `getIconRect` 取 `getClosingAppDefaultDisappearRect(...)`。
+  原生 MIUI 桌面模式下完全放行（不动 MIUI 自己的动画）；方法缺失由 tryHook 记录失败并放行原逻辑。
+- [x] **验证**：构建通过；待装机确认所有应用返回动画统一为"缩小消失"（真机日志锚点
+  `AppCloseAnim: icon target suppressed -> default disappear rect`）。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.160-close-anim-uniform-176.apk`。
