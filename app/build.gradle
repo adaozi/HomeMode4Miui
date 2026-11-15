@@ -112,6 +112,12 @@ dependencies {
     implementation 'androidx.room:room-runtime:2.8.4'
     implementation 'androidx.room:room-ktx:2.8.4'   // withTransaction 扩展
     ksp 'androidx.room:room-compiler:2.8.4'
+
+    // ---- 单元测试（v2.9.162 起）：设置行编解码护栏 ----
+    // 为什么必须显式引 org.json：AGP 的 JVM 单测用 android.jar 的 stub 实现，
+    // 调用 JSONObject 会抛 "Method ... not mocked"，编解码测试跑不起来。
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }
 
 // P3：schema JSON 落 app/schemas/（入 git），后续 P4/P6 migration 有编译期依据
