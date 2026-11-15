@@ -33,7 +33,6 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
 import android.graphics.Rect
 import android.os.Bundle
@@ -53,7 +52,6 @@ import com.galaxyrio.gracelauncher.data.GraceSettingsRepository
 import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherAppOrder
 import com.galaxyrio.gracelauncher.data.LauncherDatabase
-import com.galaxyrio.gracelauncher.data.LauncherFolder
 import com.galaxyrio.gracelauncher.data.LauncherShortcut
 import com.galaxyrio.gracelauncher.data.ShortcutRepository
 import com.galaxyrio.gracelauncher.data.ShortcutResult
@@ -66,15 +64,12 @@ import com.galaxyrio.gracelauncher.data.weather.WeatherStatus
 import com.homemode4miui.bridge.GraceBridge
 import com.homemode4miui.bridge.GraceSettingsBridge
 import com.homemode4miui.util.ModLog
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class GraceHomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -108,16 +103,10 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      * 原先那两个引擎互相引用（设置刷新 ↔ 天气回推快照）靠 by lazy 断开初始化环，
      * 现在由 VM 注入两个 lambda（preferredLocationId / onSnapshotInvalidated）实现同样的解耦。
      */
-    /** 上游同步 v1.1.8 S8b：图标渲染管线（Grace 按钮 artwork 面专用；settings 传入逐次构造）。
-     *  context 必须是【模块资源 Context】：ItemIconStore/GraceButtonIcon 解析模块
-     *  drawable/string——宿主 MiuiResources 无模块 R id（NotFound）或同 ID 错位
-     *  （DualResources 只兜 string 族，drawable 错位静默换图）。filesDir 指向模块
-     *  数据目录仅影响 image kind（当前设置侧 import 降级禁用，不可达）。 */
-    private val moduleResourceContext: android.content.Context = runCatching {
-        application.createPackageContext("com.homemode4miui", android.content.Context.CONTEXT_IGNORE_SECURITY)
-    }.getOrElse { application }
-    private val iconStore = com.galaxyrio.gracelauncher.data.icons.ItemIconStore(moduleResourceContext,
-        com.galaxyrio.gracelauncher.data.icons.IconPackRepository(moduleResourceContext))
+    /**
+     * 上游同步 v1.1.8 S8b：图标渲染管线（moduleResourceContext / ItemIconStore）
+     * **已迁至 AppsLoader**（拆分第 8 步）—— 它只被图标装饰链路消费。
+     */
 
     // ---- 设置页 widget 命令入口（moveWidget / addWidget / addPopupWidget 三个 request flow）
     //      已随 widget 域迁至 WidgetSlot（拆分第 5 步）；VM 保留 onBridge* 私有转发，
@@ -185,18 +174,36 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     )
 
     /**
+     * 应用装载域（拆分第 8 步）：枚举 / 全量解码 / 图标装饰 / decorateMutex + 代际。
+     *
+     * 对 ShortcutSync **零直接依赖**：装载前的 pinned 对账、装饰尾部的快捷方式重建
+     * 都用 lambda 注入 —— 因为 ShortcutSync 反过来要调本类的 decorate（双向依赖，
+     * 见 docs/VIEWMODEL_SPLIT_PLAN.md §4-8）。
+     */
+    private val appsLoader: AppsLoader = AppsLoader(
+        application = application,
+        scope = viewModelScope,
+        uiState = _uiState,
+        appRepository = appRepository,
+        settingsRepository = settingsRepository,
+        favoritesStore = favoritesStore,
+        onRefreshPinned = { shortcuts.syncPinned(force = true) },
+        buildShortcuts = { rows -> shortcuts.buildForRows(rows) },
+    )
+
+    /**
      * 快捷方式域（拆分第 6 步）：saved_shortcuts 对账 / 图标解码 / 查询 / 启动 / 系统回调。
      *
      * 注意 decorate 是 lambda 而非 AppsLoader 实例：buildShortcutApps 要调装饰，
      * 而装饰路径（applyItemIconSnapshot）又要回调 buildForRows —— 双向依赖，
      * 只能靠「谁调用谁传参」断开（见 docs/VIEWMODEL_SPLIT_PLAN.md §4-8）。
      */
-    private val shortcuts = ShortcutSync(
+    private val shortcuts: ShortcutSync = ShortcutSync(
         application = application,
         scope = viewModelScope,
         uiState = _uiState,
         shortcutRepository = ShortcutRepository(application),
-        decorate = { apps -> decorateApps(apps) },
+        decorate = { list -> appsLoader.decorate(list) },
         onFavoriteKeyOrphaned = { key -> settings.dropFavoriteKey(key) },
     )
 
@@ -226,82 +233,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ---- P4：widget picker 状态 / WidgetController 已迁至 WidgetSlot（拆分第 5 步）----
 
-    private var appLoadJob: Job? = null
-    /** 装载失败自愈重试计数：成功装载后归零，连败不重试（防失败-重试循环）。 */
-    private var appLoadRetryCount = 0
-    // 设置域三条观察流（settings / hidden_apps / folders）已迁至 SettingsSync（拆分第 7 步）
-    private var iconsJob: Job? = null
-    /** 壁纸跟随失效源（模块侧根因修复）：Grace 按钮/themed 图标的光栅化配色在 VM 层
-     *  预渲染成位图，壁纸变化后必须重渲染才跟得上主题。双通道 bump（与组合层
-     *  rememberWallpaperVersion 同语义）：OnColorsChangedListener（AOSP 对同色系
-     *  壁纸去重不回调）+ ACTION_WALLPAPER_CHANGED 广播（每次设壁纸必发）。 */
-    private val wallpaperRevision = kotlinx.coroutines.flow.MutableStateFlow(0)
-    private val wallpaperColorsListener = android.app.WallpaperManager.OnColorsChangedListener { _, _ ->
-        wallpaperRevision.value = wallpaperRevision.value + 1
-    }
-    private val wallpaperReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == Intent.ACTION_WALLPAPER_CHANGED) wallpaperRevision.value = wallpaperRevision.value + 1
-        }
-    }
-    /** 上游同步补漏：item_icons 快照（iconsJob 主线程写，refreshApps/装饰读）。
-     *  上游 LauncherViewModel.itemsSnapshot.icons 的宿主同构。 */
-    private var iconsSnapshot: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon> = emptyMap()
-    /** 内存列表（apps + folderApps）当前已按哪个 icons 快照装饰完成的标记；
-     *  null = 未装饰/上次装饰失败（下次快照到达强制重试）。 */
-    private var itemsDecoratedWith: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon>? = null
-    /** 上次重装饰时的主题戳（壁纸 revision + 主题设置指纹，见 decorationThemeStampOf）；
-     *  null = 从未记录。戳变化 = 光栅化配色来源变化，iconsJob 强制重装饰。 */
-    private var decorationThemeStamp: String? = null
-    /** 「读内存列表 → 装饰 → 原子换入」串行化：iconsJob 重装饰与 refreshApps 收尾互斥。 */
-    private val decorateMutex = Mutex()
-    /**
-     * 应用装载代际（每次 refreshApps 自增）。
-     *
-     * 根因（2026-10-28 装机实锤：重启桌面后有概率"收藏有图标、抽屉全是字母占位"）：
-     * 两段式装载的 phase1 把 isLoadingApps 置 false 后，iconsJob 的快照重装饰
-     * （applyItemIconSnapshot）就能进来 —— 它读 [LauncherUiState.apps]（此刻是只解码了
-     * 收藏子集的 phase1 partial）、在 IO 上装饰、再整体写回。若它的读发生在 phase2
-     * 换入全量带图标列表之前、写发生在之后，就会把全量结果覆盖回 partial：
-     * 收藏子集有图标、抽屉/搜索其余全是字母占位，且 itemsDecoratedWith 已被标记成
-     * "已装饰"，此后不再自愈（要等图标设计/壁纸/包变化触发 refreshApps）。
-     * 修复：decorateMutex 内做「读 → 校验代际 → 写」，装载换入同样在锁内进行，
-     * 代际变化即说明有更新的一次装载接管，旧装饰结果直接丢弃。
-     *
-     * 2026-11-14：两段式已回归单段装载（phase1 不复存在，上述覆盖窗口自然消失），
-     * 但代际 + 互斥仍保留 —— iconsJob 重装饰与包变化刷新并发时仍是同一类竞态。
-     */
-    @Volatile
-    private var appLoadGeneration = 0
-    // ---- 桥快照摄入节流（v2.9.125-notif-burst）：已迁至 BridgeInbox（拆分第 4 步）----
-    // 三个时间窗（80ms 合并 / 后台 pending / 回前台 700ms 宽限）与相关字段全部在新类内，
-    // 不要拆散 —— 它们共同保证"冻结解冻后不回放历史通知"这一行为。
-
-    // ---- 日程失效链（v2.9.126-agenda-live）：已迁至 AgendaFeed（拆分第 2 步）----
-
-    private companion object {
-        /** 回桌面触发的 pinned 对账最小间隔（系统推送走 force=true，不受限）。 */
-        const val PINNED_SYNC_MIN_INTERVAL_MS = 5_000L
-    }
-    // 审计修缮（2026-10-16）：删除 iconPacksDecorating —— 全仓无置位（承诺的
-    // "刷新完成后置 true" 逻辑不存在）也无收集，上游装饰中提示的移植半成品。
-
-    /** 与原版 packageReceiver 同构：包变化（安装/卸载/更新/变更）触发应用列表刷新。 */
-    private val packageReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == Intent.ACTION_PACKAGE_REMOVED && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
-            refreshApps()
-        }
-    }
+    // 应用装载域（appLoadJob / iconsJob / 装饰互斥代际 / 壁纸与包变化广播 /
+    //  iconStore）已迁至 AppsLoader（拆分第 8 步）。
 
     init {
-        ContextCompat.registerReceiver(application, packageReceiver, IntentFilter().apply {
-            addAction(Intent.ACTION_PACKAGE_ADDED)
-            addAction(Intent.ACTION_PACKAGE_REMOVED)
-            addAction(Intent.ACTION_PACKAGE_REPLACED)
-            addAction(Intent.ACTION_PACKAGE_CHANGED)
-            addDataScheme("package")
-        }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // 装载域（拆分第 8 步）：注册包变化/壁纸广播 + 启动 item_icons 跟随
+        appsLoader.start()
         // P6：桥快照广播。hotfix1：必须 EXPORTED —— NOT_EXPORTED 动态 receiver 在
         // Android 13+ 只收同 UID/系统广播，模块进程（异 UID）的显式 setPackage 广播
         // 被系统丢弃（授权后媒体行不出现的根因）。信任面见 GraceBridgeReceiver 头注。
@@ -310,14 +247,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         // notif1：挂载即拉取快照 —— 引擎指纹去重是模块进程持久单例，桌面重启后
         // 重启前的通知/媒体快照不会重发（要等新通知/切歌），必须显式拉取。
         bridge.requestSnapshot()
-        // 壁纸跟随失效源注册（见 wallpaperRevision 注释）；shutdown 侧解绑
-        runCatching {
-            android.app.WallpaperManager.getInstance(application)
-                .addOnColorsChangedListener(wallpaperColorsListener,
-                    android.os.Handler(android.os.Looper.getMainLooper()))
-        }
-        ContextCompat.registerReceiver(application, wallpaperReceiver,
-            IntentFilter(Intent.ACTION_WALLPAPER_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         // B6.2：天气首装载（本进程直读小米天气 provider；后续 ContentObserver 失效）
         weather.refresh("mount")
         // 设置域（拆分第 7 步）：启动 settings / hidden_apps / folders 三条 Room 观察流
@@ -335,73 +264,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             refreshMediaAccess()
         }
         refreshAgenda()
-        // 上游同步 v1.1.8 S8b：图标设计器产出跟随（GraceButton design + artwork 面）
-        // 模块侧根因修复：combine 壁纸 revision + 设置流 —— 光栅化配色（WallpaperColors
-        // 种子）或主题设置变化时，Grace 按钮 artwork 重渲染 + themed 图标强制重装饰。
-        iconsJob = viewModelScope.launch {
-            try {
-                val database = LauncherDatabase.getInstance(application)
-                kotlinx.coroutines.flow.combine(
-                    database.itemsDao().icons(),
-                    settingsRepository.observeSettings(),
-                    wallpaperRevision,
-                ) { rows, _, _ -> rows }.collect { rows ->
-                    val icons = rows.mapNotNull { row ->
-                        com.galaxyrio.gracelauncher.data.ItemIcon.decode(row.iconJson)?.let { row.itemKey to it }
-                    }.toMap()
-                    // 上游 itemsSnapshot 同构（LauncherViewModel.kt:427 在 collect 内落快照字段）：
-                    // 局部 icons 必须同步到 iconsSnapshot —— decorateApps/decorateFolders 的
-                    // 两条消费链（refreshApps 冷启动 + 本 collect 即时重装饰）都从该字段读
-                    // per-item 选择。漏赋值 = 单个图标/文件夹图标设计永不生效（装机实锤）。
-                    iconsSnapshot = icons
-                    // Grace 按钮位图随 icons 流产出（上游 LauncherViewModel.kt:450-451 同构）：
-                    // ItemIconStore.apply 走 isGraceButton 分支渲染 256px artwork。
-                    // 图标渲染设置统一走 currentIconSettings（补 iconDesign/iconPackPackages，
-                    // 与 applyDesign 全局面 + theme kind 语义对齐）。
-                    val buttonApp = try {
-                        val iconSettings = currentIconSettings()
-                        // moduleResourceContext：GraceButtonIcon.item 内部 getString
-                        // (settings_grace_button) 必须解析模块资源——宿主 Application 的
-                        // MiuiResources 无模块 R id（Resources$NotFoundException 实锤，
-                        // 与 GraceHomeRoot LocalContext 覆盖同族问题，VM 非组合代码需手动过桥）。
-                        iconStore.apply(
-                            com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.item(moduleResourceContext),
-                            com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.choice(icons[com.galaxyrio.gracelauncher.data.icons.GraceButtonIcon.key]),
-                            iconSettings,
-                        )
-                    } catch (error: kotlinx.coroutines.CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        ModLog.e("GraceHomeViewModel renderGraceButtonIcon failed", error)
-                        null
-                    }
-                    // 上游同步补漏（LauncherViewModel.kt:305-310 reload 语义）：快照变化 → 内存
-                    // 列表重装饰（设计器保存后桌面立即生效，不重查系统；refreshApps 侧同链路
-                    // 覆盖冷启动/包变化路径）。去重 + 装载中让路：
-                    // ① 快照与 itemsDecoratedWith 相同 = 内存列表已按该快照装饰过，跳过
-                    //   （Room 流可能在失效追踪器初始化等场景重发；Grace 按钮 artwork 不受影响，
-                    //   上方仍无条件产出）；
-                    // ② isLoadingApps = refreshApps 在途，其 decorateApps 会读到刚落的最新
-                    //   快照，无需（也不能）在此并发重装饰——否则读到的旧/空 apps 会在
-                    //   update 时覆盖装载结果（空列表闪断竞态，v2.9.51 起存在）。
-                    // ③ 模块侧补强：主题戳（壁纸 revision + 主题设置）变化也强制重装饰 ——
-                    //   themed 图标/Grace 按钮的光栅化配色随壁纸取色种子即时刷新。
-                    val iconSettingsForStamp = currentIconSettingsOrNull()
-                    if (iconSettingsForStamp != null) {
-                        val stamp = decorationThemeStampOf(iconSettingsForStamp)
-                        if (icons != itemsDecoratedWith || stamp != decorationThemeStamp) {
-                            decorationThemeStamp = stamp
-                            applyItemIconSnapshot()
-                        }
-                    }
-                    _uiState.update { it.copy(itemIcons = icons, graceButtonApp = buttonApp) }
-                }
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                ModLog.e("GraceHomeViewModel observeItemIcons failed", error)
-            }
-        }
         // B6.2：天气首装载已由 init 的 weatherHostEngine.refresh("mount") 承接
         // （本进程直读 provider，不再向模块进程请求）
     }
@@ -412,256 +274,11 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** 用户主动移除快捷方式（dismiss + 系统 unpin + 清图标设计，见 ShortcutSync）。 */
     fun removeShortcut(app: LauncherApp) = shortcuts.removeShortcut(app)
 
-    fun refreshApps() {
-        // force：包变化/挂载/图标包切换后必须按系统 pinned 重新对账；
-        // 回桌面（GraceHomeView）走默认节流，这里 force 正好覆盖 VM 首次装载那一次。
-        syncPinnedShortcuts(force = true)
-        appLoadJob?.cancel()
-        // 代际自增必须在启动新 job 之前（旧 job 可能正在锁内换入，读到新代际即让位）
-        val generation = ++appLoadGeneration
-        appLoadJob = viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingApps = true, appLoadFailed = false) }
-            try {
-                // B6.4：图标包跟随设置（装饰在 loadApps 内完成；包加载失败自动回退系统图标）
-                val packs = _uiState.value.settings.enabledIconPackPackages
-                // 上游同步补漏（LauncherViewModel.kt:443 decorate 逐字语义）：
-                // 应用图标设计器产出（item_icons）+ 全局面设计 + 主题化在入库前套用。
-                // 快照在装饰前取定：装载期间 icons 流前进的场景由尾部补偿轮处理。
-                val snapshotAtDecorate = iconsSnapshot
-                // 单段装载（2026-11-14 User 实锤：重启手机后收藏图标正常、抽屉整屏字母占位）。
-                //
-                // 历史包袱：曾为"时钟/文件夹先出、应用晚 1-2 秒到"做两段式 —— phase1 只解
-                // 收藏子集立即换入、phase2 后台解全量。两段各起一批 getBadgedIcon，冷启动
-                // 在 MIUI IconCustomizer 的主题资源锁上互相踩踏 + 各自吃一份解码超时：
-                // 收藏子集（20 个）先拿到锁、正常出图；全量（200+）撞上超时被整批判死 →
-                // 抽屉永久骨架态（字母占位）。诊断实锤"收藏正常 / 抽屉全占位"正是这个形态。
-                //
-                // 回归单段：枚举 → 全量解码 → 装饰 → 一次换入。首帧晚 1-2 秒（时钟、文件夹、
-                // 收藏一起出现），代价可接受；换来抽屉图标不再整批丢失。
-                val inventory = appRepository.enumerateApps(packs)
-                ModLog.i("refreshApps: enumerated=" + inventory.apps.size
-                        + " at=" + android.os.SystemClock.uptimeMillis())
-                var full = inventory.withIcons(inventory.apps.map(LauncherApp::key).toSet())
-                ModLog.i("refreshApps: icons done at=" + android.os.SystemClock.uptimeMillis()
-                        + " missing=" + full.count { it.icon == null } + "/" + full.size)
-                // 解码瞬时失败自愈：MIUI 系统刚启动时 PackageManager 资源未就绪，
-                // getBadgedIcon 可能整批抛错（解码器内 runCatching 静默为 null）。
-                // 缺失超过 5% 时重试一次（解码是纯函数，重复调用无副作用，第二轮已暖
-                // IconCustomizer 缓存，明显更快），仍失败则如实记录，便于日志定位。
-                run {
-                    val missing = full.filter { it.icon == null }.map(LauncherApp::key)
-                    // 无条件打点：图标缺失是"抽屉字母占位"的唯一判据，缺 1 个也值得留痕
-                    if (missing.isNotEmpty()) {
-                        com.homemode4miui.util.ModLog.i(
-                            "refreshApps: icon missing=" + missing.size + "/" + full.size)
-                    }
-                    if (missing.isNotEmpty() && missing.size * 20 >= full.size) {
-                        com.homemode4miui.util.ModLog.i(
-                            "refreshApps: retry icon decode missing=" + missing.size + "/" + full.size)
-                        full = inventory.withIcons(missing.toSet(), parallelism = 2)
-                        com.homemode4miui.util.ModLog.i(
-                            "refreshApps: after retry missing=" + full.count { it.icon == null } +
-                                "/" + full.size)
-                    }
-                }
-                // 开机后首次装载的兜底（2026-11-02 User 实测："再重启一次桌面图标就回来"）：
-                // 系统刚开机时内存紧张 + PackageManager/主题资源未就绪，整批解码失败；
-                // 此时不折腾用户手动重启桌面，按 6s/15s 退避自动整表重装，最多两轮。
-                val missingAfterRetry = full.count { it.icon == null }
-                if (missingAfterRetry * 5 >= full.size && appLoadRetryCount < 2) {
-                    appLoadRetryCount += 1
-                    val delayMs = if (appLoadRetryCount == 1) 6_000L else 15_000L
-                    ModLog.i("refreshApps: schedule auto-retry #" + appLoadRetryCount
-                            + " in " + delayMs + "ms (missing=" + missingAfterRetry + "/" + full.size + ")")
-                    viewModelScope.launch {
-                        kotlinx.coroutines.delay(delayMs)
-                        if (generation == appLoadGeneration && !_uiState.value.isLoadingApps) refreshApps()
-                    }
-                } else if (missingAfterRetry == 0) {
-                    appLoadRetryCount = 0
-                }
-                val apps = decorateApps(full)
-                ModLog.i("refreshApps: decorated at=" + android.os.SystemClock.uptimeMillis()
-                        + " iconMissing=" + apps.count { it.icon == null } + "/" + apps.size)
-                val folderApps = decorateFolders(_uiState.value.folders, snapshotAtDecorate)
-                // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
-                // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
-                val order = favoritesStore.favoritesFor(apps)
-                // 上游同步 v1.1.8 S8a：工作资料枚举（无 managed profile 时零开销静默跳过）。
-                val workProfiles = appRepository.workProfiles()
-                val workProfileApps = if (workProfiles.isNotEmpty()) {
-                    appRepository.loadWorkApps(workProfiles, packs)
-                } else emptyList()
-                // 锁内换入（与 applyItemIconSnapshot 串行，见 appLoadGeneration 注释）
-                decorateMutex.withLock {
-                    if (generation != appLoadGeneration) return@launch
-                    _uiState.update {
-                        it.copy(apps = apps, folderApps = folderApps, favoriteOrder = order,
-                            isLoadingApps = false, homeReady = true,
-                            workProfiles = workProfiles, workProfileApps = workProfileApps)
-                    }
-                }
-                // appLoadRetryCount 的归零放在 missing 判定分支（本文件上部）：
-                // 只有"零缺失"的成功装载才清零，否则退避重试计数会被每次装载重置成 0。
-                itemsDecoratedWith = snapshotAtDecorate
-                // 装载期间 icons 流前进过（iconsJob 因 isLoadingApps 让路）：
-                // 以最新快照补一轮内存重装饰，否则新快照要等下次 emission 才生效。
-                if (iconsSnapshot != snapshotAtDecorate) applyItemIconSnapshot()
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                ModLog.e("GraceHomeViewModel loadApps failed", error)
-                // 已有列表（上一轮装载结果）时不得置 appLoadFailed —— 那会让
-                // favorites/appListApps 双双空化，比"图标未解出"严重得多。
-                val hasList = _uiState.value.apps.isNotEmpty()
-                _uiState.update { it.copy(isLoadingApps = false, appLoadFailed = !hasList, homeReady = true) }
-                // 半装载自愈：枚举/解码中途抛错会留下旧列表，且没有任何兜底能唤醒 ——
-                // 延迟重试一次（仅一次，避免失败-重试循环）。
-                if (hasList && appLoadRetryCount < 1 && generation == appLoadGeneration) {
-                    appLoadRetryCount += 1
-                    viewModelScope.launch {
-                        kotlinx.coroutines.delay(3000)
-                        if (generation == appLoadGeneration && !_uiState.value.isLoadingApps) refreshApps()
-                    }
-                }
-            }
-        }
-    }
-
     /**
-     * 用当前 iconsSnapshot 重装饰内存中的应用/文件夹图标列表（不重查系统），原子换入。
-     * icons 快照到达（iconsJob）与 refreshApps 装载尾部补偿共用；装载在途时直接让路
-     * （在途 refreshApps 的 decorateApps 会读到刚落的最新快照）。成功后落 itemsDecoratedWith
-     * 标记；失败不落（下次快照到达强制重试）。
+     * 应用装载入口（实现见 AppsLoader：枚举 → 全量解码 → 装饰 → 锁内原子换入）。
+     * 包变化广播、图标包切换、挂载首次装载都走这里，内部按代际丢弃过期结果。
      */
-    /** 主题戳：光栅化配色的全部来源指纹（壁纸取色 revision + 主题设置 + 夜间模式）。
-     *  任一变化 = ItemIconStore.themeColors/dynamicColors 会产出不同配色 → 强制重装饰。 */
-    private fun decorationThemeStampOf(settings: com.galaxyrio.gracelauncher.data.LauncherSettings): String {
-        val nightMode = getApplication<Application>().resources.configuration.uiMode and
-            android.content.res.Configuration.UI_MODE_NIGHT_MASK
-        return wallpaperRevision.value.toString() + "|" + settings.useDynamicColors + "|" + settings.themeColor +
-            "|" + settings.darkMode.name + "|" + settings.paletteStyle.name + "|" +
-            settings.enabledIconPackPackages + "|" + nightMode
-    }
-
-    /** currentIconSettings 的容错版（主题戳计算用；失败返回 null 跳过本次重装饰判定）。 */
-    private suspend fun currentIconSettingsOrNull(): com.galaxyrio.gracelauncher.data.LauncherSettings? =
-        runCatching { currentIconSettings() }.getOrNull()
-
-    private suspend fun applyItemIconSnapshot(): Boolean {
-        if (_uiState.value.isLoadingApps) return false
-        return decorateMutex.withLock {
-            try {
-                val generation = appLoadGeneration
-                val state = _uiState.value
-                val apps = decorateApps(state.apps)
-                val folderApps = decorateFolders(state.folders, iconsSnapshot)
-                // v2.9.154：快捷方式同样重装饰（图标设计器改快捷方式图标后即时生效，
-                // 不必等下一次 refreshApps / 重开抽屉）
-                val (shortcutApps, shownKeys) = runCatching {
-                    val rows = LauncherDatabase.getInstance(getApplication()).itemsDao().readShortcuts()
-                    shortcuts.buildForRows(rows)
-                }.getOrElse { state.savedShortcutApps to state.shownShortcutKeys }
-                // 装饰期间新一次装载接管（代际前进 / isLoadingApps 已置位）：本轮基于旧
-                // apps 的结果直接丢弃 —— 写回去会把在途装载的换入结果盖成旧快照的骨架。
-                if (generation != appLoadGeneration || _uiState.value.isLoadingApps) return@withLock false
-                _uiState.update {
-                    it.copy(apps = apps, folderApps = folderApps,
-                        savedShortcutApps = shortcutApps, shownShortcutKeys = shownKeys)
-                }
-                itemsDecoratedWith = iconsSnapshot
-                true
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                ModLog.e("GraceHomeViewModel applyItemIconSnapshot failed", error)
-                false
-            }
-        }
-    }
-
-    // ---- 上游同步补漏：应用图标装饰链（LauncherViewModel.kt:430/443 + LauncherSettingsRepository 主题三参同源）----
-
-    /**
-     * 图标渲染设置（上游 iconSettings = _uiState.value.settings 的宿主同构）：
-     * 主题三参从 Room 行直取（与设计器预览同源），iconDesign = 全局面「全部」页
-     * 设计（Room iconDesignJson），iconPackPackages = theme kind 跟随的主题包。
-     */
-    private suspend fun currentIconSettings(): com.galaxyrio.gracelauncher.data.LauncherSettings {
-        val row = LauncherDatabase.getInstance(getApplication()).settingsDao().readSettings()
-        return com.galaxyrio.gracelauncher.data.LauncherSettings(
-            useDynamicColors = row?.useDynamicColors ?: true,
-            themeColor = row?.themeColor ?: com.galaxyrio.gracelauncher.data.LauncherSettings.DEFAULT_THEME_COLOR,
-            darkMode = row?.darkMode
-                ?.let { runCatching { com.galaxyrio.gracelauncher.data.ThemeMode.valueOf(it) }.getOrNull() }
-                ?: com.galaxyrio.gracelauncher.data.ThemeMode.System,
-            iconDesign = row?.iconDesignJson?.let(com.galaxyrio.gracelauncher.data.ItemIcon::decode),
-            iconPackPackages = com.galaxyrio.gracelauncher.data.GraceHomeSettings.decodeStringList(row?.iconPackPackagesJson),
-        )
-    }
-
-    /**
-     * 应用图标装饰（上游 LauncherViewModel.decorate 逐字语义：applyDesign(app,
-     * icons[key], settings.iconDesign, settings, themedIcons)）。快速路径：无自定义
-     * 设计 + 无全局面 + 未开主题化时零渲染（宿主进程省 200+ 次 144px 位图渲染）。
-     */
-    private suspend fun decorateApps(apps: List<LauncherApp>): List<LauncherApp> {
-        val icons = iconsSnapshot
-        val iconSettings = currentIconSettings()
-        val themed = com.galaxyrio.gracelauncher.data.LauncherPreferences(
-            getApplication<Application>()).themedIcons
-        if (!themed && icons.isEmpty() && iconSettings.iconDesign == null) return apps
-        return kotlinx.coroutines.withContext(Dispatchers.IO) {
-            apps.map { app ->
-                runCatching {
-                    val special = icons[app.key]
-                    // 骨架应用（系统图标解码失败/未解出）：无 per-item 选择 + 无全局面设计
-                    // 时直接跳过 —— 否则 systemDrawable 兜底会对 200+ 骨架触发全量重渲染
-                    // （风暴复现）；解码成功的应用走下面正常装饰。
-                    // 宿主性能适配（装机实锤 v2.9.51 后每次重启桌面字母条滑动卡顿）：
-                    // 无 per-item 选择 + 无全局面设计 + 未开主题化的应用，applyDesign 仍会走
-                    // "默认设计全量重渲染"——systemDrawable binder 往返 + 144px 多层位图渲染 +
-                    // monochrome 逐像素扫描，冷启动 200+ 次，IO 线程与宿主 UI/Render 线程抢
-                    // CPU 且 ~20MB 位图分配引发 GC 抖动。上游独立进程扛得住，宿主
-                    // com.miui.home 进程（MIUI 自身 UI 同线程竞争）扛不住。
-                    // 快速路径与重渲染视觉等价：保留枚举原图标，仅按设计分支语义清空
-                    // monochromeIcon（桌面 themed 圆显隐一致）；iconPackPackage 保持枚举原值
-                    // （theme kind 本就原样保留语义）。
-                    when {
-                        // v2.9.158：快捷方式图标还没解码出来（saved_shortcuts 行先到、
-                        // LauncherApps 图标后到）→ 跳过装饰。此时渲染只会产出"无图标"
-                        // 的结果，既白费一次渲染又会污染图标渲染缓存；等 shortcutIcons
-                        // 到位后 buildShortcutApps 会重建并正常装饰。
-                        app.shortcut != null && app.icon == null -> app
-                        special == null && iconSettings.iconDesign == null && app.icon == null -> app
-                        special == null && iconSettings.iconDesign == null && !themed ->
-                            if (app.monochromeIcon == null) app else app.copy(monochromeIcon = null)
-                        else -> iconStore.applyDesign(app, special, iconSettings.iconDesign, iconSettings, themed)
-                    }
-                }.getOrElse { app }
-            }
-        }
-    }
-
-    /**
-     * 上游 LauncherViewModel.kt:445-447 逐字语义：文件夹图标项装饰 —— item_icons 里
-     * key "folder:<id>" 的自定义选择（图标设计器 FolderEditor 入口产出）经 ItemIconStore
-     * .apply 渲染成位图。无自定义选择的文件夹不进 map（folderItem 回落 asApp() 默认圆标）。
-     */
-    private suspend fun decorateFolders(
-        folders: List<LauncherFolder>,
-        icons: Map<String, com.galaxyrio.gracelauncher.data.ItemIcon>,
-    ): Map<String, LauncherApp> {
-        if (icons.isEmpty() || folders.isEmpty()) return emptyMap()
-        val iconSettings = currentIconSettings()
-        return kotlinx.coroutines.withContext(Dispatchers.IO) {
-            folders.mapNotNull { folder ->
-                val choice = icons[folder.key] ?: return@mapNotNull null
-                runCatching { iconStore.apply(folder.asApp(), choice, iconSettings) }
-                    .getOrNull()?.takeIf { it.icon != null }?.let { folder.id to it }
-            }.toMap()
-        }
-    }
+    fun refreshApps() = appsLoader.refreshApps()
 
     /**
      * 原版 AppRepository.launch 对齐：LauncherApps.startMainActivity（宿主即默认桌面）。
@@ -836,8 +453,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** GraceHomeView.onHomeDetached 显式调用（手动构造的 ViewModel 不走 onCleared）。 */
     fun shutdown() {
-        appLoadJob?.cancel()
-        iconsJob?.cancel()
+        // 装载域：取消装载/图标流 + 解绑包变化/壁纸广播（实现见 AppsLoader.dispose）
+        appsLoader.dispose()
         // 设置域：取消三条 Room 观察流（实现见 SettingsSync.dispose）
         settings.dispose()
         // 快捷方式域：取消流跟随 + 解绑系统回调 + 关闭仓储（实现见 ShortcutSync.dispose）
@@ -848,16 +465,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         weather.dispose()
         // 桥快照域：取消宽限期收尾 job + 清 pending
         bridge.dispose()
-        runCatching { getApplication<Application>().unregisterReceiver(packageReceiver) }
-            .onFailure { ModLog.e("GraceHomeViewModel unregister receiver failed", it) }
+        // 桥命令接收器（仍在 VM 内注册，见 init）
         runCatching { getApplication<Application>().unregisterReceiver(bridgeReceiver) }
             .onFailure { ModLog.e("GraceHomeViewModel unregister bridge receiver failed", it) }
-        // 壁纸跟随失效源解绑（init 侧注册，见 wallpaperRevision 注释）
-        runCatching {
-            android.app.WallpaperManager.getInstance(getApplication())
-                .removeOnColorsChangedListener(wallpaperColorsListener)
-        }
-        runCatching { getApplication<Application>().unregisterReceiver(wallpaperReceiver) }
-            .onFailure { ModLog.e("GraceHomeViewModel unregister wallpaper receiver failed", it) }
     }
 }
