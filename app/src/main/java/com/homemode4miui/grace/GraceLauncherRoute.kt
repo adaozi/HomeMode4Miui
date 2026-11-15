@@ -683,11 +683,18 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         val regularHomeTop = (safeHeight * if (safeHeight < 600.dp) 0.12f else 0.32f).coerceIn(24.dp, 320.dp)
         val homeTop = statusBarHeight + regularHomeTop
         val drawerTop = statusBarHeight + safeHeight * 0.28f
-        val railHeight = ((model.letters.size + 1) * 18).dp.coerceAtMost(safeHeight * 0.65f)
+        // v2.9.159（User 实锤"调了字母表上下限位置不生效"）：此前 railHeight / railTop 是
+        // 硬编码常量（(letters+1)*18dp 与 safeHeight*0.39），AlphabetAppearance 的
+        // topPercent / bottomPercent 只在设置页预览里算，桌面根本没读 → 调了纹丝不动。
+        // 改为上游 LauncherScreen.kt:1012-1013 同构：layout(viewportHeightDp, entryCount)
+        // 统一算 top/height（viewport 用整屏 maxHeight，与上游一致）。
+        val alphabetAppearance = state.settings.listAppearance.alphabet.normalized()
+        val railLayout = alphabetAppearance.layout(maxHeight.value, model.letters.size + 1)
+        val railHeight = railLayout.heightDp.dp
+        val railTop = railLayout.topDp.dp
 
         // （dimfix：壁纸模糊 fallback 层与 wallpaperTint 遮罩已上提为全屏兄弟层，
         // 见 BoxWithConstraints 之前 —— 原版 LauncherScreen.kt:731-734 同构层级）
-        val railTop = statusBarHeight + (safeHeight * 0.39f).coerceAtMost(safeHeight - railHeight - 72.dp).coerceAtLeast(0.dp)
 
         // ---- 首页（时钟 + widget + favorites）----
         // P5：LocalHomeAnimationTarget provides true（原版语义）——首页图标 target 标记
@@ -904,7 +911,7 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
         if (!editingHome && !pickerOpen && searchAlpha < 1f) AlphabetRail(
             autoHide = state.settings.hideAlphabet && !drawerOpen,
             // 上游同步 v1.1.8：A-Z 列表自定义外观（字形/间距/几何）直达桌面 rail
-            alphabet = state.settings.listAppearance.alphabet,
+            alphabet = alphabetAppearance,
             // 上游同步 v1.1.8 S2 补漏（LauncherScreen.kt:1030 逐字）：屏幕左边缘
             // 28dp 字母 scrub 触摸面（listAppearance.leftAlphabet，默认开）。
             // 模块 AlphabetRail 组件本身已带该参数，但此处漏传 → 左侧永远无效。

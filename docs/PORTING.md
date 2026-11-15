@@ -821,3 +821,23 @@ DIFF vs 桩文件:
   - 真机验收：两处图标一致，无 AppIcon fallback 日志。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.157-shortcut-favorites-173.apk`、
   `.build/out/HomeMode4Miui-v2.9.158-shortcut-icon-cache-174.apk`。
+
+### alphabet-rail-position（v2.9.159 / versionCode 175，2026-11-15）—— 字母表上下限设置不生效
+
+- [x] **症状（User 实锤）**：设置 → 外观 → 字母表里调「顶部 / 底部」位置，设置页预览会动，桌面字母条**纹丝不动**。
+- [x] **根因**：桌面渲染端根本没消费 `AlphabetAppearance.topPercent / bottomPercent`。
+  `GraceLauncherRoute` 里 rail 几何是硬编码常量：
+  `railHeight = ((letters.size + 1) * 18).dp.coerceAtMost(safeHeight * 0.65f)`、
+  `railTop = statusBarHeight + safeHeight * 0.39f`；`layout(viewportHeightDp, entryCount)`
+  只在设置页预览里被调用。
+- [x] **修复（对齐上游 `LauncherScreen.kt:1012-1013` 逐字）**：
+  ```kotlin
+  val alphabetAppearance = state.settings.listAppearance.alphabet.normalized()
+  val railLayout = alphabetAppearance.layout(maxHeight.value, model.letters.size + 1)
+  val railHeight = railLayout.heightDp.dp
+  val railTop = railLayout.topDp.dp
+  ```
+  `alphabet` 参数同步传 normalized 版本；`touchHeight` 仍为整屏（scrub 手势面不受位置设置影响）。
+  `normalized()` 保证 `bottomPercent > topPercent`（上下限填反自动修正）。
+- [x] **验证**：装机后字母条按设置值定位，scrub 跳转正常，用户确认"已经可以了"。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.159-alphabet-rail-position-175.apk`。
