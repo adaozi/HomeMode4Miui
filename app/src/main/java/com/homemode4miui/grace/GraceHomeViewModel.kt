@@ -28,7 +28,6 @@
 package com.homemode4miui.grace
 
 import android.app.Application
-import android.app.NotificationManager
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.BroadcastReceiver
@@ -62,7 +61,6 @@ import com.galaxyrio.gracelauncher.data.PopupItem
 import com.galaxyrio.gracelauncher.data.LauncherShortcut
 import com.galaxyrio.gracelauncher.data.ShortcutRepository
 import com.galaxyrio.gracelauncher.data.ShortcutResult
-import com.galaxyrio.gracelauncher.data.media.MediaAccess
 import com.galaxyrio.gracelauncher.data.media.MediaCommand
 import com.galaxyrio.gracelauncher.data.media.MediaSessionRepository
 import com.galaxyrio.gracelauncher.data.media.NowPlaying
@@ -100,7 +98,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                 val w = _uiState.value.weather
                 if (w.status == WeatherStatus.Disabled) null else GraceBridge.encodeWeatherWire(w)
             },
-            onWeatherRefresh = { weatherHostEngine.refresh("settings") },
+            onWeatherRefresh = { refreshWeatherForSettings() },
             appCatalog = {
                 _uiState.value.apps.map { app ->
                     com.homemode4miui.bridge.GraceSettingsBridge.AppWire(
@@ -112,18 +110,10 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             })
     }
     /**
-     * B6.2 天气宿主引擎：小米天气 provider 白名单放行 com.miui.home、拒绝模块
-     * App 进程（装机实锤 hasAccessProvider 日志），读取在【本进程】进行，
-     * 结果进程内直推 uiState；设置页经快照 weatherJson 回带。
-     * 两个引擎互相引用（设置刷新 ↔ 天气回推快照），by lazy 断开初始化环。
+     * B6.2 天气宿主引擎**已迁至 WeatherFeed**（2026-11-15 拆分第 3 步）。
+     * 原先那两个引擎互相引用（设置刷新 ↔ 天气回推快照）靠 by lazy 断开初始化环，
+     * 现在由 VM 注入两个 lambda（preferredLocationId / onSnapshotInvalidated）实现同样的解耦。
      */
-    private val weatherHostEngine: GraceWeatherHostEngine by lazy {
-        GraceWeatherHostEngine(
-            application, viewModelScope,
-            preferredLocationId = { settingsHostEngine.currentWeatherLocationId() },
-            onState = ::onWeatherState,
-        )
-    }
     /** 上游同步 v1.1.8 S8b：图标渲染管线（Grace 按钮 artwork 面专用；settings 传入逐次构造）。
      *  context 必须是【模块资源 Context】：ItemIconStore/GraceButtonIcon 解析模块
      *  drawable/string——宿主 MiuiResources 无模块 R id（NotFound）或同 ID 错位
@@ -158,6 +148,25 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** 日程域（2026-11-15 拆分第 2 步）：events / scheduleStatus 与日历失效链的持有者。 */
     private val agenda = AgendaFeed(application, viewModelScope, _uiState)
+
+    /** 天气域（拆分第 3 步）：weather 状态 + 小米天气 provider 直读引擎。 */
+    private val weather = WeatherFeed(
+        application = application,
+        scope = viewModelScope,
+        uiState = _uiState,
+        // 首选城市是设置域的数据（宿主 Room 行），以 lambda 注入避免域间持有
+        preferredLocationId = { settingsHostEngine.currentWeatherLocationId() },
+        onSnapshotInvalidated = { settingsHostEngine.pushSnapshot() },
+    )
+
+    /** 桥快照域（拆分第 4 步）：通知/媒体状态、回放抑制三段时间窗、命令上行。 */
+    private val bridge = BridgeInbox(
+        application = application,
+        scope = viewModelScope,
+        uiState = _uiState,
+        // 回前台顺带补读日程（后台期间日历可能被改）
+        onReturnedToForeground = { refreshAgenda() },
+    )
 
     /**
      * P2：Home 键回桌面请求流（GraceHomeView.onHomeIntent 转发）。路由层收集后
@@ -248,41 +257,13 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** P6：图标包开关变化 → 重刷应用列表（渲染装饰跟随包顺序）。 */
     private var lastIconPacks: List<String>? = null
 
-    // ---- 桥快照摄入节流（v2.9.125-notif-burst）----
-    /**
-     * 宿主桌面是否在前台（GraceHomeView.onHomeAttached / onHomePaused 同步）。
-     *
-     * 装机实锤症状：长时间不打开桌面后突然回桌面，通知预览会把这期间的历史整批
-     * 逐条回放一遍，最后才停在最新一条。根因：模块进程在桌面后台期间每有一条
-     * 通知变化就发一次广播（指纹去重只挡内容相同的重复），宿主侧 onReceive 又
-     * 逐条直写 uiState —— 桌面进程被 MIUI 冻结/限流时这批广播在主线程排队，
-     * 解冻（回桌面）后逐条 deliver，每条都触发一次重组/布局 → 视觉上就是"回放"。
-     * 修复：后台只把最新一份滚动进 pending（不产生任何 state 变更），回前台一次性
-     * 应用；前台则做 80ms 合并窗口，把同一批投递压成一次更新。
-     * hook 5b 未命中的宿主版本上本标志恒 true，行为等同旧版（安全降级）。
-     */
-    @Volatile
-    private var hostForeground = true
-    /** 后台期间/合并窗口内到达的最新通知快照（滚动覆盖，只保留最后一份）。 */
-    private var pendingNotifications: Map<String, List<AppNotification>>? = null
-    /** 同上，媒体快照（含 artChanged，应用时仍要按 revision 沿用旧封面）。 */
-    private var pendingMedia: Pair<NowPlaying?, Boolean>? = null
-    private var snapshotFlushScheduled = false
-    /** 回前台宽限期截止时刻（uptimeMillis）：系统可能正在把冻结期间积压的广播逐条投递。 */
-    private var graceUntilUptime = 0L
-    private var graceFlushJob: Job? = null
-    /** 上次向模块进程拉全量的时刻（uptimeMillis），防可见性抖动反复拉取。 */
-    private var lastSnapshotPullUptime = 0L
+    // ---- 桥快照摄入节流（v2.9.125-notif-burst）：已迁至 BridgeInbox（拆分第 4 步）----
+    // 三个时间窗（80ms 合并 / 后台 pending / 回前台 700ms 宽限）与相关字段全部在新类内，
+    // 不要拆散 —— 它们共同保证"冻结解冻后不回放历史通知"这一行为。
 
-    // ---- 日程失效链（v2.9.126-agenda-live）：已迁至 AgendaFeed（2026-11-15 拆分第 2 步）----
+    // ---- 日程失效链（v2.9.126-agenda-live）：已迁至 AgendaFeed（拆分第 2 步）----
 
     private companion object {
-        /** 桥快照合并窗口：同批广播（回桌面后逐条 deliver / 通知风暴）压成一次更新。 */
-        const val SNAPSHOT_COALESCE_MS = 80L
-        /** 回桌面宽限期：冻结期积压的投递通常在这段时间内排空，期间只应用最后一份。 */
-        const val SNAPSHOT_GRACE_MS = 700L
-        /** 回前台拉全量的最小间隔（可见性抖动/连续 onResume 去重）。 */
-        const val SNAPSHOT_PULL_MIN_INTERVAL_MS = 3_000L
         /** 回桌面触发的 pinned 对账最小间隔（系统推送走 force=true，不受限）。 */
         const val PINNED_SYNC_MIN_INTERVAL_MS = 5_000L
     }
@@ -352,7 +333,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             ContextCompat.RECEIVER_EXPORTED)
         // notif1：挂载即拉取快照 —— 引擎指纹去重是模块进程持久单例，桌面重启后
         // 重启前的通知/媒体快照不会重发（要等新通知/切歌），必须显式拉取。
-        sendBridgeCommand(GraceBridge.Cmd.SNAPSHOT_REFRESH)
+        bridge.requestSnapshot()
         // 壁纸跟随失效源注册（见 wallpaperRevision 注释）；shutdown 侧解绑
         runCatching {
             android.app.WallpaperManager.getInstance(application)
@@ -362,7 +343,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         ContextCompat.registerReceiver(application, wallpaperReceiver,
             IntentFilter(Intent.ACTION_WALLPAPER_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         // B6.2：天气首装载（本进程直读小米天气 provider；后续 ContentObserver 失效）
-        weatherHostEngine.refresh("mount")
+        weather.refresh("mount")
         // P3：Room 设置接管 —— SP seed 迁移（一次性）+ 行变化流常驻跟随
         settingsJob = viewModelScope.launch {
             val initial = settingsRepository.loadInitial()
@@ -1270,20 +1251,12 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ================= P6（B6.x）附属特性 =================
 
-    /** B6.1：通知监听权限探测（模块 App 的 listener 组件；公开 API 任意进程可查）。 */
-    fun refreshMediaAccess() {
-        val context = getApplication<Application>()
-        val granted = runCatching {
-            context.getSystemService(NotificationManager::class.java)
-                .isNotificationListenerAccessGranted(MediaAccess.component(context))
-        }.getOrDefault(false)
-        _uiState.update { it.copy(hasMediaAccess = granted) }
-    }
+    /** B6.1：通知监听权限探测（实现见 BridgeInbox：模块 App 的 listener 组件，公开 API 任意进程可查）。 */
+    fun refreshMediaAccess() = bridge.refreshMediaAccess()
 
     /**
-     * B6.2：日程刷新（2026-11-15 拆分第 2 步 —— 实现搬到 AgendaFeed：
-     * 权限探测 / 静默刷新 / ContentObserver 失效链 / 查询降级全在那边）。
-     * 本方法保留为对外签名，Route 与 onHostResumed 的调用点不用改。
+     * B6.2：日程刷新（拆分第 2 步 —— 实现搬到 AgendaFeed：权限探测 / 静默刷新 /
+     * ContentObserver 失效链 / 查询降级全在那边）。本方法保留为对外签名。
      */
     fun refreshAgenda() = agenda.refresh()
 
@@ -1293,191 +1266,37 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun openCalendarApp(): Boolean = agenda.openCalendarApp()
 
-    // ---- 桥快照摄入（GraceBridgeReceiver 转发）----
+    // ---- 桥快照摄入（GraceBridgeReceiver 转发；实现见 BridgeInbox）----
 
-    fun onBridgeMedia(media: NowPlaying?, artChanged: Boolean) {
-        pendingMedia = media to artChanged
-        if (!hostForeground) return          // 后台：只滚动 pending，零重组
-        if (inResumeGrace()) return          // 回桌面宽限期：由宽限收尾统一应用最后一份
-        scheduleSnapshotFlush()
-    }
+    fun onBridgeMedia(media: NowPlaying?, artChanged: Boolean) = bridge.onMedia(media, artChanged)
 
-    fun onBridgeNotifications(notifications: Map<String, List<AppNotification>>) {
-        // 与"目标状态"（后台/合并窗口内以 pending 为准，否则以当前 uiState 为准）相同
-        // 说明没有新信息，直接丢弃。不能比 Map equals：AppNotification.icon 是 Icon 对象，
-        // 每次解码都是新实例，引用不等会让"内容相同"判定失效 —— 用 key + revision 指纹。
-        val target = pendingNotifications ?: _uiState.value.notifications
-        if (sameNotifications(target, notifications)) return
-        pendingNotifications = notifications
-        if (!hostForeground) return          // 后台：只滚动 pending，零重组
-        if (inResumeGrace()) return          // 回桌面宽限期：同上
-        scheduleSnapshotFlush()
-    }
+    fun onBridgeNotifications(notifications: Map<String, List<AppNotification>>) =
+        bridge.onNotifications(notifications)
 
-    /** 通知快照语义相等（key + revision 已能唯一确定一条通知的内容版本）。 */
-    private fun sameNotifications(
-        a: Map<String, List<AppNotification>>,
-        b: Map<String, List<AppNotification>>,
-    ): Boolean {
-        if (a === b) return true
-        if (a.size != b.size) return false
-        for ((pkg, left) in a) {
-            val right = b[pkg] ?: return false
-            if (left.size != right.size) return false
-            for (i in left.indices) {
-                if (left[i].key != right[i].key || left[i].revision != right[i].revision) return false
-            }
-        }
-        return true
-    }
+    /** 宿主桌面退后台 / 回前台（实现在 BridgeInbox：后台只滚动 pending，回前台一次性应用 + 700ms 宽限）。 */
+    fun onHostPaused() = bridge.onHostPaused()
 
-    /** 是否处于"刚回桌面"的宽限期（见 SNAPSHOT_GRACE_MS 注释）。 */
-    private fun inResumeGrace(): Boolean =
-        graceUntilUptime > 0L && android.os.SystemClock.uptimeMillis() < graceUntilUptime
-
-    /**
-     * 快照合并落状态（前台路径）。
-     *
-     * 同一批广播（回桌面后主线程序列 deliver、或通知风暴）在 [SNAPSHOT_COALESCE_MS]
-     * 窗口内只应用最后一份 —— 逐条应用会让通知预览把历史整串闪一遍。80ms 对通知
-     * 预览的观感不可感知（远低于一次通知切换的人类可辨阈值），但足以把一整批投递
-     * 压成一次 uiState 变更。
-     */
-    private fun scheduleSnapshotFlush() {
-        if (snapshotFlushScheduled) return
-        snapshotFlushScheduled = true
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(SNAPSHOT_COALESCE_MS)
-            snapshotFlushScheduled = false
-            applyPendingSnapshots()
-        }
-    }
-
-    /** 立即应用 pending（回前台路径：不等待合并窗口，首帧就要最新内容）。 */
-    private fun applyPendingSnapshots() {
-        pendingNotifications?.let { next ->
-            pendingNotifications = null
-            _uiState.update {
-                if (sameNotifications(it.notifications, next)) it else it.copy(notifications = next)
-            }
-        }
-        pendingMedia?.let { (media, artChanged) ->
-            pendingMedia = null
-            applyMedia(media, artChanged)
-        }
-    }
-
-    /** 媒体快照应用（原 onBridgeMedia 主体：封面未随包变化时沿用旧封面）。 */
-    private fun applyMedia(media: NowPlaying?, artChanged: Boolean) {
-        _uiState.update { current ->
-            // 封面未随包变化时沿用旧封面（artKey = sessionId+revision 的引擎侧去重约定）
-            val merged = if (media != null && !artChanged && media.artwork == null) {
-                val previous = current.homeMedia
-                if (previous?.sessionId == media.sessionId && previous.revision == media.revision) {
-                    media.copy(artwork = previous.artwork)
-                } else media
-            } else media
-            current.copy(homeMedia = merged)
-        }
-    }
-
-    /**
-     * 宿主桌面退后台（GraceHomeView.onHomePaused → Launcher.onPause，perf3 同链）。
-     * 之后到达的桥快照只进 pending：后台不产生重组，也避免冻结解冻后整批回放。
-     */
-    fun onHostPaused() {
-        if (!hostForeground) return          // 幂等（visibility 与 onPause 双通道都会打进来）
-        hostForeground = false
-        ModLog.i("host paused: bridge snapshots now coalesced (no recompose)")
-    }
-
-    /**
-     * 宿主桌面回前台（GraceHomeView.onHomeAttached 复用分支 / onVisibilityAggregated）。
-     *
-     * 处理顺序：
-     * ① 立即应用后台期间已滚动到 pending 的最新一份（冻结前收到的最后状态）；
-     * ② 开一个 [SNAPSHOT_GRACE_MS] 宽限期 —— 冻结期间积压的广播通常在解冻后紧接着
-     *    逐条 deliver，宽限期内只滚动 pending 不落 state，收尾时一次性应用最后一份，
-     *    视觉上直接停在最新通知，不再"整段回放"；
-     * ③ 向模块进程拉一次全量（长时间后台可能被省电策略冻结甚至杀进程，期间的通知
-     *    变化根本没送达，只靠 pending 会停在旧内容）。引擎侧 refreshSnapshots 清指纹
-     *    重发，内容相同则被相等短路，无 UI 抖动。
-     */
-    fun onHostResumed() {
-        val wasBackground = !hostForeground
-        hostForeground = true
-        applyPendingSnapshots()
-        if (!wasBackground) return
-        ModLog.i("host resumed: grace=${SNAPSHOT_GRACE_MS}ms (stale burst suppressed)")
-        // 回桌面补读日程：后台期间日历可能被改（ContentObserver 之外的兜底 ——
-        // 宿主进程被冻结时 observer 回调同样会排队/丢失）。静默刷新不闪。
-        refreshAgenda()
-        graceUntilUptime = android.os.SystemClock.uptimeMillis() + SNAPSHOT_GRACE_MS
-        graceFlushJob?.cancel()
-        graceFlushJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(SNAPSHOT_GRACE_MS)
-            graceUntilUptime = 0L
-            applyPendingSnapshots()
-            ModLog.i("host resume grace flush: apps=" +
-                _uiState.value.notifications.size + " entries=" +
-                _uiState.value.notifications.values.sumOf(List<*>::size))
-            val now = android.os.SystemClock.uptimeMillis()
-            if (now - lastSnapshotPullUptime >= SNAPSHOT_PULL_MIN_INTERVAL_MS) {
-                lastSnapshotPullUptime = now
-                sendBridgeCommand(GraceBridge.Cmd.SNAPSHOT_REFRESH)
-            }
-        }
-    }
-
-    /**
-     * B6.2 天气状态入口：宿主引擎直推（原桥广播路径随天气读取上移废止）。
-     * 更新 uiState 后回推设置快照 —— 设置页天气经快照回带，保证地点选择器/
-     * 状态行与桌面同源。
-     */
-    fun onWeatherState(weather: WeatherState) {
-        if (_uiState.value.weather == weather) return
-        _uiState.update { it.copy(weather = weather) }
-        settingsHostEngine.pushSnapshot()
-    }
+    fun onHostResumed() = bridge.onHostResumed()
 
     // ---- 命令上行（宿主 → 模块 App 进程；命令在持有 token 的进程内执行）----
 
-    private fun sendBridgeCommand(cmd: String, arg1: String? = null, arg2: String? = null) {
-        runCatching {
-            val app = getApplication<Application>()
-            // 2026-11-15：命令附带能力令牌（GraceCommandReceiver 校验，见 BridgeToken）
-            app.sendBroadcast(GraceBridge.command(app, cmd, arg1, arg2))
-        }.onFailure { ModLog.e("GraceHomeViewModel sendBridgeCommand($cmd) failed", it) }
-    }
-
     /** B6.1：媒体控制（上一首/播放暂停/下一首/打开播放器）。 */
-    fun controlMedia(sessionId: String, command: MediaCommand) {
-        sendBridgeCommand(GraceBridge.Cmd.MEDIA_COMMAND, sessionId, GraceBridge.mediaCommandName(command))
-    }
+    fun controlMedia(sessionId: String, command: MediaCommand) = bridge.controlMedia(sessionId, command)
 
     /** B6.1：本地划走（原版 dismiss 语义：只影响本桌面显示，不取消系统通知）。 */
-    fun dismissMedia(sessionId: String, revision: Long): Boolean {
-        sendBridgeCommand(GraceBridge.Cmd.MEDIA_DISMISS, sessionId, revision.toString())
-        // 原版立即本地消失由 store 状态驱动；跨进程简化为命令发出后 UI 等快照更新
-        return true
-    }
+    fun dismissMedia(sessionId: String, revision: Long): Boolean = bridge.dismissMedia(sessionId, revision)
 
     /** B6.3：打开通知（contentIntent 由模块 App 进程以 BAL 选项发送）。 */
-    fun openNotification(key: String, revision: Long): Boolean {
-        sendBridgeCommand(GraceBridge.Cmd.NOTIFICATION_OPEN, key, revision.toString())
-        return true
-    }
+    fun openNotification(key: String, revision: Long): Boolean = bridge.openNotification(key, revision)
 
     /** B6.3：清除通知（系统侧 cancel，原版"等 onNotificationRemoved"语义经快照回流）。 */
-    fun dismissNotification(key: String, revision: Long): Boolean {
-        sendBridgeCommand(GraceBridge.Cmd.NOTIFICATION_DISMISS, key, revision.toString())
-        return true
-    }
+    fun dismissNotification(key: String, revision: Long): Boolean = bridge.dismissNotification(key, revision)
 
-    /** B6.2：天气刷新请求（宿主进程内直读小米天气 provider；ContentObserver 常驻失效）。 */
-    fun refreshWeather() {
-        weatherHostEngine.refresh("manual")
-    }
+    /** B6.2：天气刷新请求（实现见 WeatherFeed；宿主进程内直读小米天气 provider）。 */
+    fun refreshWeather() = weather.refresh("manual")
+
+    /** 设置页「刷新天气」命令入口（reason 独立，排障时能和手动刷新区分开）。 */
+    private fun refreshWeatherForSettings() = weather.refresh("settings")
 
     // ---- B6.4：图标包选择（面板数据 + 单选落库）----
 
@@ -1515,8 +1334,9 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         // v2.9.126：日程失效监听解绑（实现已迁 AgendaFeed，dispose 负责 job + observer）
         agenda.dispose()
         // B6.2：天气引擎停摆（反注册 ContentObserver；VM 每次 attach 新建，dispose 即终态）
-        runCatching { weatherHostEngine.dispose() }
-            .onFailure { ModLog.e("GraceHomeViewModel weatherHostEngine.dispose failed", it) }
+        weather.dispose()
+        // 桥快照域：取消宽限期收尾 job + 清 pending
+        bridge.dispose()
         runCatching { shortcutRepository.close() }
             .onFailure { ModLog.e("GraceHomeViewModel shortcutRepository.close failed", it) }
         runCatching { getApplication<Application>().unregisterReceiver(packageReceiver) }
