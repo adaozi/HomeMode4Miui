@@ -891,3 +891,58 @@ DIFF vs 桩文件:
 - [ ] **待装机**：覆盖安装后 LSPosed 作用域页应自动勾选两项（无 PA 机型只有桌面一项）；
   有 PA 机型确认 `loaded into com.miui.personalassistant (PaWidgetGuard)` 日志出现。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.161-static-scope-pa-177.apk`。
+
+---
+
+## 上游同步战役：GraceLauncher v1.2.0 → v1.2.4（2026-11-15 起，批次 P0~P9）
+
+### P0 地基（v2.9.164-p0-upstream124 / versionCode 180，2026-11-15）
+
+**delta 基线**（`git diff` 语义统计，LF 归一化后）：
+
+| 项 | 值 |
+| --- | --- |
+| 上游版本 | v1.2.0（vc12，2026-10-18）→ **v1.2.4（vc16，2026-11-13）**，中间含 1.2.1/1.2.2/1.2.3 |
+| 文件增量 | 新增 168（86 个 .kt + 82 个 res），删除 0，修改 113（其中 .kt 100 个，8697 行） |
+| 模块映射 | 83 个改动文件模块已移植（36 个三方合并零冲突 / 47 个有冲突）；17 个改动文件模块未移植；86 个新 .kt 模块全部没有 |
+| DB | 模块 v24 → 上游 v34（10 个迁移，均为 `launcher_settings` 加列） |
+| 文案 | 新增 539 条英文 + 538 条中文（与宿主 string 同名仅 2 条，已按铁律改 `grace_` 前缀） |
+
+**三方合并预演方法（后续批次复用）**：逐文件
+`sed 's/\r$//'` 归一化后 `git merge-file -p --diff3 <模块> <1.2.0> <1.2.4>`，
+冲突块用「ours 段 + theirs 段」语义合并；判据 = 模块相对 1.2.0 是否存在**独有声明**
+（`val/fun/class` 名集合差集）：无独有声明 → 直接用上游新版；有 → 手工叠加上游改动。
+
+**本批交付**：
+
+- [x] 源码副本 bump：`GraceLauncher-src/` → v1.2.4（旧版备份 `.workbuddy/tmp/GraceLauncher-src-v1.2.0/`，三方合并 base 来源）。
+- [x] DB v24→v34：补 `Migration24To25`..`Migration33To34`（含 26→27 三列 + `dismissResistance=75`
+  初始化），`version = 34`，迁移链注册齐全。`widgetScreenJson` 上游在 v23 添加、本仓当时跳过，
+  本批并入 24→25，使**模块 v25 起列集合与上游完全一致**，后续迁移可逐字沿用。
+- [x] schema 自检：导出 `app/schemas/.../34.json` 与上游 34.json 逐表逐列比对 —— 表集合一致、
+  列/类型/默认值全一致，唯一差异是本仓独有 `saved_shortcuts.dismissed`（v2.9.141 快捷方式三连修，保留）。
+- [x] `LauncherSettings` 补齐 13 字段（allowScreenRotation / mediaKeepWhilePlaying / dismissResistance /
+  dismissThresholdDp / mediaStyle / weatherConnection / agendaAppearance / fontColors / digitalWellbeing /
+  widgetScreen / appCategories / preferNonAccessibility / calendar），`LauncherSettingsRepository`
+  双向编解码同步（`toSettings()` + `updateSettings()`）；`DEFAULT_THEME_COLOR` 单一事实源保留。
+- [x] 新增数据类 19 个（零 UI 依赖）：AgendaAppearance/AgendaEntry/AppCategory/CalendarPreferences/
+  ClockContent/ClockRegions/ClockTasks/DigitalWellbeing/FontColors/LauncherCatalogMemory/LauncherProfiles/
+  MaterialColorRole/MediaPlayerStyle/RenamedApps/UsageRepository/AppOpenHistory/WidgetScreen/
+  weather:WeatherConnectionPreferences/tasks:{TaskItem,TasksPreferences,TasksRepository}。
+- [x] `PopupItem.grid` 恢复（上游 1.2.0 就有，本仓当年裁剪）：`encode/decode` 双向 + `WidgetGridPlacement`。
+- [x] `LauncherApp.isCloneProfile`（1.2.2 分身应用）；`LauncherShortcut` 同步 `iconCacheKey` /
+  clone 透传，并从 `ShortcutRepository` 移除重复声明（本仓独立文件为准）。
+- [x] 资源：139 个 `ms_*` 矢量图标（75 个新增）+ `xml/locales_config.xml` + 539/538 条文案。
+  文案铁律：`edit_folder`/`uninstall` 与宿主 `com.miui.home` 资源同名 → 改名 `grace_edit_folder`/`grace_uninstall`。
+- [x] `normalizeHomeOrder()` 以本仓语义補齐（GraceWidget 仍分离 Clock/Calendar，只做去重）——
+  P3 合并 clock+calendar 后再换成上游的 key 映射。
+- [x] 构建：`assembleRelease` 通过；产物 `.build/out/HomeMode4Miui-v2.9.164-p0-upstream124-180.apk`。
+
+**本批刻意缓后（各归其批次，避免一次改动面过大）**：`HomeContent`（GraceWidget 合并）、`HomeLayout`
+（clockCalendarEnabled/editingLocked）、`ListAppearance`（AppListLayout/Neither）、`AppRepository`、
+`CalendarRepository`、`MediaPlayback`/`MediaSessionRepository`（media3 依赖未引入）、`AppNotificationStore`、
+`ItemIconStore`/`IconPackRepository`（IconSnapshotCache 与 materialRole 渲染）、`ShortcutRepository` 本体、
+`weather/*`、`AppListLayout`、`LauncherAppCache`/`PrivateAppCache`。
+
+**待装机**：覆盖安装后确认 ① 桌面正常进第四模式零崩溃；② 设置页/抽屉/收藏全部照常（本批不改行为，
+只加列与模型）；③ `logcat` 无 Room 迁移异常（`Migration didn't properly handle`）。

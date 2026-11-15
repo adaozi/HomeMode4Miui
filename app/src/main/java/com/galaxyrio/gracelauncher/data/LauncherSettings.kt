@@ -1,10 +1,11 @@
 package com.galaxyrio.gracelauncher.data
 
 import com.materialkolor.PaletteStyle
+import com.galaxyrio.gracelauncher.data.weather.WeatherConnectionPreferences
 
 enum class ThemeMode { System, Light, Dark }
 
-// C 组搬运注记：原版此处的 AppFont 枚举未随搬（本仓 data/AppFont.kt 已承载，P1 字体链路）。
+// 搬运注记：原版此处的 AppFont 枚举已由本仓 data/AppFont.kt 承载（P1 字体链路）。
 
 data class LauncherSettings(
     val clockEnabled: Boolean = true,
@@ -12,6 +13,7 @@ data class LauncherSettings(
     val calendarAboveClock: Boolean = false,
     val showBatteryPercentage: Boolean = true,
     val allowHapticFeedback: Boolean = true,
+    val allowScreenRotation: Boolean = true,
     val useDynamicColors: Boolean = true,
     val themeColor: Int = DEFAULT_THEME_COLOR,
     val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
@@ -23,13 +25,19 @@ data class LauncherSettings(
     val iconDesign: ItemIcon? = null,
     val mediaPlayer: Boolean = true,
     val mediaAlwaysVisible: Boolean = false,
+    val mediaKeepWhilePlaying: Boolean = true,
+    val dismissResistance: Int = 75,
+    val dismissThresholdDp: Int = 72,
     val mediaAppKey: String? = null,
+    val mediaStyle: MediaPlayerStyle = MediaPlayerStyle(),
     val weatherEnabled: Boolean = false,
     val weatherForecastDays: Int = 7,
     val weatherLocationId: String? = null,
+    val weatherConnection: WeatherConnectionPreferences = WeatherConnectionPreferences(),
     /** null delegates to Android's standard SHOW_ALARMS action. */
     val clockAppKey: String? = null,
     val clockStyle: ClockStyle = ClockStyle(),
+    val agendaAppearance: AgendaAppearance = AgendaAppearance(),
     val homeLayout: HomeLayout = HomeLayout(),
     val hideStatusBar: Boolean = true,
     val hideAlphabet: Boolean = false,
@@ -42,14 +50,21 @@ data class LauncherSettings(
     /** Legacy selection, used only when migrating to the ordered font library. */
     val appFontId: String? = null,
     val fontLibrary: FontLibrary = FontLibrary(),
+    val fontColors: FontColors = FontColors(),
     val listAppearance: ListAppearance = ListAppearance(),
     val applyFontToSettings: Boolean = true,
     val privateSpace: ProfileSettings = ProfileSettings(),
     val workProfile: ProfileSettings = ProfileSettings.workDefaults(),
     val search: SearchSettings = SearchSettings(),
     val shortcutsFolders: ShortcutsFoldersSettings = ShortcutsFoldersSettings(),
+    val digitalWellbeing: DigitalWellbeingSettings = DigitalWellbeingSettings(),
     val graceButton: GraceButtonSettings = GraceButtonSettings(),
     val homeGestures: GraceButtonSettings = GraceButtonSettings.homeDefaults(),
+    val widgetScreen: WidgetScreenSettings = WidgetScreenSettings(),
+    /** Null until the legacy favorite order has been migrated. */
+    val appCategories: List<AppCategory>? = null,
+    val preferNonAccessibility: Boolean = false,
+    val calendar: CalendarPreferences = CalendarPreferences(),
 ) {
     /** Icon designer overrides precede this order; system icons always follow it. */
     val enabledIconPackPackages: List<String>
@@ -90,6 +105,7 @@ enum class FolderPlacement(val inFavorites: Boolean, val inAppList: Boolean) {
 }
 
 const val RecentlyInstalledFolderId = "recently-installed"
+const val RecentlyInstalledFolderKey = "folder:$RecentlyInstalledFolderId"
 
 data class LauncherFolder(
     val id: String,
@@ -100,14 +116,14 @@ data class LauncherFolder(
     val appListAtBottom: Boolean = true,
     /** Membership-derived hiding never changes the explicit hidden-app table. */
     val autoHideApps: Boolean = false,
-    /** 上游同步 1.2.0：同一套成员/位置存储，但渲染成横向应用堆而不是有名字的文件夹。 */
+    /** Same membership/placement storage, rendered inline instead of as a named folder. */
     val isAppStack: Boolean = false,
 ) {
     val key: String get() = "folder:$id"
 
     /** Local identity only: folders must never be sent to Android as activities. */
     fun asApp() = LauncherApp(
-        componentName = android.content.ComponentName("com.homemode4miui", key),
+        componentName = android.content.ComponentName("com.galaxyrio.gracelauncher", key),
         label = name, icon = null, folderId = id, isAppStack = isAppStack,
     )
 }
@@ -115,10 +131,10 @@ data class LauncherFolder(
 /** A complete first emission is available only after all Room tables have loaded. */
 data class LauncherStorageSnapshot(
     val settings: LauncherSettings = LauncherSettings(),
+    /** Explicit, manually hidden keys only. */
     val hiddenAppKeys: Set<String> = emptySet(),
     val folders: List<LauncherFolder> = emptyList(),
 ) {
-    /** Explicit, manually hidden keys only. */
     val folderHiddenAppKeys: Set<String> get() = hiddenAppsFromFolders(folders)
     val effectiveHiddenAppKeys: Set<String> get() = hiddenAppKeys + folderHiddenAppKeys
 }

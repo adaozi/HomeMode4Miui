@@ -47,6 +47,8 @@ data class LauncherApp(
     val originalIconColor: Int? = null,
     /** 上游同步 1.2.0：该文件夹项是否以横向应用堆（App Stack）形式渲染。 */
     val isAppStack: Boolean = false,
+    /** 上游 1.2.2：克隆/分身应用与个人应用并列，只有自己的用户身份与角标。 */
+    val isCloneProfile: Boolean = false,
 ) {
     val key: String = folderId?.let { "folder:$it" } ?: shortcut?.key
         ?: userSerial?.let { "profile:$it:${componentName.flattenToString()}" } ?: componentName.flattenToString()

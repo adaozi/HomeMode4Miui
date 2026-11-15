@@ -50,12 +50,15 @@ data class ItemIcon(val kind: String, val source: String = "", val name: String 
 }
 
 /** Items reference the same app/shortcut identity everywhere; widgets own a separate host ID. */
-data class PopupItem(val key: String, val widget: HomeLayout? = null) {
+data class PopupItem(val key: String, val widget: HomeLayout? = null,
+    /** 上游 1.2.4：仅 Widget screen 消费（网格位）；其余混合内容表面仍是有序列表。 */
+    val grid: WidgetGridPlacement? = null) {
     companion object {
         fun encode(items: List<PopupItem>): String = JSONArray().apply {
             items.distinctBy { it.key }.forEach { item -> put(JSONObject().apply {
                 put("key", item.key)
                 item.widget?.let { put("widget", JSONObject(it.encode())) }
+                item.grid?.let { put("grid", it.json()) }
             }) }
         }.toString()
         fun decode(json: String): List<PopupItem> = runCatching {
@@ -63,7 +66,8 @@ data class PopupItem(val key: String, val widget: HomeLayout? = null) {
             (0 until array.length()).mapNotNull { index ->
                 val entry = array.getJSONObject(index)
                 val key = entry.optString("key").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                PopupItem(key, entry.optJSONObject("widget")?.let { HomeLayout.decode(it.toString()) })
+                PopupItem(key, entry.optJSONObject("widget")?.let { HomeLayout.decode(it.toString()) },
+                    WidgetGridPlacement.decode(entry.optJSONObject("grid")))
             }.distinctBy { it.key }
         }.getOrDefault(emptyList())
     }

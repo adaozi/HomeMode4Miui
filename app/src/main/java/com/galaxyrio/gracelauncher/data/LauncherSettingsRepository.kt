@@ -1,6 +1,7 @@
 package com.galaxyrio.gracelauncher.data
 
 import androidx.room.withTransaction
+import com.galaxyrio.gracelauncher.data.weather.WeatherConnectionPreferences
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -46,11 +47,16 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
             clockEnabled = settings.clockEnabled,
             calendarAboveClock = settings.calendarAboveClock,
             mediaAlwaysVisible = settings.mediaAlwaysVisible,
+            mediaKeepWhilePlaying = settings.mediaKeepWhilePlaying,
+            dismissResistance = settings.dismissResistance.coerceIn(0, 90),
+            dismissThresholdDp = settings.dismissThresholdDp.coerceIn(24, 160),
             mediaAppKey = settings.mediaAppKey,
+            mediaStyleJson = settings.mediaStyle.encode(),
             graceButtonJson = settings.graceButton.encode(),
             calendarAgenda = settings.calendarAgenda,
             showBatteryPercentage = settings.showBatteryPercentage,
             allowHapticFeedback = settings.allowHapticFeedback,
+            allowScreenRotation = settings.allowScreenRotation,
             useDynamicColors = settings.useDynamicColors,
             themeColor = settings.themeColor,
             paletteStyle = settings.paletteStyle.name,
@@ -64,8 +70,10 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
             weatherEnabled = settings.weatherEnabled,
             weatherForecastDays = settings.weatherForecastDays.coerceIn(1, 14),
             weatherLocationId = settings.weatherLocationId,
+            weatherConnectionJson = settings.weatherConnection.encode(),
             clockAppKey = settings.clockAppKey,
             clockStyleJson = settings.clockStyle.encode(),
+            agendaAppearanceJson = settings.agendaAppearance.encode(),
             homeLayoutJson = settings.homeLayout.encode(),
             hideStatusBar = settings.hideStatusBar,
             hideAlphabet = settings.hideAlphabet,
@@ -76,6 +84,7 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
             wallpaperBlurRadius = settings.wallpaperBlurRadius.coerceIn(0, 48),
             appFontId = settings.appFontId,
             fontLibraryJson = settings.fontLibrary.encode(),
+            fontColorsJson = settings.fontColors.encode(),
             listAppearanceJson = settings.listAppearance.encode(),
             applyFontToSettings = settings.applyFontToSettings,
             privateSpaceJson = settings.privateSpace.encode(),
@@ -83,6 +92,11 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
             homeGesturesJson = settings.homeGestures.encode(),
             searchJson = settings.search.encode(),
             shortcutsFoldersJson = settings.shortcutsFolders.encode(),
+            digitalWellbeingJson = settings.digitalWellbeing.encode(),
+            widgetScreenJson = settings.widgetScreen.encode(),
+            appCategoriesJson = settings.appCategories?.let(AppCategory::encode),
+            preferNonAccessibility = settings.preferNonAccessibility,
+            calendarPreferencesJson = settings.calendar.encode(),
         ))
     }
 
@@ -91,6 +105,23 @@ class LauncherSettingsRepository(private val database: LauncherDatabase) {
         database.withTransaction {
             val current = dao.readSettings()?.toSettings() ?: LauncherSettings()
             updateSettings(transform(current))
+        }
+    }
+
+    /**
+     * 上游 1.2.2/1.2.4：主页小组件从 homeLayout 迁到 home-content 弹层项（可多小组件）。
+     * 首次编辑 home-content 时幂等迁移；迁移后 homeLayout 只保留排序与位置。
+     */
+    suspend fun migrateLegacyHomeWidget() = database.withTransaction {
+        val current = dao.readSettings()?.toSettings() ?: LauncherSettings()
+        if (current.homeLayout.hasWidget) {
+            val layout = current.homeLayout
+            val items = database.itemsDao()
+            val previous = items.popup(HomeContentKey)?.let { PopupItem.decode(it.itemsJson) }.orEmpty()
+            val widget = PopupItem("widget:${layout.widgetId}", layout.copy(homeOrder = null))
+            items.savePopup(AppPopupEntity(HomeContentKey, PopupItem.encode((listOf(widget) + previous).distinctBy { it.key })))
+            updateSettings(current.copy(homeLayout = layout.withoutWidget().copy(
+                homeOrder = layout.homeOrder ?: legacyHomeOrder(current))))
         }
     }
 
@@ -156,11 +187,16 @@ private fun LauncherSettingsEntity.toSettings() = LauncherSettings(
     clockEnabled = clockEnabled,
     calendarAboveClock = calendarAboveClock,
     mediaAlwaysVisible = mediaAlwaysVisible,
+    mediaKeepWhilePlaying = mediaKeepWhilePlaying,
+    dismissResistance = dismissResistance.coerceIn(0, 90),
+    dismissThresholdDp = dismissThresholdDp.coerceIn(24, 160),
     mediaAppKey = mediaAppKey,
+    mediaStyle = MediaPlayerStyle.decode(mediaStyleJson),
     graceButton = GraceButtonSettings.decode(graceButtonJson),
     calendarAgenda = calendarAgenda,
     showBatteryPercentage = showBatteryPercentage,
     allowHapticFeedback = allowHapticFeedback,
+    allowScreenRotation = allowScreenRotation,
     useDynamicColors = useDynamicColors,
     themeColor = themeColor,
     paletteStyle = decodePaletteStyle(paletteStyle),
@@ -173,8 +209,10 @@ private fun LauncherSettingsEntity.toSettings() = LauncherSettings(
     weatherEnabled = weatherEnabled,
     weatherForecastDays = weatherForecastDays.coerceIn(1, 14),
     weatherLocationId = weatherLocationId,
+    weatherConnection = WeatherConnectionPreferences.decode(weatherConnectionJson),
     clockAppKey = clockAppKey,
     clockStyle = ClockStyle.decode(clockStyleJson),
+    agendaAppearance = AgendaAppearance.decode(agendaAppearanceJson),
     homeLayout = HomeLayout.decode(homeLayoutJson),
     hideStatusBar = hideStatusBar,
     hideAlphabet = hideAlphabet,
@@ -185,6 +223,7 @@ private fun LauncherSettingsEntity.toSettings() = LauncherSettings(
     wallpaperBlurRadius = wallpaperBlurRadius.coerceIn(0, 48),
     appFontId = appFontId,
     fontLibrary = FontLibrary.decode(fontLibraryJson, appFontId),
+    fontColors = FontColors.decode(fontColorsJson),
     listAppearance = ListAppearance.decode(listAppearanceJson, hideFavoriteNames),
     applyFontToSettings = applyFontToSettings,
     privateSpace = ProfileSettings.decode(privateSpaceJson),
@@ -192,6 +231,11 @@ private fun LauncherSettingsEntity.toSettings() = LauncherSettings(
     homeGestures = GraceButtonSettings.decode(homeGesturesJson, GraceButtonSettings.homeDefaults()),
     search = SearchSettings.decode(searchJson),
     shortcutsFolders = ShortcutsFoldersSettings.decode(shortcutsFoldersJson),
+    digitalWellbeing = DigitalWellbeingSettings.decode(digitalWellbeingJson),
+    widgetScreen = WidgetScreenSettings.decode(widgetScreenJson),
+    appCategories = AppCategory.decode(appCategoriesJson),
+    preferNonAccessibility = preferNonAccessibility,
+    calendar = CalendarPreferences.decode(calendarPreferencesJson),
 )
 
 private fun decodeIconPackOrder(json: String?): List<String> = runCatching {

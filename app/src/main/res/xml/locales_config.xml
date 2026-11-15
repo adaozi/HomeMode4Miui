@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep this list aligned with nonempty translations. The in-app picker reads
+     this same resource so it offers the languages exposed in Android Settings. -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="ar" />
+    <locale android:name="de" />
+    <locale android:name="el" />
+    <locale android:name="es" />
+    <locale android:name="fr" />
+    <locale android:name="gl" />
+    <locale android:name="it" />
+    <locale android:name="ja" />
+    <locale android:name="ko" />
+    <locale android:name="pt" />
+    <locale android:name="pt-BR" />
+    <locale android:name="ru" />
+    <locale android:name="zh-CN" />
+</locale-config>

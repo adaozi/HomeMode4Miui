@@ -33,6 +33,10 @@ enum class GraceWidget(val key: String) {
     }
 }
 
+/** 上游 1.2.4 引入的归一键（本仓 GraceWidget 仍分离 Clock/Calendar，故只做去重）。
+ *  P3（首页结构对齐）真正合并 clock+calendar 后，此处应改成上游的 normalizedGraceWidgetKey 映射。 */
+internal fun normalizeHomeOrder(keys: List<String>): List<String> = keys.distinct()
+
 /** Old data is interpreted without rewriting IDs, replacing widgets, or resetting favorites. */
 internal fun legacyHomeOrder(settings: LauncherSettings): List<String> = buildList {
     if (settings.calendarAboveClock) { add(GraceWidget.Calendar.key); add(GraceWidget.Baseline.key); add(GraceWidget.Clock.key) }

@@ -38,6 +38,8 @@ data class LauncherSettingsEntity(
     val calendarAgenda: Boolean,
     val showBatteryPercentage: Boolean,
     val allowHapticFeedback: Boolean,
+    /** 上游 1.2.4（DB v33）：屏幕旋转开关，默认允许。 */
+    @ColumnInfo(defaultValue = "1") val allowScreenRotation: Boolean = true,
     val useDynamicColors: Boolean,
     val themeColor: Int,
     @ColumnInfo(defaultValue = "'TonalSpot'") val paletteStyle: String = "TonalSpot",
@@ -48,13 +50,21 @@ data class LauncherSettingsEntity(
     val iconDesignJson: String? = null,
     @ColumnInfo(defaultValue = "1") val mediaPlayer: Boolean = true,
     @ColumnInfo(defaultValue = "0") val mediaAlwaysVisible: Boolean = false,
+    /** 上游 1.2.4（DB v27）：媒体组件播放中保持显示 + 下滑关闭手感参数。 */
+    @ColumnInfo(defaultValue = "1") val mediaKeepWhilePlaying: Boolean = true,
+    @ColumnInfo(defaultValue = "55") val dismissResistance: Int = 75,
+    @ColumnInfo(defaultValue = "72") val dismissThresholdDp: Int = 72,
     val mediaAppKey: String? = null,
+    /** 上游 1.2.4（DB v32）：媒体组件样式。 */
+    @ColumnInfo(defaultValue = "NULL") val mediaStyleJson: String? = null,
     val graceButtonJson: String? = null,
     @ColumnInfo(defaultValue = "0") val weatherEnabled: Boolean = false,
     @ColumnInfo(defaultValue = "7") val weatherForecastDays: Int = 7,
     val weatherLocationId: String? = null,
     val clockAppKey: String? = null,
     val clockStyleJson: String? = null,
+    /** 上游 1.2.4（DB v34）：Agenda Page 外观。 */
+    @ColumnInfo(defaultValue = "NULL") val agendaAppearanceJson: String? = null,
     val homeLayoutJson: String? = null,
     @ColumnInfo(defaultValue = "1") val hideStatusBar: Boolean = true,
     @ColumnInfo(defaultValue = "0") val hideAlphabet: Boolean = false,
@@ -65,6 +75,8 @@ data class LauncherSettingsEntity(
     @ColumnInfo(defaultValue = "16") val wallpaperBlurRadius: Int = 16,
     val appFontId: String? = null,
     val fontLibraryJson: String? = null,
+    /** 上游 1.2.4（DB v29）：逐元素字体颜色（集中管理）。 */
+    val fontColorsJson: String? = null,
     val listAppearanceJson: String? = null,
     @ColumnInfo(defaultValue = "1") val applyFontToSettings: Boolean = true,
     val privateSpaceJson: String? = null,
@@ -72,6 +84,13 @@ data class LauncherSettingsEntity(
     val homeGesturesJson: String? = null,
     val searchJson: String? = null,
     val shortcutsFoldersJson: String? = null,
+    /** 上游 1.2.4（DB v25~v31）：数字健康 / Widget Screen / 应用类别 / 免无障碍优先 / 日历偏好 / 天气连接。 */
+    val digitalWellbeingJson: String? = null,
+    val widgetScreenJson: String? = null,
+    val appCategoriesJson: String? = null,
+    @ColumnInfo(defaultValue = "0") val preferNonAccessibility: Boolean = false,
+    @ColumnInfo(defaultValue = "NULL") val calendarPreferencesJson: String? = null,
+    @ColumnInfo(defaultValue = "NULL") val weatherConnectionJson: String? = null,
 )
 
 @Entity(tableName = "hidden_apps")
@@ -134,7 +153,7 @@ abstract class LauncherSettingsDao {
     entities = [LauncherSettingsEntity::class, HiddenAppEntity::class,
         LauncherFolderEntity::class, ItemIconEntity::class,
         SavedShortcutEntity::class, AppPopupEntity::class],
-    version = 24,
+    version = 34,
     exportSchema = true,
 )
 abstract class LauncherDatabase : RoomDatabase() {
@@ -325,6 +344,87 @@ abstract class LauncherDatabase : RoomDatabase() {
         }
 
         /**
+         * 上游同步 1.2.4（v2.9.164 / P0 地基）：DB v24 → v34 与上游列集合对齐。
+         * 注：上游 v23 的 widgetScreenJson 在模块 v22→23 时被跳过（当时不移植 Widget Screen），
+         * 本批全量跟进 1.2.4 起补回 —— 与 preferNonAccessibility 一起落在 24→25，
+         * 使模块 v25 的 launcher_settings 列集合与上游 v25 完全一致，后续迁移可逐字沿用。
+         */
+        val Migration24To25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN widgetScreenJson TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN preferNonAccessibility INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** 上游 1.2.3：数字健康（应用使用时长）设置。 */
+        val Migration25To26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN digitalWellbeingJson TEXT DEFAULT NULL")
+            }
+        }
+
+        /** 上游 1.2.1：媒体组件常驻 + 弹层下滑关闭手感（dismissResistance 默认值只初始化新库）。 */
+        val Migration26To27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN mediaKeepWhilePlaying INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN dismissResistance INTEGER NOT NULL DEFAULT 55")
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN dismissThresholdDp INTEGER NOT NULL DEFAULT 72")
+                // Keep the SQL default compatible with existing v27 databases. Only initialize
+                // this newly added preference; never overwrite an existing user's chosen value.
+                db.execSQL("UPDATE launcher_settings SET dismissResistance = 75")
+            }
+        }
+
+        /** 上游 1.2.2：应用类别（按条件决定桌面/应用列表可见）。 */
+        val Migration27To28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN appCategoriesJson TEXT DEFAULT NULL")
+            }
+        }
+
+        /** 上游 1.2.2：逐元素字体颜色集中管理。 */
+        val Migration28To29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN fontColorsJson TEXT DEFAULT NULL")
+            }
+        }
+
+        /** 上游 1.2.3：日历偏好（议程页/日期行细则）。 */
+        val Migration29To30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN calendarPreferencesJson TEXT DEFAULT NULL")
+            }
+        }
+
+        /** 上游 1.2.3：Gadgetbridge 天气协议连接配置。 */
+        val Migration30To31 = object : Migration(30, 31) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN weatherConnectionJson TEXT DEFAULT NULL")
+            }
+        }
+
+        /** 上游 1.2.3：音乐组件样式。 */
+        val Migration31To32 = object : Migration(31, 32) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN mediaStyleJson TEXT DEFAULT NULL")
+            }
+        }
+
+        /** 上游 1.2.4：屏幕旋转开关。 */
+        val Migration32To33 = object : Migration(32, 33) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN allowScreenRotation INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        /** 上游 1.2.4：Agenda Page 外观。 */
+        val Migration33To34 = object : Migration(33, 34) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE launcher_settings ADD COLUMN agendaAppearanceJson TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
          * 宿主适配：库文件落 databases/custom/grace_launcher.db（对齐底座独立 DB 目录惯例）。
          * hotfix1（装机 2026-10-08 实锤）：getDatabasePath("custom/x.db") 走 ContextImpl
          * makeFilename —— 无条件拒绝带路径分隔符的名字，直接 IllegalArgumentException
@@ -352,7 +452,7 @@ abstract class LauncherDatabase : RoomDatabase() {
                 // Room 降级无迁移路径 → snapshot build 全挂（第四桌面应用/设置装载失败）。
                 // 仅降级时销毁重建（升级仍走迁移链），用户数据以桌面重置为代价换取功能恢复。
                 .fallbackToDestructiveMigrationOnDowngrade()
-                .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22, Migration22To23, Migration23To24).build().also { instance = it }
+                .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5, Migration5To6, Migration6To7, Migration7To8, Migration8To9, Migration9To10, Migration10To11, Migration11To12, Migration12To13, Migration13To14, Migration14To15, Migration15To16, Migration16To17, Migration17To18, Migration18To19, Migration19To20, Migration20To21, Migration21To22, Migration22To23, Migration23To24, Migration24To25, Migration25To26, Migration26To27, Migration27To28, Migration28To29, Migration29To30, Migration30To31, Migration31To32, Migration32To33, Migration33To34).build().also { instance = it }
         }
     }
 }
