@@ -88,7 +88,8 @@ private fun FontOption(id: String?, checked: Boolean, onSelect: (String?) -> Uni
 }
 
 @Composable
-internal fun FontSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit) {
+internal fun FontSettings(uiState: LauncherUiState, actions: LauncherActions, onBack: () -> Unit,
+    onFontColors: () -> Unit = {}) {
     val context = LocalContext.current
     val store = remember(context) { ClockFontStore(context) }
     val scope = rememberCoroutineScope()
@@ -173,9 +174,13 @@ internal fun FontSettings(uiState: LauncherUiState, actions: LauncherActions, on
                 userScrollEnabled = reorder.draggingKey == null) {
                 item("settings") {
                     SettingsToggleItem(stringResource(R.string.font_apply_settings), stringResource(R.string.font_apply_settings_summary),
-                        uiState.settings.applyFontToSettings, 0, 1, "apply_font_to_settings", enabled = enabled) { value ->
+                        uiState.settings.applyFontToSettings, 0, 2, "apply_font_to_settings", enabled = enabled) { value ->
                         actions.updateSettings { it.copy(applyFontToSettings = value) }
                     }
+                    Spacer(Modifier.height(ListItemDefaults.SegmentedGap))
+                    // 上游 1.2.2：字体颜色集中管理入口（逐元素配色）。
+                    SettingsActionItem(stringResource(R.string.list_font_color), null,
+                        1, 2, "font_colors", enabled = enabled, onClick = onFontColors)
                     Spacer(Modifier.height(16.dp))
                 }
                 item("add") {

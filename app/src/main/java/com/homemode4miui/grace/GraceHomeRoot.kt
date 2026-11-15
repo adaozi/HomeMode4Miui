@@ -100,6 +100,8 @@ fun GraceHomeRoot(
             // 上游同步 v1.1.8 S5：全局字体 = 字体库 selected 链（字体库管理页首位）。
             // appFontId 为 legacy 列，设置页从不写入 —— 接它永远不生效（装机实锤）。
             fontLibrary = settings.fontLibrary,
+            // 上游 1.2.2：逐元素字体颜色（主题层 provide LocalFontColors / LocalWallpaperFontColor）
+            fontColors = settings.fontColors,
             // hotfix（appFont 桌面接线补漏）：主题层字体解析必须用模块 Context ——
             // 此处的 LocalContext 是 ModuleResourceBridge 包装的宿主 Context（宿主
             // assets 无模块字体资产，宿主 filesDir 无导入字体），不传则字体恒回落。

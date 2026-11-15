@@ -83,6 +83,8 @@ internal enum class SettingsPage {
     GraceAction, GraceApp, GraceShortcut, GraceFolder, Gestures, LabGraceButton, LabGesture, LabPopup, HomeOrder, AppStacks,
     // 上游同步 v1.1.9：外观编辑页（Grace 按钮外观/位置 + 日历/天气/媒体播放器外观占位）
     GraceButtonAppearance, GraceButtonPosition, CalendarAppearance, WeatherAppearance, MediaPlayerAppearance,
+    // 上游 1.2.2：字体颜色集中管理页（Fonts 页入口）
+    FontColors,
 }
 
 /** Navigation owns each page's saved state and seekable predictive-back transition. */
@@ -199,7 +201,10 @@ fun LauncherSettingsScreen(
                 // Never initialize an editable draft before Room's first snapshot.
                 if (!storage.canEdit) {
                     SettingsScaffold(stringResource(R.string.settings_title), "settings_storage_blocked", back) { }
-                } else when (page) {
+                } else CompositionLocalProvider(
+                    // 上游 1.2.2：颜色选择器的"共享字体颜色"入口（受当前导航条目保护）
+                    LocalOpenFontColors provides { navigate(SettingsPage.FontColors) },
+                ) { when (page) {
                     SettingsPage.Root -> SettingsHome(back, navigate)
                     SettingsPage.Productivity -> ProductivitySettings(uiState, actions, back, navigate)
                     SettingsPage.Clock -> ClockSettings(uiState, actions, back) { navigate(SettingsPage.ClockStyle) }
@@ -273,7 +278,9 @@ fun LauncherSettingsScreen(
                             })
                     }
                     SettingsPage.Weather -> WeatherSettings(uiState, actions, back) { navigate(SettingsPage.WeatherAppearance) }
-                    SettingsPage.Fonts -> FontSettings(uiState, actions, back)
+                    SettingsPage.Fonts -> FontSettings(uiState, actions, back) { navigate(SettingsPage.FontColors) }
+                    // 上游 1.2.2：字体颜色集中管理（逐元素配色 + 壁纸亮度/取色）
+                    SettingsPage.FontColors -> FontColorSettings(uiState, actions, back)
                     SettingsPage.LabGraceButton -> LabGraceButtonSettings(uiState, actions, back)
                     SettingsPage.LabGesture -> LabGestureSettings(uiState, actions, back)
                     // 上游同步 1.2.0：Pop-up 触发灵敏度（额外滑动距离 / 允许偏离角度）
@@ -356,7 +363,7 @@ fun LauncherSettingsScreen(
                     SettingsPage.Changelog -> ChangelogSettings(back)
                     SettingsPage.Licenses -> LicenseSettings(back, navigate)
                     SettingsPage.AppLicense -> AppLicenseSettings(back)
-                }
+                } }
             }
         }
       }

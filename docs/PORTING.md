@@ -946,3 +946,35 @@ DIFF vs 桩文件:
 
 **待装机**：覆盖安装后确认 ① 桌面正常进第四模式零崩溃；② 设置页/抽屉/收藏全部照常（本批不改行为，
 只加列与模型）；③ `logcat` 无 Room 迁移异常（`Migration didn't properly handle`）。
+
+### P1 字体颜色集中管理（v2.9.165-p1-fontcolors / versionCode 181，2026-11-15）
+
+**范围界定**：上游 1.2.2「重新整理设置页面 + 统一字体颜色管理」拆两半 —— 本批只做**字体颜色链路**
+（可验证闭环）；设置页的**分组重排**（Homepage/AppList/FeedScreen/StatusScreen/DigitalWellbeing 等新页）
+依赖小组件与应用类别功能，随 P3/P7 一起落，避免建空壳页。
+
+- [x] **桥扩展到 4 条线齐全**（此前 P0 只做 ①②）：
+  ① `LauncherSettings.fontColors`（P0）→ ② Room 列 `fontColorsJson` + 迁移 v29（P0）→
+  ③ `GraceSettingsBridge.encodeRow/decodeRow/applyDelta` 补齐 P0 的 13 个字段 →
+  ④ `GraceHomeSettings`（桌面侧 SP 模型 + KEY_FONT_COLORS）+ `GraceSettingsRepository` 三处映射
+  （toEntity / seed / toGraceSettings）+ `GraceHomeRoot`/`SettingsActivity` 传 `fontColors` 给主题。
+  **本批把 P0 遗留的「字段只进 DB、不过桥」全部补完**，后续每一批都直接复用这条链。
+- [x] 新增 Compose 侧文件（R import 换 `com.homemode4miui.R`）：
+  `ui/theme/FontColors.kt`（`LocalFontColors` + `resolvedFontColor` 显示期解析）、
+  `ui/theme/WallpaperFontColor.kt`（`LocalWallpaperFontColor` + 壁纸明暗探测，仅用户显式授权才调 WallpaperManager）、
+  `ui/settings/FontColorSettings.kt`（色板列表 + 新建 + 取色）、
+  `ui/settings/WallpaperFontColorSettings.kt`、`ui/settings/MaterialColorLabels.kt`（37 个材质色角色中文标签）。
+- [x] `Theme.kt`：新增 `fontColors` 参数；seed 计算提到分支外，新增 `rememberWallpaperIsDark` + `wallpaperScheme`
+  仅供 `LocalWallpaperFontColor`（壁纸文字色随明暗自适应）；`CompositionLocalProvider` 补两条 provide。
+  **保留模块定制**：`rememberWallpaperSeedColor`（壁纸主色驱动，替代上游静态 system_accent1_500）与 `fontContext`。
+- [x] `IconDesignerColorPicker` 换上游 1.2.4 版：材质色角色 / 共享字体颜色两套预设 + `fromAppLabel` 上下文标签。
+- [x] `SettingsSelectionDialog` 换上游版（`selectedItem: T?` + `footer` + `itemLeading` + `leadingButton`）。
+- [x] `SettingsComponents` 补 `LocalOpenFontColors`；`LauncherSettingsScreen` 在导航目标内 provide
+  （受 `isCurrent()` 保护的 `navigate(FontColors)`），路由加 `SettingsPage.FontColors`；
+  `FontSettings`（FontLibrarySettings.kt）加「字体颜色」入口项（计数 0/1 → 0/2）。
+- [x] **装机验证（fuxi / OS2 5.39.40.10843）**：零 FATAL；`GraceSettings diffRow keys=[fontColorsJson]` ×3
+  （改色写回链路实锤）；`snapshot pushed ok=true len 10651 → 28377`（新字段进桥并回推）；
+  用户手动确认「入口在 / 色板列表正常 / 改动返回后保留 / 重启桌面后保留」四项全绿。
+- [ ] **已知边界（非缺陷）**：字体颜色当前只作用于设置页内部（色板、取色器、预览）。桌面实际文字
+  （时钟 / 日期 / 应用名 / 字母条）的 `resolvedFontColor` 接线随 P2（时钟）/ P3（首页）/ P4（列表）落。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.165-p1-fontcolors-181.apk`。

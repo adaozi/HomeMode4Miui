@@ -302,39 +302,54 @@ private fun PaletteOption(seed: Color, style: PaletteStyle, selected: Boolean, i
 internal fun <T> SettingsSelectionDialog(
     title: String,
     items: List<T>,
-    selectedItem: T,
+    selectedItem: T?,
     tag: String,
     itemKey: (T) -> String,
     itemLabel: @Composable (T) -> String,
     onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
+    footer: @Composable () -> Unit = {},
+    itemLeading: (@Composable (T) -> Unit)? = null,
+    leadingButton: (@Composable () -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()).selectableGroup()) {
-                items.forEach { item ->
-                    val enabled = LocalSettingsStorageState.current.canEdit
-                    Row(
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                            .testTag("$tag:${itemKey(item)}")
-                            .selectable(
-                                selected = item == selectedItem, enabled = enabled,
-                                role = Role.RadioButton, onClick = { onSelect(item) },
-                            )
-                            .padding(horizontal = 4.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        RadioButton(selected = item == selectedItem, onClick = null, enabled = enabled)
-                        Text(itemLabel(item), style = MaterialTheme.typography.bodyLarge)
+            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                Column(Modifier.selectableGroup()) {
+                    items.forEach { item ->
+                        val enabled = LocalSettingsStorageState.current.canEdit
+                        Row(
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                                .testTag("$tag:${itemKey(item)}")
+                                .selectable(
+                                    selected = item == selectedItem, enabled = enabled,
+                                    role = Role.RadioButton, onClick = { onSelect(item) },
+                                )
+                                .padding(horizontal = 4.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            RadioButton(selected = item == selectedItem, onClick = null, enabled = enabled)
+                            itemLeading?.invoke(item)
+                            Text(itemLabel(item), style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
                 }
+                footer()
             }
         },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_cancel)) } },
+        confirmButton = {
+            if (leadingButton != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                leadingButton()
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_cancel)) }
+            }
+        },
+        dismissButton = if (leadingButton == null) ({
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_cancel)) }
+        }) else null,
     )
 }
 

@@ -40,6 +40,14 @@ import com.galaxyrio.gracelauncher.data.ThemeMode
 import com.galaxyrio.gracelauncher.data.WallpaperTextMode
 import com.galaxyrio.gracelauncher.data.ClockStyle
 import com.galaxyrio.gracelauncher.data.HomeLayout
+import com.galaxyrio.gracelauncher.data.weather.WeatherConnectionPreferences
+import com.galaxyrio.gracelauncher.data.AgendaAppearance
+import com.galaxyrio.gracelauncher.data.AppCategory
+import com.galaxyrio.gracelauncher.data.CalendarPreferences
+import com.galaxyrio.gracelauncher.data.DigitalWellbeingSettings
+import com.galaxyrio.gracelauncher.data.FontColors
+import com.galaxyrio.gracelauncher.data.MediaPlayerStyle
+import com.galaxyrio.gracelauncher.data.WidgetScreenSettings
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -140,6 +148,7 @@ object GraceSettingsBridge {
         .put("calendarAboveClock", s.calendarAboveClock)
         .put("showBatteryPercentage", s.showBatteryPercentage)
         .put("allowHapticFeedback", s.allowHapticFeedback)
+        .put("allowScreenRotation", s.allowScreenRotation)
         .put("useDynamicColors", s.useDynamicColors)
         .put("themeColor", s.themeColor)
         .put("paletteStyle", s.paletteStyle.name)
@@ -150,13 +159,19 @@ object GraceSettingsBridge {
         .put("iconDesignJson", s.iconDesign?.encode() ?: JSONObject.NULL)
         .put("mediaPlayer", s.mediaPlayer)
         .put("mediaAlwaysVisible", s.mediaAlwaysVisible)
+        .put("mediaKeepWhilePlaying", s.mediaKeepWhilePlaying)
+        .put("dismissResistance", s.dismissResistance)
+        .put("dismissThresholdDp", s.dismissThresholdDp)
         .put("mediaAppKey", s.mediaAppKey ?: JSONObject.NULL)
+        .put("mediaStyleJson", s.mediaStyle.encode())
         .put("graceButtonJson", s.graceButton.encode())
         .put("weatherEnabled", s.weatherEnabled)
         .put("weatherForecastDays", s.weatherForecastDays)
         .put("weatherLocationId", s.weatherLocationId ?: JSONObject.NULL)
+        .put("weatherConnectionJson", s.weatherConnection.encode())
         .put("clockAppKey", s.clockAppKey ?: JSONObject.NULL)
         .put("clockStyleJson", s.clockStyle.encode())
+        .put("agendaAppearanceJson", s.agendaAppearance.encode())
         .put("homeLayoutJson", s.homeLayout.encode())
         .put("hideStatusBar", s.hideStatusBar)
         .put("hideAlphabet", s.hideAlphabet)
@@ -171,9 +186,16 @@ object GraceSettingsBridge {
         .put("workProfileJson", s.workProfile.encode())
         .put("homeGesturesJson", s.homeGestures.encode())
         .put("fontLibraryJson", s.fontLibrary.encode())
+        .put("fontColorsJson", s.fontColors.encode())
         .put("listAppearanceJson", s.listAppearance.encode())
         .put("shortcutsFoldersJson", s.shortcutsFolders.encode())
         .put("searchJson", s.search.encode())
+        // 上游 1.2.4 同步（P1 批）：以下列 P0 已落 DB，本批接桥（模块↔宿主双向）。
+        .put("digitalWellbeingJson", s.digitalWellbeing.encode())
+        .put("widgetScreenJson", s.widgetScreen.encode())
+        .put("appCategoriesJson", s.appCategories?.let(AppCategory::encode) ?: JSONObject.NULL)
+        .put("preferNonAccessibility", s.preferNonAccessibility)
+        .put("calendarPreferencesJson", s.calendar.encode())
 
     /** 行解码（模块侧快照种子）。 */
     fun decodeRow(v: JSONObject): LauncherSettings = LauncherSettings(
@@ -182,6 +204,7 @@ object GraceSettingsBridge {
         calendarAboveClock = v.optBoolean("calendarAboveClock", false),
         showBatteryPercentage = v.optBoolean("showBatteryPercentage", true),
         allowHapticFeedback = v.optBoolean("allowHapticFeedback", true),
+        allowScreenRotation = v.optBoolean("allowScreenRotation", true),
         useDynamicColors = v.optBoolean("useDynamicColors", true),
         themeColor = v.optInt("themeColor", com.galaxyrio.gracelauncher.data.LauncherSettings.DEFAULT_THEME_COLOR),
         paletteStyle = com.galaxyrio.gracelauncher.data.decodePaletteStyle(v.optString("paletteStyle")),
@@ -192,13 +215,19 @@ object GraceSettingsBridge {
         iconDesign = (v.opt("iconDesignJson") as? String)?.let(ItemIcon::decode),
         mediaPlayer = v.optBoolean("mediaPlayer", true),
         mediaAlwaysVisible = v.optBoolean("mediaAlwaysVisible", false),
+        mediaKeepWhilePlaying = v.optBoolean("mediaKeepWhilePlaying", true),
+        dismissResistance = v.optInt("dismissResistance", 75),
+        dismissThresholdDp = v.optInt("dismissThresholdDp", 72),
         mediaAppKey = v.opt("mediaAppKey") as? String,
+        mediaStyle = MediaPlayerStyle.decode(v.opt("mediaStyleJson") as? String),
         graceButton = GraceButtonSettings.decode(v.opt("graceButtonJson") as? String),
         weatherEnabled = v.optBoolean("weatherEnabled", false),
         weatherForecastDays = v.optInt("weatherForecastDays", 7),
         weatherLocationId = v.opt("weatherLocationId") as? String,
+        weatherConnection = WeatherConnectionPreferences.decode(v.opt("weatherConnectionJson") as? String),
         clockAppKey = v.opt("clockAppKey") as? String,
         clockStyle = ClockStyle.decode(v.opt("clockStyleJson") as? String),
+        agendaAppearance = AgendaAppearance.decode(v.opt("agendaAppearanceJson") as? String),
         homeLayout = HomeLayout.decode(v.opt("homeLayoutJson") as? String ?: "{}"),
         hideStatusBar = v.optBoolean("hideStatusBar", true),
         hideAlphabet = v.optBoolean("hideAlphabet", false),
@@ -213,9 +242,15 @@ object GraceSettingsBridge {
         workProfile = ProfileSettings.decode(v.opt("workProfileJson") as? String, ProfileSettings.workDefaults()),
         homeGestures = GraceButtonSettings.decode(v.opt("homeGesturesJson") as? String, GraceButtonSettings.homeDefaults()),
         fontLibrary = FontLibrary.decode(v.opt("fontLibraryJson") as? String, v.opt("appFontId") as? String),
+        fontColors = FontColors.decode(v.opt("fontColorsJson") as? String),
         listAppearance = ListAppearance.decode(v.opt("listAppearanceJson") as? String, v.optBoolean("hideFavoriteNames", false)),
         shortcutsFolders = ShortcutsFoldersSettings.decode(v.opt("shortcutsFoldersJson") as? String),
         search = SearchSettings.decode(v.opt("searchJson") as? String),
+        digitalWellbeing = DigitalWellbeingSettings.decode(v.opt("digitalWellbeingJson") as? String),
+        widgetScreen = WidgetScreenSettings.decode(v.opt("widgetScreenJson") as? String),
+        appCategories = AppCategory.decode(v.opt("appCategoriesJson") as? String),
+        preferNonAccessibility = v.optBoolean("preferNonAccessibility", false),
+        calendar = CalendarPreferences.decode(v.opt("calendarPreferencesJson") as? String),
     )
 
     /**
@@ -230,6 +265,7 @@ object GraceSettingsBridge {
         if (delta.has("calendarAboveClock")) set { it.copy(calendarAboveClock = delta.getBoolean("calendarAboveClock")) }
         if (delta.has("showBatteryPercentage")) set { it.copy(showBatteryPercentage = delta.getBoolean("showBatteryPercentage")) }
         if (delta.has("allowHapticFeedback")) set { it.copy(allowHapticFeedback = delta.getBoolean("allowHapticFeedback")) }
+        if (delta.has("allowScreenRotation")) set { it.copy(allowScreenRotation = delta.getBoolean("allowScreenRotation")) }
         if (delta.has("useDynamicColors")) set { it.copy(useDynamicColors = delta.getBoolean("useDynamicColors")) }
         if (delta.has("themeColor")) set { it.copy(themeColor = delta.getInt("themeColor")) }
         if (delta.has("paletteStyle")) set { it.copy(paletteStyle = com.galaxyrio.gracelauncher.data.decodePaletteStyle(delta.getString("paletteStyle"))) }
@@ -240,13 +276,19 @@ object GraceSettingsBridge {
         if (delta.has("iconDesignJson")) set { it.copy(iconDesign = (delta.opt("iconDesignJson") as? String)?.let(ItemIcon::decode)) }
         if (delta.has("mediaPlayer")) set { it.copy(mediaPlayer = delta.getBoolean("mediaPlayer")) }
         if (delta.has("mediaAlwaysVisible")) set { it.copy(mediaAlwaysVisible = delta.getBoolean("mediaAlwaysVisible")) }
+        if (delta.has("mediaKeepWhilePlaying")) set { it.copy(mediaKeepWhilePlaying = delta.getBoolean("mediaKeepWhilePlaying")) }
+        if (delta.has("dismissResistance")) set { it.copy(dismissResistance = delta.getInt("dismissResistance")) }
+        if (delta.has("dismissThresholdDp")) set { it.copy(dismissThresholdDp = delta.getInt("dismissThresholdDp")) }
+        if (delta.has("mediaStyleJson")) set { it.copy(mediaStyle = MediaPlayerStyle.decode(delta.optString("mediaStyleJson"))) }
         if (delta.has("mediaAppKey")) set { it.copy(mediaAppKey = delta.opt("mediaAppKey") as? String) }
         if (delta.has("graceButtonJson")) set { it.copy(graceButton = GraceButtonSettings.decode(delta.optString("graceButtonJson"))) }
         if (delta.has("weatherEnabled")) set { it.copy(weatherEnabled = delta.getBoolean("weatherEnabled")) }
         if (delta.has("weatherForecastDays")) set { it.copy(weatherForecastDays = delta.getInt("weatherForecastDays")) }
         if (delta.has("weatherLocationId")) set { it.copy(weatherLocationId = delta.opt("weatherLocationId") as? String) }
+        if (delta.has("weatherConnectionJson")) set { it.copy(weatherConnection = WeatherConnectionPreferences.decode(delta.optString("weatherConnectionJson"))) }
         if (delta.has("clockAppKey")) set { it.copy(clockAppKey = delta.opt("clockAppKey") as? String) }
         if (delta.has("clockStyleJson")) set { it.copy(clockStyle = ClockStyle.decode(delta.optString("clockStyleJson"))) }
+        if (delta.has("agendaAppearanceJson")) set { it.copy(agendaAppearance = AgendaAppearance.decode(delta.optString("agendaAppearanceJson"))) }
         if (delta.has("homeLayoutJson")) set { it.copy(homeLayout = HomeLayout.decode(delta.optString("homeLayoutJson") ?: "{}")) }
         if (delta.has("hideStatusBar")) set { it.copy(hideStatusBar = delta.getBoolean("hideStatusBar")) }
         if (delta.has("hideAlphabet")) set { it.copy(hideAlphabet = delta.getBoolean("hideAlphabet")) }
@@ -261,9 +303,15 @@ object GraceSettingsBridge {
         if (delta.has("workProfileJson")) set { it.copy(workProfile = ProfileSettings.decode(delta.optString("workProfileJson"), ProfileSettings.workDefaults())) }
         if (delta.has("homeGesturesJson")) set { it.copy(homeGestures = GraceButtonSettings.decode(delta.optString("homeGesturesJson"), GraceButtonSettings.homeDefaults())) }
         if (delta.has("fontLibraryJson")) set { it.copy(fontLibrary = FontLibrary.decode(delta.optString("fontLibraryJson"), it.appFontId)) }
+        if (delta.has("fontColorsJson")) set { it.copy(fontColors = FontColors.decode(delta.optString("fontColorsJson"))) }
         if (delta.has("listAppearanceJson")) set { it.copy(listAppearance = ListAppearance.decode(delta.optString("listAppearanceJson"), it.hideFavoriteNames)) }
         if (delta.has("shortcutsFoldersJson")) set { it.copy(shortcutsFolders = ShortcutsFoldersSettings.decode(delta.optString("shortcutsFoldersJson"))) }
         if (delta.has("searchJson")) set { it.copy(search = SearchSettings.decode(delta.optString("searchJson"))) }
+        if (delta.has("digitalWellbeingJson")) set { it.copy(digitalWellbeing = DigitalWellbeingSettings.decode(delta.optString("digitalWellbeingJson"))) }
+        if (delta.has("widgetScreenJson")) set { it.copy(widgetScreen = WidgetScreenSettings.decode(delta.optString("widgetScreenJson"))) }
+        if (delta.has("appCategoriesJson")) set { it.copy(appCategories = AppCategory.decode(delta.optString("appCategoriesJson"))) }
+        if (delta.has("preferNonAccessibility")) set { it.copy(preferNonAccessibility = delta.getBoolean("preferNonAccessibility")) }
+        if (delta.has("calendarPreferencesJson")) set { it.copy(calendar = CalendarPreferences.decode(delta.optString("calendarPreferencesJson"))) }
         return s
     }
 

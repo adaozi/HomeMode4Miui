@@ -59,6 +59,9 @@ internal data class SettingsStorageState(val loading: Boolean = false, val loadF
 
 internal val LocalSettingsStorageState = staticCompositionLocalOf { SettingsStorageState() }
 
+/** 上游 1.2.2：当前导航条目持有通往共享字体颜色的受保护路由。 */
+internal val LocalOpenFontColors = staticCompositionLocalOf<(() -> Unit)?> { null }
+
 /** Scrollable content includes this inset; fixed bottom controls stay above it. */
 internal val LocalSettingsBottomInset = staticCompositionLocalOf { 0.dp }
 

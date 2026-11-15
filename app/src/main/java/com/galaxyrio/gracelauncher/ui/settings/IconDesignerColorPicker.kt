@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
@@ -34,18 +35,31 @@ import androidx.compose.ui.unit.dp
 import com.homemode4miui.R
 import com.galaxyrio.gracelauncher.data.IconColor
 import com.galaxyrio.gracelauncher.data.IconColorSource
+import com.galaxyrio.gracelauncher.data.MaterialColorRole
+import com.galaxyrio.gracelauncher.data.FontColors
+import com.galaxyrio.gracelauncher.ui.theme.LocalWallpaperFontColor
+import com.galaxyrio.gracelauncher.ui.theme.resolvedFontColor
 import java.util.Locale
 
 /** Confined to the controls pane: never covers the live icon preview. */
 @Composable
 internal fun IconDesignerColorPicker(title: String, choice: IconColor?, theme: Int, default: IconColor?,
     onChange: (IconColor?) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier, fallback: Int = theme,
-    allowFromApp: Boolean = false, appColor: Int? = null) {
-    val initial = choice?.resolve(theme, appColor) ?: fallback
-    val source = if (!allowFromApp && choice?.fromApp == true) IconColorSource.Theme
-        else choice?.source ?: IconColorSource.Fixed
+    allowFromApp: Boolean = false, appColor: Int? = null, fontColors: FontColors? = null,
+    fromAppLabel: String? = null, fromAppSummary: String? = null) {
+    val scheme = MaterialTheme.colorScheme
+    // An inherited wallpaper text color is a live palette reference, not a fixed swatch.
+    val selectedColor = choice ?: if (fontColors != null) IconColor(0, fontColorId = FontColors.WallpaperId) else null
+    val initial = selectedColor?.resolve(theme, appColor, scheme, fontColors,
+        wallpaperColor = LocalWallpaperFontColor.current.toArgb()) ?: fallback
+    val openFontColors = LocalOpenFontColors.current
+    var showRoles by rememberSaveable { mutableStateOf(false) }
+    var showFontColors by rememberSaveable { mutableStateOf(false) }
+    val referencedColor = fontColors?.entries?.firstOrNull { it.id == selectedColor?.fontColorId }
+    val source = if (!allowFromApp && selectedColor?.fromApp == true) IconColorSource.Theme
+        else selectedColor?.source ?: IconColorSource.Fixed
     val fixed = source == IconColorSource.Fixed
-    val automatic = (choice ?: IconColor.Theme).copy(theme = source == IconColorSource.Theme,
+    val automatic = (selectedColor ?: IconColor.Theme).copy(theme = source == IconColorSource.Theme,
         fromApp = source == IconColorSource.FromApp).normalized()
     val initialHsv = remember { FloatArray(3).also { AndroidColor.colorToHSV(initial, it) } }
     var hue by rememberSaveable { mutableFloatStateOf(initialHsv[0]) }
@@ -80,15 +94,32 @@ internal fun IconDesignerColorPicker(title: String, choice: IconColor?, theme: I
                 }
             }
             DesignerConnectedChoices(IconColorSource.entries.filter { allowFromApp || it != IconColorSource.FromApp },
-                source, true, "icon_designer_color_source", { it.label() }) { selected ->
+                source, true, "icon_designer_color_source", {
+                    if (it == IconColorSource.FromApp && fromAppLabel != null) fromAppLabel else it.label()
+                }) { selected ->
                 if (selected == source) return@DesignerConnectedChoices
                 when (selected) {
-                    IconColorSource.Theme -> { showColor(theme); onChange(IconColor.Theme) }
+                    IconColorSource.Theme -> {
+                        if (fontColors != null) onChange(IconColor(0, fontColorId = FontColors.WallpaperId))
+                        else { showColor(theme); onChange(IconColor.Theme) }
+                    }
                     IconColorSource.FromApp -> { showColor(appColor ?: theme); onChange(IconColor.FromApp) }
                     IconColorSource.Fixed -> setColor(initial)
                 }
             }
-            if (source == IconColorSource.FromApp) Text(stringResource(R.string.icon_color_from_app_summary),
+            if (source == IconColorSource.Theme && fontColors != null) {
+                OutlinedButton(onClick = { showFontColors = true }, modifier = Modifier.fillMaxWidth().testTag("font_color_presets")) {
+                    Text(referencedColor?.let { fontColorLabel(it) } ?: stringResource(R.string.font_color_saved))
+                }
+            }
+            if (source == IconColorSource.Theme && fontColors == null) {
+                OutlinedButton(onClick = { showRoles = true }, modifier = Modifier.fillMaxWidth().testTag("material_color_presets")) {
+                    Surface(Modifier.size(20.dp), shape = CircleShape, color = Color(initial)) {}
+                    Spacer(Modifier.width(12.dp))
+                    Text(choice?.materialRole?.localizedLabel() ?: stringResource(R.string.font_color_material))
+                }
+            }
+            if (source == IconColorSource.FromApp) Text(fromAppSummary ?: stringResource(R.string.icon_color_from_app_summary),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (fixed) {
                 val planeDescription = stringResource(R.string.icon_designer_saturation_brightness)
@@ -146,6 +177,29 @@ internal fun IconDesignerColorPicker(title: String, choice: IconColor?, theme: I
             }
         }
     }
+    if (showRoles && fontColors == null) SettingsSelectionDialog(
+        stringResource(R.string.font_color_material), MaterialColorRole.entries, choice?.materialRole,
+        "material_color_role", { it.name }, { it.localizedLabel() },
+        { role ->
+            showColor(role.color(scheme).toArgb())
+            onChange(IconColor(0, materialRole = role))
+            showRoles = false
+        }, { showRoles = false },
+        itemLeading = { role -> Surface(Modifier.size(24.dp), shape = CircleShape, color = role.color(scheme)) {} },
+    )
+    if (showFontColors && fontColors != null) SettingsSelectionDialog(
+        stringResource(R.string.font_color_saved), fontColors.entries, referencedColor,
+        "saved_font_color", { it.id }, { fontColorLabel(it) },
+        { entry -> onChange(IconColor(0, fontColorId = entry.id)); showFontColors = false },
+        { showFontColors = false },
+        leadingButton = openFontColors?.let { open -> {
+            TextButton(onClick = { showFontColors = false; open() }, Modifier.testTag("saved_font_colors_edit")) {
+                Text(stringResource(R.string.font_color_edit))
+            }
+        } },
+        itemLeading = { entry -> Surface(Modifier.size(24.dp), shape = CircleShape,
+            color = resolvedFontColor(IconColor(0, fontColorId = entry.id))) {} },
+    )
 }
 
 private fun colorHex(color: Int) = String.format(Locale.ROOT, "%06X", color and 0xFFFFFF)

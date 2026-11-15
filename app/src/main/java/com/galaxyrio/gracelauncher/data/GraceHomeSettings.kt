@@ -80,6 +80,8 @@ data class GraceHomeSettings(
     val graceButton: GraceButtonSettings = GraceButtonSettings(),
     /** 上游同步 v1.1.8 S5：字体库（JSON 列 fontLibraryJson；decode 兼容 appFontId 旧选择）。 */
     val fontLibrary: FontLibrary = FontLibrary(),
+    /** 上游 1.2.2：逐元素字体颜色（JSON 列 fontColorsJson；桌面主题层 provide LocalFontColors）。 */
+    val fontColors: FontColors = FontColors(),
     /** hotfix（appFont 桌面接线）：字体选择（launcher_settings.appFontId 列；设置页经桥落库）。 */
     val appFontId: String? = null,
     /** hotfix（iconSize 桌面接线）：全局图标设计（launcher_settings.iconDesignJson 列；design.iconSize = 图标显示尺寸 80..150）。 */
@@ -125,6 +127,7 @@ data class GraceHomeSettings(
                    homeGesturesJson: String? = null,
                    graceButtonJson: String? = null,
                    fontLibraryJson: String? = null,
+                   fontColorsJson: String? = null,
                    workProfileJson: String? = null,
                    appFontId: String? = null,
                    iconDesignJson: String? = null,
@@ -161,6 +164,7 @@ data class GraceHomeSettings(
             homeGestures = GraceButtonSettings.decode(homeGesturesJson, GraceButtonSettings.homeDefaults()),
             graceButton = GraceButtonSettings.decode(graceButtonJson),
             fontLibrary = FontLibrary.decode(fontLibraryJson),
+            fontColors = FontColors.decode(fontColorsJson),
             workProfile = ProfileSettings.decode(workProfileJson, ProfileSettings.workDefaults()),
             appFontId = appFontId,
             iconDesign = iconDesignJson?.let(ItemIcon::decode),
@@ -216,6 +220,7 @@ class GraceHomeSettingsStore(context: Context) {
         homeGesturesJson = preferences.getString(KEY_HOME_GESTURES, null),
         graceButtonJson = preferences.getString(KEY_GRACE_BUTTON, null),
         fontLibraryJson = preferences.getString(KEY_FONT_LIBRARY, null),
+        fontColorsJson = preferences.getString(KEY_FONT_COLORS, null),
         workProfileJson = preferences.getString(KEY_WORK_PROFILE, null),
         // 审计修缮（2026-10-16）：补齐 SP 降级路径缺失的 6 个外观字段 —— 此前 DB
         // 初始化失败降级 SP 时这 6 项静默回默认值。
@@ -257,6 +262,7 @@ class GraceHomeSettingsStore(context: Context) {
         putString(KEY_HOME_GESTURES, settings.homeGestures.encode())
         putString(KEY_GRACE_BUTTON, settings.graceButton.encode())
         putString(KEY_FONT_LIBRARY, settings.fontLibrary.encode())
+        putString(KEY_FONT_COLORS, settings.fontColors.encode())
         putString(KEY_WORK_PROFILE, settings.workProfile.encode())
         // 审计修缮（2026-10-16）：SP 降级路径补齐 6 个外观字段（与 load 对称）
         putString(KEY_APP_FONT_ID, settings.appFontId)
@@ -297,6 +303,7 @@ class GraceHomeSettingsStore(context: Context) {
         const val KEY_HOME_GESTURES = "home_gestures"
         const val KEY_GRACE_BUTTON = "grace_button"
         const val KEY_FONT_LIBRARY = "font_library"
+        const val KEY_FONT_COLORS = "font_colors"
         const val KEY_WORK_PROFILE = "work_profile"
         const val KEY_APP_FONT_ID = "app_font_id"
         const val KEY_ICON_DESIGN = "icon_design_json"

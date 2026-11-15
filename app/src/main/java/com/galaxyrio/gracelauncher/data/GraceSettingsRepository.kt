@@ -110,6 +110,7 @@ class GraceSettingsRepository(context: Context) {
                     homeGesturesJson = next.homeGestures.encode(),
                     graceButtonJson = next.graceButton.encode(),
                     fontLibraryJson = next.fontLibrary.encode(),
+                    fontColorsJson = next.fontColors.encode(),
                     workProfileJson = next.workProfile.encode(),
                     // hotfix（appFont/iconSize 桌面接线）：宿主 mutate 同步承载两列
                     appFontId = next.appFontId,
@@ -164,6 +165,7 @@ class GraceSettingsRepository(context: Context) {
         homeGesturesJson = settings.homeGestures.encode(),
         graceButtonJson = settings.graceButton.encode(),
         fontLibraryJson = settings.fontLibrary.encode(),
+        fontColorsJson = settings.fontColors.encode(),
         workProfileJson = settings.workProfile.encode(),
         // hotfix（appFont/iconSize 桌面接线）：种子行同步两列
         appFontId = settings.appFontId,
@@ -206,6 +208,7 @@ class GraceSettingsRepository(context: Context) {
         homeGesturesJson = homeGesturesJson,
         graceButtonJson = graceButtonJson,
         fontLibraryJson = fontLibraryJson,
+        fontColorsJson = fontColorsJson,
         workProfileJson = workProfileJson,
         // hotfix（appFont/iconSize 桌面接线）：读出两列
         appFontId = appFontId,

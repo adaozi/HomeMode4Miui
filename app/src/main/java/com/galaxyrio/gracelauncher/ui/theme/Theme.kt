@@ -74,18 +74,26 @@ fun GraceLauncherTheme(
     fontContext: android.content.Context? = null,
     amoledMode: Boolean = false,
     paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
+    /** 上游 1.2.2：逐元素字体颜色（集中管理，主题层 provide，组件按 id 解析）。 */
+    fontColors: com.galaxyrio.gracelauncher.data.FontColors = com.galaxyrio.gracelauncher.data.FontColors(),
     content: @Composable () -> Unit,
 ) {
     // 模块侧根因修复（壁纸跟随）：dynamicColor 分支原版只读一次 system_accent1_500，
     // MIUI 上该资源静态 + 无重组失效源 → 主题色不随壁纸变。改为 rememberWallpaperSeedColor：
     // WallpaperColors 主色驱动 + OnColorsChangedListener 失效（见 LauncherAppearance.kt）。
-    val colorScheme = if (seedColor != null || (dynamicColor && Build.VERSION.SDK_INT >= 31)) {
-        val fallbackSeed = seedColor?.toArgb() ?: 0xFF6750A4.toInt()
-        val seed = if (dynamicColor && Build.VERSION.SDK_INT >= 31) {
-            rememberWallpaperSeedColor(fallbackSeed)
-        } else fallbackSeed
+    val fallbackSeed = seedColor?.toArgb() ?: 0xFF6750A4.toInt()
+    val seed: Int? = if (seedColor != null || (dynamicColor && Build.VERSION.SDK_INT >= 31)) {
+        if (dynamicColor && Build.VERSION.SDK_INT >= 31) rememberWallpaperSeedColor(fallbackSeed) else fallbackSeed
+    } else null
+    val colorScheme = if (seed != null) {
         remember(seed, darkTheme, paletteStyle) { launcherColorScheme(seed, darkTheme, paletteStyle) }
     } else if (darkTheme) DarkColorScheme else LightColorScheme
+
+    // 上游 1.2.2：壁纸文字色 = 按壁纸明暗取同种子调色板（浅色文字/深色文字两套）。
+    val wallpaperDark = rememberWallpaperIsDark(fontColors.wallpaperBrightness, fontColors.wallpaperColorAccess)
+    val wallpaperScheme = if (seed != null) {
+        remember(seed, wallpaperDark, paletteStyle) { launcherColorScheme(seed, wallpaperDark, paletteStyle) }
+    } else if (wallpaperDark) DarkColorScheme else LightColorScheme
 
     val trueBlack = darkTheme && amoledMode
     // Keep raised cards and accent colors distinct while making page and sheet
@@ -105,6 +113,8 @@ fun GraceLauncherTheme(
     val typography = remember(family) { launcherTypography(family) }
     CompositionLocalProvider(
         LocalFontLibrary provides fontLibrary,
+        LocalFontColors provides fontColors,
+        LocalWallpaperFontColor provides wallpaperScheme.onSurface,
         LocalLauncherTypography provides typography,
         // Elevation tint must not turn the black sheets back into tinted gray.
         LocalTonalElevationEnabled provides (LocalTonalElevationEnabled.current && !trueBlack),

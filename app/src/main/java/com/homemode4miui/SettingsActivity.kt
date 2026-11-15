@@ -52,6 +52,8 @@ object GraceSettingsTheme {
             paletteStyle = state.settings.paletteStyle,
             // 上游同步 v1.1.8 S5：全局字体 = 字体库 selected 链（appFontId 为 legacy 列）。
             fontLibrary = state.settings.fontLibrary,
+            // 上游 1.2.2：逐元素字体颜色透传（设置页预览与桌面同源）
+            fontColors = state.settings.fontColors,
             content = content,
         )
     }
