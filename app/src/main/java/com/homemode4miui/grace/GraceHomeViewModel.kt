@@ -28,7 +28,6 @@
 package com.homemode4miui.grace
 
 import android.app.Application
-import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -125,20 +124,18 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val iconStore = com.galaxyrio.gracelauncher.data.icons.ItemIconStore(moduleResourceContext,
         com.galaxyrio.gracelauncher.data.icons.IconPackRepository(moduleResourceContext))
 
+    // ---- 设置页 widget 命令入口（moveWidget / addWidget / addPopupWidget 三个 request flow）
+    //      已随 widget 域迁至 WidgetSlot（拆分第 5 步）；VM 保留 onBridge* 私有转发，
+    //      因为 GraceSettingsHostEngine 的构造参数是方法引用。 ----
+
     /** hotfix2：设置页"移动小部件"命令 → 桌面进入 widget 编辑模式（原版同进程直改 editingHome）。 */
-    private val _moveWidgetRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val moveWidgetRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _moveWidgetRequests
-    private fun onBridgeMoveWidget() { _moveWidgetRequests.tryEmit(Unit) }
+    private fun onBridgeMoveWidget() = widget.onMoveWidget()
 
     /** 上游同步补漏：设置页"添加自定义小组件"命令 → 桌面开 WidgetPicker（跨进程 UI 动作）。 */
-    private val _addWidgetRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val addWidgetRequests: kotlinx.coroutines.flow.SharedFlow<Unit> = _addWidgetRequests
-    private fun onBridgeAddWidget() { _addWidgetRequests.tryEmit(Unit) }
+    private fun onBridgeAddWidget() = widget.onAddWidget()
 
     /** folders 阶段（hotfix folders2）：设置页"添加新的小组件"命令 → 桌面开 WidgetPicker 弹层模式。 */
-    private val _addPopupWidgetRequests = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val addPopupWidgetRequests: kotlinx.coroutines.flow.SharedFlow<String> = _addPopupWidgetRequests
-    private fun onBridgeAddPopupWidget(ownerKey: String) { _addPopupWidgetRequests.tryEmit(ownerKey) }
+    private fun onBridgeAddPopupWidget(ownerKey: String) = widget.onAddPopupWidget(ownerKey)
 
     private val _uiState = MutableStateFlow(GraceHomeUiState(
         // Room 首读前的瞬时默认（loadInitial 在 init 即触发，正常先于首帧组合到达）
@@ -168,6 +165,23 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         onReturnedToForeground = { refreshAgenda() },
     )
 
+    /** 部件域（拆分第 5 步）：picker 数据、增删/配置、homeLayout 编辑把手。 */
+    private val widget = WidgetSlot(
+        application = application,
+        scope = viewModelScope,
+        uiState = _uiState,
+        settingsRepository = settingsRepository,
+        updateSettings = { transform -> updateSettings(transform) },
+    )
+
+    // ---- Route 访问面（转发到 WidgetSlot，保持 UI 零改动）----
+    val widgetProviders = widget.widgetProviders
+    val widgetPickerBusy = widget.widgetPickerBusy
+    val widgetSetupResults = widget.widgetSetupResults
+    val moveWidgetRequests = widget.moveWidgetRequests
+    val addWidgetRequests = widget.addWidgetRequests
+    val addPopupWidgetRequests = widget.addPopupWidgetRequests
+
     /**
      * P2：Home 键回桌面请求流（GraceHomeView.onHomeIntent 转发）。路由层收集后
      * 复位两态 UI（关抽屉/搜索/字母 scrub），对齐原版 returnHomeRequests 语义。
@@ -184,21 +198,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private val _homeIntentRequests = MutableSharedFlow<Intent?>(extraBufferCapacity = 4)
     val homeIntentRequests: kotlinx.coroutines.flow.SharedFlow<Intent?> = _homeIntentRequests
 
-    // ---- P4：widget picker 状态 ----
-    /** null = 加载中；空列表 = 无可用 provider。宿主进程单 profile（原版多 profile 过滤裁剪）。 */
-    private val _widgetProviders = MutableStateFlow<List<AppWidgetProviderInfo>?>(null)
-    val widgetProviders = _widgetProviders.asStateFlow()
-    private val _widgetPickerBusy = MutableStateFlow(true)
-    val widgetPickerBusy = _widgetPickerBusy.asStateFlow()
-    /** P4：widget 添加链路结果（false = bind/写库失败，UI 侧 Toast）。 */
-    private val _widgetSetupResults = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
-    val widgetSetupResults: kotlinx.coroutines.flow.SharedFlow<Boolean> = _widgetSetupResults
-    /** refactor2（v2.9.44）：widget 管理抽 WidgetController（host/落库/配置页全链路）。 */
-    private val widgetController = WidgetController(
-        application, viewModelScope, settingsRepository,
-        onSetupResult = { _widgetSetupResults.tryEmit(it) },
-        onHomeLayoutSaved = { saved -> _uiState.update { it.copy(settings = saved) } },
-    )
+    // ---- P4：widget picker 状态 / WidgetController 已迁至 WidgetSlot（拆分第 5 步）----
 
     private var appLoadJob: Job? = null
     /** 装载失败自愈重试计数：成功装载后归零，连败不重试（防失败-重试循环）。 */
@@ -1057,37 +1057,16 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      * widget picker 数据加载（进入 picker 时调用）。
      * 原版多 profile/private profile 过滤裁剪：宿主进程单 myUserHandle。
      */
-    fun loadWidgetProviders() {
-        if (_widgetProviders.value != null) { _widgetPickerBusy.value = false; return }
-        _widgetPickerBusy.value = true
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = runCatching {
-                val context = getApplication<Application>()
-                val manager = AppWidgetManager.getInstance(context)
-                manager.getInstalledProvidersForProfile(Process.myUserHandle())
-                    .sortedBy { provider ->
-                        runCatching { provider.loadLabel(context.packageManager) }
-                            .getOrDefault(provider.provider.className).lowercase()
-                    }
-            }.onFailure { ModLog.e("GraceHomeViewModel loadWidgetProviders failed", it) }.getOrNull()
-            _widgetProviders.value = result
-            _widgetPickerBusy.value = false
-        }
-    }
+    // ---- widget 增删 / 配置（拆分第 5 步：实现见 WidgetSlot）----
 
-    /**
-     * 添加 widget：allocate → bindAppWidgetIdIfAllowed（宿主持 BIND_APPWIDGET，
-     * 免系统确认对话框）→ 写 Room homeLayout → 有配置页则 NEW_TASK 启动
-     * （fire-and-forget：配置返回前 widget 已落库生效）。全链路 runCatching，
-     * 失败回收 allocated id 并发 false（UI Toast），对齐原版 cancelSetup。
-     */
-    /** widget 增删委托 WidgetController（v2.9.44-refactor2 抽离，语义见该类头注）。 */
-    fun addHomeWidget(info: AppWidgetProviderInfo) = widgetController.addHome(info)
+    fun loadWidgetProviders() = widget.loadProviders()
 
-    fun removeHomeWidget() = widgetController.removeHome(_uiState.value.settings.homeLayout)
+    fun addHomeWidget(info: AppWidgetProviderInfo) = widget.addHome(info)
+
+    fun removeHomeWidget() = widget.removeHome()
 
     fun addPopupWidgetTo(ownerKey: String, info: AppWidgetProviderInfo) =
-        widgetController.addPopupTo(ownerKey, info)
+        widget.addPopupTo(ownerKey, info)
 
     /**
      * folders 阶段（hotfix folders2）：模块设置页快捷方式代查（SHORTCUTS_QUERY）。
@@ -1119,53 +1098,21 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** 原版 WidgetSetupActivity.configureWidget 语义：对现有 widget 启动其配置页。 */
-    fun configureHomeWidget() {
-        val current = _uiState.value.settings.homeLayout
-        if (!current.hasWidget) return
-        runCatching {
-            val context = getApplication<Application>()
-            val manager = AppWidgetManager.getInstance(context)
-            val info = manager.getAppWidgetInfo(current.widgetId) ?: return
-            if (info.configure == null) return
-            context.startActivity(Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
-                .setClassName(info.configure.packageName, info.configure.className)
-                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, current.widgetId)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { ModLog.e("GraceHomeViewModel configureHomeWidget failed", it) }
-    }
+    // ---- homeLayout 编辑把手 / 配置页（实现见 WidgetSlot）----
 
-    /** HomeScreen 编辑把手：首页内容区垂直偏移持久化（Room homeLayoutJson）。 */
-    fun updateHomeLayoutTopOffset(offset: Float) =
-        updateSettings { it.copy(homeLayout = it.homeLayout.copy(topOffsetDp = offset)) }
+    fun configureHomeWidget() = widget.configure()
 
-    /** HomeScreen 编辑把手：widget 高度持久化（0 = provider 默认）。 */
-    fun updateHomeLayoutWidgetHeight(height: Int) =
-        updateSettings { it.copy(homeLayout = it.homeLayout.copy(widgetHeightDp = height)) }
+    fun updateHomeLayoutTopOffset(offset: Float) = widget.updateTopOffset(offset)
 
-    /** 上游同步 1.2.0（S6d）：主页区块拖动排序结果落库。 */
-    fun updateHomeOrder(order: List<String>) =
-        updateSettings { it.copy(homeLayout = it.homeLayout.copy(homeOrder = order.distinct())) }
+    fun updateHomeLayoutWidgetHeight(height: Int) = widget.updateWidgetHeight(height)
 
-    /**
-     * 上游同步 1.2.0（S5b）：弹层内 widget 布局（宽度/全宽/底色/缩放/高度）回写。
-     * 落 app_popups.itemsJson —— 对应 PopupItem.widget，按 widgetId 定位替换。
-     * save=false（拖动中）由 UI 本地 drafts 承担，这里只在落盘时机调用。
-     */
-    fun updatePopupWidget(ownerKey: String, layout: com.galaxyrio.gracelauncher.data.HomeLayout, save: Boolean) {
-        if (!save) return
-        viewModelScope.launch {
-            runCatching {
-                val database = com.galaxyrio.gracelauncher.data.LauncherDatabase.getInstance(getApplication())
-                com.galaxyrio.gracelauncher.data.LauncherItemsRepository(database)
-                    .updatePopup(ownerKey, emptyList()) { previous ->
-                        previous.map { item ->
-                            if (item.widget?.widgetId == layout.widgetId) item.copy(widget = layout) else item
-                        }
-                    }
-            }.onFailure { ModLog.e("GraceHomeViewModel updatePopupWidget failed", it) }
-        }
-    }
+    fun updateHomeOrder(order: List<String>) = widget.updateHomeOrder(order)
+
+    fun updatePopupWidget(
+        ownerKey: String,
+        layout: com.galaxyrio.gracelauncher.data.HomeLayout,
+        save: Boolean,
+    ) = widget.updatePopupWidget(ownerKey, layout, save)
 
     /** 原版 clockAppKey == null 的默认语义：Android 标准 SHOW_ALARMS。 */
     fun openClock(): Boolean = runCatching {
