@@ -54,8 +54,6 @@ import com.galaxyrio.gracelauncher.data.LauncherApp
 import com.galaxyrio.gracelauncher.data.LauncherAppOrder
 import com.galaxyrio.gracelauncher.data.LauncherDatabase
 import com.galaxyrio.gracelauncher.data.LauncherFolder
-import com.galaxyrio.gracelauncher.data.FolderPlacement
-import com.galaxyrio.gracelauncher.data.PopupItem
 import com.galaxyrio.gracelauncher.data.LauncherShortcut
 import com.galaxyrio.gracelauncher.data.ShortcutRepository
 import com.galaxyrio.gracelauncher.data.ShortcutResult
@@ -143,6 +141,21 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     /** 日程域（2026-11-15 拆分第 2 步）：events / scheduleStatus 与日历失效链的持有者。 */
     private val agenda = AgendaFeed(application, viewModelScope, _uiState)
 
+    /**
+     * 设置域（拆分第 7 步）：settings / hidden_apps / folders 三条 Room 观察流、
+     * 收藏序、文件夹收藏、图标包面板。全仓的**公共写通道** —— 其他域通过
+     * `settings.update(lambda)` 落库（WidgetSlot 的 homeLayout 即走这里）。
+     */
+    private val settings = SettingsSync(
+        application = application,
+        scope = viewModelScope,
+        uiState = _uiState,
+        settingsRepository = settingsRepository,
+        favoritesStore = favoritesStore,
+        onIconPacksChanged = { refreshApps() },
+        installedIconPacks = { appRepository.iconPacks.installedPacks() },
+    )
+
     /** 天气域（拆分第 3 步）：weather 状态 + 小米天气 provider 直读引擎。 */
     private val weather = WeatherFeed(
         application = application,
@@ -168,7 +181,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         scope = viewModelScope,
         uiState = _uiState,
         settingsRepository = settingsRepository,
-        updateSettings = { transform -> updateSettings(transform) },
+        updateSettings = { transform -> settings.update(transform) },
     )
 
     /**
@@ -184,7 +197,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         uiState = _uiState,
         shortcutRepository = ShortcutRepository(application),
         decorate = { apps -> decorateApps(apps) },
-        onFavoriteKeyOrphaned = { key -> dropFavoriteKey(key) },
+        onFavoriteKeyOrphaned = { key -> settings.dropFavoriteKey(key) },
     )
 
     // ---- Route 访问面（转发到 WidgetSlot，保持 UI 零改动）----
@@ -216,12 +229,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     private var appLoadJob: Job? = null
     /** 装载失败自愈重试计数：成功装载后归零，连败不重试（防失败-重试循环）。 */
     private var appLoadRetryCount = 0
-    /** P3：设置流常驻收集（Room 行变化驱动 settings）；shutdown 显式取消 */
-    private var settingsJob: Job? = null
-    /** hotfix7：隐藏应用键流（Room hidden_apps 表；设置页 SET_HIDDEN_APPS 落库后实时到达） */
-    private var hiddenAppsJob: Job? = null
-    /** folders 阶段：文件夹流（Room folders 表 + popup items 成员 JSON，原版 snapshots 同构） */
-    private var foldersJob: Job? = null
+    // 设置域三条观察流（settings / hidden_apps / folders）已迁至 SettingsSync（拆分第 7 步）
     private var iconsJob: Job? = null
     /** 壁纸跟随失效源（模块侧根因修复）：Grace 按钮/themed 图标的光栅化配色在 VM 层
      *  预渲染成位图，壁纸变化后必须重渲染才跟得上主题。双通道 bump（与组合层
@@ -265,9 +273,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
      */
     @Volatile
     private var appLoadGeneration = 0
-    /** P6：图标包开关变化 → 重刷应用列表（渲染装饰跟随包顺序）。 */
-    private var lastIconPacks: List<String>? = null
-
     // ---- 桥快照摄入节流（v2.9.125-notif-burst）：已迁至 BridgeInbox（拆分第 4 步）----
     // 三个时间窗（80ms 合并 / 后台 pending / 回前台 700ms 宽限）与相关字段全部在新类内，
     // 不要拆散 —— 它们共同保证"冻结解冻后不回放历史通知"这一行为。
@@ -315,22 +320,8 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             IntentFilter(Intent.ACTION_WALLPAPER_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         // B6.2：天气首装载（本进程直读小米天气 provider；后续 ContentObserver 失效）
         weather.refresh("mount")
-        // P3：Room 设置接管 —— SP seed 迁移（一次性）+ 行变化流常驻跟随
-        settingsJob = viewModelScope.launch {
-            val initial = settingsRepository.loadInitial()
-            _uiState.update { it.copy(settings = initial) }
-            settingsRepository.observeSettings().collect { observed ->
-                // S8b 诊断：宿主 settings 流（graceButton.enabled 跟随验证）
-                com.homemode4miui.util.ModLog.i(
-                    "GraceSettings observe graceButton.enabled=" + observed.graceButton.enabled +
-                        " tap=" + observed.graceButton.tap.action.name +
-                        " longPress=" + observed.graceButton.longPress.action.name +
-                        " doubleTap.enabled=" + observed.graceButton.doubleTap.enabled)
-                _uiState.update { it.copy(settings = observed) }
-                // B6.4：图标包顺序变化 → 重刷（设置流驱动，幂等）
-                if (lastIconPacks != null && observed.enabledIconPackPackages != lastIconPacks) refreshApps()
-            }
-        }
+        // 设置域（拆分第 7 步）：启动 settings / hidden_apps / folders 三条 Room 观察流
+        settings.start()
         // 快捷方式域（拆分第 6 步）：启动 saved_shortcuts 流跟随 + 注册系统 shortcut 回调
         shortcuts.start()
         refreshApps()
@@ -344,60 +335,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             refreshMediaAccess()
         }
         refreshAgenda()
-        // hotfix7：隐藏应用键跟随（与 LauncherSettingsRepository 同源 DAO；
-        // 观察失败不阻塞主链路 —— 抽屉退化为不过滤）
-        hiddenAppsJob = viewModelScope.launch {
-            try {
-                val flow = LauncherDatabase.getInstance(application).settingsDao().observeHiddenApps()
-                flow.collect { keys ->
-                    _uiState.update { it.copy(hiddenAppKeys = keys.toSet()) }
-                }
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                ModLog.e("GraceHomeViewModel observeHiddenApps failed", error)
-            }
-        }
-        // folders 阶段：文件夹跟随（成员关系存于 popup items JSON，owner = "folder:<id>"，
-        // 原版 LauncherSettingsRepository.snapshots :18-33 逐字映射；观察失败不阻塞主链路）
-        foldersJob = viewModelScope.launch {
-            try {
-                val database = LauncherDatabase.getInstance(application)
-                kotlinx.coroutines.flow.combine(
-                    database.settingsDao().observeFolders(),
-                    database.itemsDao().popups(),
-                ) { folderRows, popupRows ->
-                    // 上游同步 v1.1.8 S8b：popups 全量一并透出（Triple，openFirstItem 弹层版消费）
-                    val contents = popupRows.associate { it.ownerKey to PopupItem.decode(it.itemsJson) }
-                    // hotfix folders2：widget 项单独透出（文件夹弹层渲染用；appKeys 仍不含 widget）
-                    val widgets = contents.mapNotNull { (ownerKey, items) ->
-                        val layouts = items.mapNotNull { it.widget }
-                        if (layouts.isEmpty() || !ownerKey.startsWith("folder:")) null
-                        else ownerKey.removePrefix("folder:") to layouts
-                    }.toMap()
-                    val folders = folderRows.map { entry ->
-                        LauncherFolder(
-                            id = entry.id,
-                            name = entry.name,
-                            appKeys = contents["folder:${entry.id}"].orEmpty().filter { it.widget == null }.map { it.key },
-                            placement = FolderPlacement.decode(entry.placement),
-                            appListAtBottom = entry.appListAtBottom,
-                            // 上游同步 v1.1.9：文件夹成员派生隐藏
-                            autoHideApps = entry.autoHideApps,
-                            // 上游同步 1.2.0：应用堆（主页 AppStack 渲染分支读这个字段）
-                            isAppStack = entry.isAppStack,
-                        )
-                    }
-                    Triple(folders, widgets, contents)
-                }.collect { (folders, widgets, popups) -> _uiState.update {
-                    it.copy(folders = folders, folderWidgets = widgets, popups = popups)
-                } }
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                ModLog.e("GraceHomeViewModel observeFolders failed", error)
-            }
-        }
         // 上游同步 v1.1.8 S8b：图标设计器产出跟随（GraceButton design + artwork 面）
         // 模块侧根因修复：combine 壁纸 revision + 设置流 —— 光栅化配色（WallpaperColors
         // 种子）或主题设置变化时，Grace 按钮 artwork 重渲染 + themed 图标强制重装饰。
@@ -487,7 +424,6 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 // B6.4：图标包跟随设置（装饰在 loadApps 内完成；包加载失败自动回退系统图标）
                 val packs = _uiState.value.settings.enabledIconPackPackages
-                lastIconPacks = packs
                 // 上游同步补漏（LauncherViewModel.kt:443 decorate 逐字语义）：
                 // 应用图标设计器产出（item_icons）+ 全局面设计 + 主题化在入库前套用。
                 // 快照在装饰前取定：装载期间 icons 流前进的场景由尾部补偿轮处理。
@@ -801,69 +737,24 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
         context.startActivity(Intent(AlarmClock.ACTION_SHOW_ALARMS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }.onFailure { ModLog.e("GraceHomeViewModel openClock failed", it) }.isSuccess
 
-    /** 原版 LauncherViewModel.toggleFavorite 的 P1 同构：SP 落盘 + StateFlow 即时刷新。 */
-    fun toggleFavorite(app: LauncherApp) {
-        val current = _uiState.value.let { it.favoriteOrder + it.favorites.map(LauncherApp::key) }.distinct()
-        val updated = favoritesStore.toggle(app.key, current)
-        ModLog.i("toggleFavorite: ${app.key} shortcut=${app.shortcut != null} size=${updated.size}")
-        _uiState.update { it.copy(favoriteOrder = updated) }
-    }
+    // ---- 收藏 / 设置写通道 / 图标包（实现见 SettingsSync）----
 
-    /** 收藏顺序里摘掉某个 key（快捷方式被移除时清理脏 key；ShortcutSync 的回调）。 */
-    private fun dropFavoriteKey(key: String) {
-        val current = _uiState.value.favoriteOrder
-        if (key !in current) return
-        val updated = favoritesStore.toggle(key, current)
-        _uiState.update { it.copy(favoriteOrder = updated) }
-    }
+    fun toggleFavorite(app: LauncherApp) = settings.toggleFavorite(app)
 
-    /** hotfix8：编辑收藏页重排（原版 LauncherViewModel.reorderFavorites：Store 只重排现有成员）。 */    fun reorderFavorites(keys: List<String>) {
-        val updated = favoritesStore.reorder(keys, _uiState.value.favoriteOrder)
-        _uiState.update { it.copy(favoriteOrder = updated) }
-    }
+    fun reorderFavorites(keys: List<String>) = settings.reorderFavorites(keys)
 
-    /**
-     * folders 阶段：编辑收藏页的文件夹收藏开关（原版 LauncherSettingsRepository.
-     * setFolderFavorites 直通 —— 宿主与库同进程，无需走桥；文件夹流实时跟随）。
-     */
-    suspend fun setFolderFavorites(selection: Map<String, Boolean>): Boolean {
-        if (selection.isEmpty()) return true
-        return try {
-            com.galaxyrio.gracelauncher.data.LauncherSettingsRepository(
-                LauncherDatabase.getInstance(getApplication())).setFolderFavorites(selection)
-            true
-        } catch (error: kotlinx.coroutines.CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            ModLog.e("GraceHomeViewModel setFolderFavorites failed", error); false
-        }
-    }
+    suspend fun setFolderFavorites(selection: Map<String, Boolean>): Boolean =
+        settings.setFolderFavorites(selection)
 
-    /**
-     * C 组（C3）：模块设置页命令入口（GraceBridgeReceiver 转发）。
-     * 落库与快照回推都在引擎协程内，onReceive 主线程零阻塞。
-     */
+    /** 设置页命令入口（落库与快照回推都在引擎协程内，onReceive 主线程零阻塞）。 */
     fun onSettingsCommand(cmd: String?, arg1: String?, arg2: String?, json: String?) {
         settingsHostEngine.handle(cmd, arg1, arg2, json)
     }
 
-    /** C 组（C3）：引擎落库回调 —— 设置行走 Room 观察流自动生效，这里补 SP 面（收藏序）。 */
-    private fun onSettingsMutated() {
-        val refreshed = favoritesStore.currentOrder().orEmpty()
-        _uiState.update { it.copy(favoriteOrder = refreshed, settingsRevision = it.settingsRevision + 1) }
-    }
+    /** 引擎落库回调（设置行走 Room 观察流自动生效，这里补 SP 面收藏序）。 */
+    private fun onSettingsMutated() = settings.onMutated()
 
-
-    // 审计修缮（2026-10-16）：删除 cycleClockLayout —— P1 演示入口，唯一调用点
-    // （GracePopupActions.cycleClockStyle 死接线）已删；时钟样式走设置页 ClockStyle 面板。
-
-    /** P3：写路径切 Room（GraceSettingsRepository.mutateSettings 事务；DB 故障内部降级 SP）。 */
-    fun updateSettings(transform: (GraceHomeSettings) -> GraceHomeSettings) {
-        viewModelScope.launch {
-            val next = settingsRepository.mutateSettings(transform)
-            _uiState.update { it.copy(settings = next) }
-        }
-    }
+    fun updateSettings(transform: (GraceHomeSettings) -> GraceHomeSettings) = settings.update(transform)
 
     /** Home 键回桌面（GraceHomeView.onHomeIntent 转发）：复位抽屉/搜索两态。 */
     fun requestReturnHome() {
@@ -935,32 +826,20 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     // ---- B6.4：图标包选择（面板数据 + 单选落库）----
 
-    /** null = 加载中。原版 installedPacks（adw/nova/go/lawnchair 等 discovery intents）。 */
-    private val _iconPacks = MutableStateFlow<List<com.galaxyrio.gracelauncher.data.icons.IconPackInfo>?>(null)
-    val iconPacks = _iconPacks.asStateFlow()
+    /** 图标包面板数据（实现见 SettingsSync：null = 加载中）。 */
+    val iconPacks = settings.iconPacks
 
-    fun loadIconPacks() {
-        if (_iconPacks.value != null) return
-        viewModelScope.launch {
-            val result = runCatching { appRepository.iconPacks.installedPacks() }
-                .onFailure { ModLog.e("GraceHomeViewModel loadIconPacks failed", it) }
-                .getOrDefault(emptyList())
-            _iconPacks.value = result
-        }
-    }
+    fun loadIconPacks() = settings.loadIconPacks()
 
     /** 单选简化（原版多选 fallback 顺序随 C 组设置页恢复）：null = 系统图标。 */
-    fun setIconPack(pkg: String?) {
-        updateSettings { it.copy(iconPackPackages = listOfNotNull(pkg)) }
-    }
+    fun setIconPack(pkg: String?) = settings.setIconPack(pkg)
 
     /** GraceHomeView.onHomeDetached 显式调用（手动构造的 ViewModel 不走 onCleared）。 */
     fun shutdown() {
         appLoadJob?.cancel()
-        settingsJob?.cancel()
         iconsJob?.cancel()
-        hiddenAppsJob?.cancel()
-        foldersJob?.cancel()
+        // 设置域：取消三条 Room 观察流（实现见 SettingsSync.dispose）
+        settings.dispose()
         // 快捷方式域：取消流跟随 + 解绑系统回调 + 关闭仓储（实现见 ShortcutSync.dispose）
         shortcuts.dispose()
         // v2.9.126：日程失效监听解绑（实现已迁 AgendaFeed，dispose 负责 job + observer）
