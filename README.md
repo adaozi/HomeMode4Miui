@@ -15,8 +15,8 @@
 | OS2（5.x） | `RELEASE-5.39.40.10843` | `com.miui.home.launcher.Launcher` |
 | OS3（6.x） | `RELEASE-6.01.03.1927` | `com.miui.home.launcher.BaseLauncher`（OS3 的 Launcher 大重构，方法整体上移） |
 
-当前版本：`2.9.162-bridge-token-hardening`（versionCode 178），见 `app/build.gradle`。
-最新 Tag：[v2.9.162-bridge-token-hardening](https://github.com/adaozi/HomeMode4Miui/releases/tag/v2.9.162-bridge-token-hardening)。
+当前版本：`2.9.163-refactor-viewmodel`（versionCode 179），见 `app/build.gradle`。
+最新 Tag：[v2.9.163-refactor-viewmodel](https://github.com/adaozi/HomeMode4Miui/releases/tag/v2.9.163-refactor-viewmodel)。
 
 ## 效果预览
 

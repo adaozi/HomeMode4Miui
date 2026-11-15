@@ -90,3 +90,52 @@
 | 拆分后发现性能回退 | 每步装机后看 `refreshApps` / `snapshot pushed` 日志与首帧耗时 |
 
 回滚：单步 `git revert <commit>` 即可，不涉及数据迁移与协议变更。
+
+## 8. 实施结果（已完成，v2.9.163 / vc179）
+
+| 文件 | 行数 | 说明 |
+|---|---|---|
+| `GraceHomeViewModel.kt` | **472**（原 1775，−73%） | 只剩编排：派生属性转发、launch、生命周期、命令入口 |
+| `GraceHomeUiState.kt` | 195 | 状态定义 + 8 个派生属性 |
+| `AppsLoader.kt` | 449 | 枚举 / 全量解码 / 图标装饰 / 互斥代际 |
+| `ShortcutSync.kt` | 439 | pinned 对账 / 图标解码 / 查询启动 / 系统回调 |
+| `BridgeInbox.kt` | 266 | 通知媒体快照 / 回放抑制三时间窗 |
+| `SettingsSync.kt` | 224 | 三条 Room 观察流 / 收藏 / 图标包 |
+| `WidgetSlot.kt` | 160 | picker / 增删配置 / homeLayout |
+| `AgendaFeed.kt` | 138 | 日历失效链 |
+| `WeatherFeed.kt` | 56 | 天气直读 |
+
+提交序列（每步独立可 revert）：`04523dc`(1-2) → `c73620f`(3-4) → `310ecfe`(5) →
+`596d74c`(6) → `c83b5b8`(7) → `63cc9fd`(8)。
+
+### 实施中修正的两处原方案判断
+
+1. **§4-7 的「单向依赖」是错的**（见 §4-8）：`buildShortcutApps` 调 `decorateApps`，
+   而装饰路径又调 `buildShortcutApps` —— 双向。用 lambda 注入装饰能力解决。
+2. **`buildShortcutApps` 必须拆两个出口**：`buildForRows`（纯计算，供装饰路径与
+   `apps`/`folderApps` 原子换入）与 `rebuildFromRows`（计算+写 state，供流跟随）。
+   只留写 state 的版本时，装饰路径会多一次 `update`，中间态可能被并发装载覆盖。
+
+### 三条必须守住的约束（已写进 AppsLoader 类头）
+
+- `decorateMutex` + `appLoadGeneration` **不可拆散**：读/校验代际/写全在锁内，装载换入
+  也在锁内。这是 2026-10-28「收藏有图标、抽屉全占位」事故的修复本体。
+- `favoriteOrder` 是 AppsLoader 唯一允许跨域写的字段（必须与 `apps` 同一次 update 换入）。
+- AppsLoader 对 ShortcutSync 零直接依赖（全部 lambda 注入）。
+
+### 一个编译期坑
+
+两个 delegate 互相引用（`appsLoader` ← `shortcuts` ← `appsLoader.decorate`）时，
+Kotlin 类型推断会报 `TYPECHECKER_HAS_RUN_INTO_RECURSIVE_PROBLEM` ——
+**两个 val 都要显式标注类型**（`private val appsLoader: AppsLoader = AppsLoader(...)`）。
+
+### 验证口径
+
+装机日志三个指标必须同时为真：
+```
+refreshApps: enumerated=142
+refreshApps: icons done missing=0/142
+refreshApps: decorated iconMissing=0/142      ← "抽屉字母占位"的反向指标
+```
+外加抽屉目视确认（不能有任何一行是字母占位）。
+
