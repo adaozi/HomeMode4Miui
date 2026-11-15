@@ -103,10 +103,15 @@ internal fun FavoritesScreen(uiState: LauncherUiState, actions: LauncherActions,
     ItemSelectionScreen(
         title = stringResource(R.string.edit_favorites), tag = "favorites",
         selected = uiState.favoriteItems.map { SelectionEntry(it.key, it.label, it) },
-        apps = uiState.allApps, enabled = !uiState.isLoadingSettings && !uiState.settingsLoadFailed,
+        // v2.9.157（User 实锤"快捷方式不能加到收藏"）：可选池补 shortcutApps ——
+        // LauncherUiState.allApps 只含真实应用，快捷方式收藏项此前既选不到也取消不掉。
+        // distinctBy 防 key 重复（LazyColumn key 相同会崩）。
+        apps = (uiState.allApps + uiState.shortcutApps).distinctBy { it.key },
+        enabled = !uiState.isLoadingSettings && !uiState.settingsLoadFailed,
         onToggle = onToggle, onRemove = { key -> uiState.findItem(key)?.let(onToggle) }, onReorder = onReorder, onDone = onDone,
         onAddShortcut = { choosingShortcut = true },
         onAddFolder = if (foldersEnabled) ({ choosingFolders = true }) else null,
+        includeShortcuts = true,
     )
 }
 
@@ -173,6 +178,8 @@ private fun ItemSelectionScreen(
     header: (@Composable () -> Unit)? = null,
     reorderOnly: Boolean = false,
     loading: Boolean = false,
+    /** v2.9.157：可选池是否放行快捷方式（收藏页需要；弹层编辑器另有专属入口，保持原行为）。 */
+    includeShortcuts: Boolean = false,
 ) {
     val selectedKeys = selected.map { it.key }
     val selectedEntries = selected.associateBy { it.key }
@@ -201,7 +208,8 @@ private fun ItemSelectionScreen(
         TextButton(onClick = onDone, modifier = Modifier.testTag("${tag}_done")) { Text(stringResource(R.string.done)) }
     }) { padding ->
         AppSelectionList(
-            apps = apps.filter { it.shortcut == null }, selectedKeys = selectedKeys.toSet(), query = query, onSelect = onToggle,
+            apps = if (includeShortcuts) apps else apps.filter { it.shortcut == null },
+            selectedKeys = selectedKeys.toSet(), query = query, onSelect = onToggle,
             modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
             state = list, listTag = "${tag}_list", searchTag = "${tag}_search", itemTagPrefix = "favorite_all",
             enabled = enabled && reorder.draggingKey == null, userScrollEnabled = reorder.draggingKey == null,

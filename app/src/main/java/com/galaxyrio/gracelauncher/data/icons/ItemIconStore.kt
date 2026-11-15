@@ -139,7 +139,17 @@ class ItemIconStore(private val context: Context, private val packs: IconPackRep
         maxBytes = 16 * 1024 * 1024, sizeOf = { iconBitmapBytes(it.icon, it.monochromeIcon) })
 
     suspend fun apply(app: LauncherApp, choice: ItemIcon?, settings: LauncherSettings = LauncherSettings()): LauncherApp = withContext(Dispatchers.IO) {
-        val renderKey = "${app.key}|${choice?.hashCode()}|${settings.hashCode()}|${java.time.LocalDate.now()}"
+        // v2.9.158（模块差异，上游无）：**仅快捷方式**在签名里追加输入图标指纹。
+        // 快捷方式的位图是异步补上的（saved_shortcuts 行先到、LauncherApps 图标后到），
+        // 若签名只看 key+设置，第一次用 icon=null 渲染的结果会被缓存并长期命中 —— 之后
+        // 即使图标就绪也一直返回旧的空图标（装机实锤：收藏区快捷方式显示异常图标而抽屉正常）。
+        // 普通应用不参与：它们的图标每次 refreshApps 都是新实例，加 identityHash 会让
+        // 全量装饰永久 miss（性能退化）；快捷方式数量少，多渲染几次无碍。
+        val iconStamp = if (app.shortcut != null) {
+            "${System.identityHashCode(app.icon)}:${System.identityHashCode(app.monochromeIcon)}"
+        } else "stable"
+        val renderKey = "${app.key}|${choice?.hashCode()}|${settings.hashCode()}|$iconStamp|" +
+            java.time.LocalDate.now()
         renderedApps.get(renderKey, renderKey)?.let { return@withContext it }
         val result = safelyRender(app, app) {
             if (choice == null) return@safelyRender app

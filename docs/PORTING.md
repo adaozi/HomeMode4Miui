@@ -793,3 +793,31 @@ DIFF vs 桩文件:
   - 真机验收：删除后设计器列表该条消失，重新创建为默认图标。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.155-shortcut-thumb-171.apk`、
   `.build/out/HomeMode4Miui-v2.9.156-shortcut-icon-cleanup-172.apk`。
+
+### shortcut-favorites + icon-cache（v2.9.157 / v2.9.158 / vc173~174，2026-11-15）—— 快捷方式可收藏 + 收藏区图标错位根因
+
+- [x] **v2.9.157（User：快捷方式不能加到收藏）**：三处独立拦截，缺一处都进不去。
+  1. `GraceHomeUiState.favorites` 解析池只有 `apps` → 快捷方式 key 永远解析不到（即使写进
+     `favoriteOrder` 也不显示）。改为 `apps + savedShortcutApps`（用全量 saved，弹层里的
+     快捷方式也能收藏）。
+  2. `GraceFavoritesShim.uiState` 没投影 `shortcutApps` → 编辑收藏页 `favoriteItems` 无此项。
+     补 `shortcutApps = state.savedShortcutApps`。
+  3. `ItemSelectionScreen` 内部硬过滤 `apps.filter { it.shortcut == null }` → 可选列表选不到。
+     加 `includeShortcuts` 参数，仅收藏页传 true（弹层编辑器保持原行为，避免与其自身
+     "添加快捷方式"入口语义冲突）；收藏页可选池 `allApps + shortcutApps` 并 `distinctBy(key)`
+     （防 LazyColumn key 重复崩溃）。
+  - 附带：`removeShortcut` 时把 key 从 `favoriteOrder` 摘掉（不留脏成员槽位）；
+    `toggleFavorite` 加日志锚点（key / shortcut / size）。
+- [x] **v2.9.158（User：收藏页图标与抽屉不一致）**：根因是**图标渲染缓存签名不含输入图标**。
+  快捷方式数据先到、图标后到：① 行到达即装饰，此时 `icon == null` → 空图标渲染结果被
+  `IconSnapshotCache` 缓存；② `LauncherApps` 图标到达后重建，装饰命中 ① 的缓存 → 永久返回
+  空图标副本。抽屉走另一条数据路径，故只有收藏区异常。
+  日志实锤：`toggleFavorite: ... shortcut=true` 紧跟 `AppIcon fallback: key=shortcut:... mono=false themed=true`，
+  而同时 `syncPinnedShortcuts: icons=1`。
+  - 修复①：`ItemIconStore.apply` 的 renderKey **只对 shortcut** 追加 `identityHashCode(icon/monochrome)`。
+    普通应用保持原签名 —— 它们每次 refreshApps 都是新图标实例，加指纹会让全量装饰永久 miss。
+  - 修复②：`decorateApps` 增加 `app.shortcut != null && app.icon == null → 原样返回`（图标未就绪
+    不装饰，既不白渲染也不污染缓存）。
+  - 真机验收：两处图标一致，无 AppIcon fallback 日志。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.157-shortcut-favorites-173.apk`、
+  `.build/out/HomeMode4Miui-v2.9.158-shortcut-icon-cache-174.apk`。

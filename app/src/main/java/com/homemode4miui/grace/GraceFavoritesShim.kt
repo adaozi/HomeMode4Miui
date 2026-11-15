@@ -26,6 +26,10 @@ internal object GraceFavoritesShim {
     /** GraceHomeUiState → 收藏编辑面最小 LauncherUiState（apps/favorites/folders 全量投影）。 */
     fun uiState(state: GraceHomeUiState): LauncherUiState = LauncherUiState(
         apps = state.apps,
+        // v2.9.157：快捷方式池并入 —— 编辑收藏页的 favoriteApps 由
+        // (allApps + shortcutApps).filter { key in favoriteKeys } 派生，缺了它
+        // 快捷方式收藏项在编辑页里既不显示也无法取消勾选。
+        shortcutApps = state.savedShortcutApps,
         folders = state.folders,
         favoriteKeys = state.favoriteOrder.toSet(),
         favoriteOrder = state.favoriteOrder,

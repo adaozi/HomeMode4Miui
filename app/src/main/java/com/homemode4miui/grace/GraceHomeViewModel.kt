@@ -164,11 +164,14 @@ data class GraceHomeUiState(
     /** 原版 LauncherUiState.favoriteItems 的 P1 同构：按 favoriteOrder 排出已装应用。
      *  刷新期不清空（上游 favoriteApps 只挡 settings 加载/失败）——安装/卸载触发的
      *  refreshApps 后台跑，旧列表保持显示，新列表就绪后原位换入（装机实锤：整列表
-     *  消失几秒是移植引入的 isLoadingApps 空化，非上游设计）。 */
+     *  消失几秒是移植引入的 isLoadingApps 空化，非上游设计）。
+     *  v2.9.157（User 实锤"快捷方式不能加到收藏"）：解析池补 savedShortcutApps ——
+     *  此前只查 apps，快捷方式 key 永远解析不到，toggle 写进了 favoriteOrder 也显示不出来。
+     *  用全量 saved（不只 showInAppList）以便把弹层里的快捷方式也收藏到首页。 */
     val favorites: List<LauncherApp>
         get() {
             if (appLoadFailed) return emptyList()
-            val byKey = apps.associateBy(LauncherApp::key)
+            val byKey = (apps + savedShortcutApps).associateBy(LauncherApp::key)
             return favoriteOrder.mapNotNull(byKey::get)
         }
 
@@ -913,6 +916,15 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                         }.onFailure { ModLog.e("removeShortcut unpin failed: ${app.key}", it) }.isSuccess
                     } else false
                     ModLog.i("removeShortcut: ${app.key} unpinOk=$unpinOk remaining=${remaining?.size}")
+                    // v2.9.157：收藏顺序里摘掉该 key —— 否则 favoriteOrder 留下脏 key
+                    // （虽然 favorites 解析会跳过，但编辑收藏页会拿到不存在的成员槽位）
+                    runCatching {
+                        val current = _uiState.value.favoriteOrder
+                        if (app.key in current) {
+                            val updated = favoritesStore.toggle(app.key, current)
+                            _uiState.update { it.copy(favoriteOrder = updated) }
+                        }
+                    }.onFailure { ModLog.e("removeShortcut favorite cleanup failed", it) }
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -1137,6 +1149,11 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
                     // monochromeIcon（桌面 themed 圆显隐一致）；iconPackPackage 保持枚举原值
                     // （theme kind 本就原样保留语义）。
                     when {
+                        // v2.9.158：快捷方式图标还没解码出来（saved_shortcuts 行先到、
+                        // LauncherApps 图标后到）→ 跳过装饰。此时渲染只会产出"无图标"
+                        // 的结果，既白费一次渲染又会污染图标渲染缓存；等 shortcutIcons
+                        // 到位后 buildShortcutApps 会重建并正常装饰。
+                        app.shortcut != null && app.icon == null -> app
                         special == null && iconSettings.iconDesign == null && app.icon == null -> app
                         special == null && iconSettings.iconDesign == null && !themed ->
                             if (app.monochromeIcon == null) app else app.copy(monochromeIcon = null)
@@ -1347,6 +1364,7 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggleFavorite(app: LauncherApp) {
         val current = _uiState.value.let { it.favoriteOrder + it.favorites.map(LauncherApp::key) }.distinct()
         val updated = favoritesStore.toggle(app.key, current)
+        ModLog.i("toggleFavorite: ${app.key} shortcut=${app.shortcut != null} size=${updated.size}")
         _uiState.update { it.copy(favoriteOrder = updated) }
     }
 
