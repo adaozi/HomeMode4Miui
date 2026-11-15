@@ -41,8 +41,10 @@ import de.robv.android.xposed.XposedHelpers;
  *    id 残留孤儿（PA 库 entity 正常删除、界面正确消失），孤儿由 MIUI 自身周期清理
  *    兜底；provider 已空的不再拦。全程 ModLog 可审计。
  *
- * 装载：MainHook.handleLoadPackage 对 com.miui.personalassistant 的分支
- * （LSPosed 静态作用域见 assets/scope.list + META-INF/xposed/scope.list）。
+ * 装载：MainHook.handleLoadPackage 对 com.miui.personalassistant 的分支。
+ * 作用域来源（静态声明，两份必须一致）：assets/scope.list（安装/覆盖更新时 LSPosed
+ * 重放的作用域，会覆盖手动勾选）+ res/values/arrays.xml 的 xposed_scope（UI 推荐作用域）。
+ * 未预装智能助理的机型：LSPosed 自动跳过该包，本类不装载，桌面侧功能不受影响。
  */
 public final class PaWidgetGuard {
 

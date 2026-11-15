@@ -205,7 +205,11 @@ bash tools/build_apk.sh
 
 ## 安装与启用
 
-1. 安装 APK → LSPosed → 启用本模块，作用域勾选**系统桌面（`com.miui.home`）**；
+1. 安装 APK → LSPosed → 启用本模块。作用域为**静态声明**，无需手动勾选：
+   - `com.miui.home`（系统桌面，全部 hook 主体，必需）
+   - `com.miui.personalassistant`（智能助理 / 负一屏 host，负一屏微件保活）
+
+   声明来源为 `assets/scope.list`（安装与每次覆盖更新时由 LSPosed 重放，会覆盖管理器里的手动勾选）+ `xposedscope`（管理器 UI 默认勾选）。**未预装智能助理的机型该包自动跳过**，桌面侧功能不受影响，负一屏相关能力随系统本身缺位。
 2. 重启系统桌面；
 3. 打开模块 App，完成**前置闸自检**（hook 生效 / 通知监听授权 / root 保活 / MIUI 自启动）
    —— 权限不齐或核心 hook 失败时开关禁用，首页明示缺项；

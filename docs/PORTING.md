@@ -865,3 +865,29 @@ DIFF vs 桩文件:
 - [x] **验证**：构建通过；待装机确认所有应用返回动画统一为"缩小消失"（真机日志锚点
   `AppCloseAnim: icon target suppressed -> default disappear rect`）。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.160-close-anim-uniform-176.apk`。
+
+### static-scope-pa（v2.9.161 / versionCode 177，2026-11-15）—— 作用域改为静态双包声明
+
+- [x] **诉求**：模块作用域改为静态声明，固定为系统桌面 `com.miui.home` + 智能助理
+  `com.miui.personalassistant`；并显式承认**部分机型未预装智能助理**，缺该包不得影响桌面侧。
+- [x] **问题（漂移）**：`assets/scope.list` 自 v2.9.148 起已写全两包（安装/覆盖更新时 LSPosed
+  重放的作用域来源），但 `res/values/arrays.xml` 的 `xposed_scope` 仍只有 `com.miui.home`
+  —— 两份声明不同源：管理器 UI 推荐作用域少一项，新装用户拿不到 PA 的默认勾选提示，
+  两处迟早再次分叉（v2.9.148 的漂移即由此类不一致积累）。
+- [x] **修复**：`xposed_scope` 补齐 `com.miui.personalassistant`，与 `assets/scope.list` 逐字一致；
+  arrays.xml 内加注释固化"两份声明必须同源"的约束与各自职责（scope.list = 安装时重放、
+  会覆盖手动勾选；xposedscope = UI 推荐作用域）。
+- [x] **缺包容错（无需代码改动，已核实三层）**：
+  ① LSPosed 读取 scope.list/推荐作用域时对未安装包**自动跳过**，不在管理器报错、不阻断加载；
+  ② `MainHook.handleLoadPackage` 的 PA 分支只在 `packageName` 命中时装载，未安装 = 零注入，
+     `PaWidgetGuard` 不运行，桌面侧 hook 全部照常；
+  ③ 宿主侧 `MinusOneEntry` 本就有"overlay client 未就绪"降级链（client 重试 → 状态机兜底 →
+  等 PA 上线自愈轮询），`MinusOneGate` 无 PA 时无 connect 可拦、25s 上限兜底放行，不阻塞桌面。
+- [x] **文档**：README 安装步骤改为"静态作用域，无需手动勾选"，并注明未预装智能助理机型的表现；
+  `PaWidgetGuard` 类注释同步作用域出处（删除已废弃的 `META-INF/xposed/scope.list` 引用）。
+- [x] **验证**：`assembleRelease` 通过；产物反查确认
+  `assets/scope.list` = `["com.miui.home","com.miui.personalassistant"]`、
+  `array/xposed_scope size=2 = ["com.miui.home","com.miui.personalassistant"]`。
+- [ ] **待装机**：覆盖安装后 LSPosed 作用域页应自动勾选两项（无 PA 机型只有桌面一项）；
+  有 PA 机型确认 `loaded into com.miui.personalassistant (PaWidgetGuard)` 日志出现。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.161-static-scope-pa-177.apk`。

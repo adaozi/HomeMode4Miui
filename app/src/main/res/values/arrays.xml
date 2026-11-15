@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- LSPosed 静态作用域（两份声明必须逐字一致，否则漂移）：
+         ① assets/scope.list —— 模块安装/覆盖更新时 LSPosed 读取并重放的作用域来源
+            （会覆盖管理器数据库里的手动勾选，见 docs/PORTING.md v2.9.148）；
+         ② 本数组 —— xposedscope，管理器 UI 的推荐作用域（首次启用时的默认勾选）。
+
+         包名清单：
+           com.miui.home               系统桌面（全部 hook 主体，必需）
+           com.miui.personalassistant  智能助理（负一屏 host）：PaWidgetGuard 微件 id 保活
+         部分机型/版本未预装智能助理 —— LSPosed 对未安装包自动跳过，缺该包不影响
+         桌面侧任何功能；宿主侧 overlay 链路本就有 client 未就绪降级（MinusOneEntry）。 -->
     <string-array name="xposed_scope">
         <item>com.miui.home</item>
+        <item>com.miui.personalassistant</item>
     </string-array>
 </resources>
