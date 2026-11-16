@@ -276,7 +276,15 @@ internal class AppsLoader(
                 val folderApps = decorateFolders(uiState.value.folders, snapshotAtDecorate)
                 // 原版语义：favoritesFor 负责首装默认收藏 / 旧格式迁移 / 去重；
                 // 之后包变化刷新只补 key，不打乱用户已保存的顺序。
-                val order = favoritesStore.favoritesFor(apps)
+                // 上游 1.2.2+：首页顺序单一来源 = homeOrder（收藏也是其中条目）。
+                // P11b 起以 homeOrder 为准（去掉 grace:/widget: 区块 key），Store 仍作为
+                // 兜底与「新增收藏只写了 Store」的差集补充 —— 双写单读，迁移失败也不会丢收藏。
+                val storeOrder = favoritesStore.favoritesFor(apps)
+                val fromHome = uiState.value.settings.homeLayout.homeOrder
+                    ?.filterNot { it.startsWith("grace:") || it.startsWith("widget:") }
+                    ?.takeIf { it.isNotEmpty() }
+                val order = if (fromHome == null) storeOrder
+                    else (fromHome + storeOrder.filterNot { it in fromHome }).distinct()
                 // 上游同步 v1.1.8 S8a：工作资料枚举（无 managed profile 时零开销静默跳过）。
                 val workProfiles = appRepository.workProfiles()
                 val workProfileApps = if (workProfiles.isNotEmpty()) {

@@ -1180,3 +1180,25 @@ P11（首页切上游 `uiState` 契约）的第一步：**只补契约、不切�
 ② **排序单一来源统一**（现状双源：`FavoritesStore`(SP) 存收藏顺序 + `homeLayout.homeOrder` 存区块顺序；
 上游只用 `homeOrder`）—— 需一次性迁移 + 双读兜底；
 ③ 完整回归：收藏增删排序 / 文件夹 / 应用堆 / 拖动排序 / 手势 / 时钟 / 日程 / 天气 / widget。
+
+### P11b 第一段：排序单一来源（v2.9.174-p11b-single-order-source / versionCode 190，2026-11-16）
+
+P11b 拆两段，本段只解决"收藏顺序双源"，不动 `HomeScreen`（降低单次风险面）。
+
+**问题**：模块此前双源 —— `FavoritesStore`(SP) 存收藏顺序，`homeLayout.homeOrder`(Room) 只存区块顺序；
+上游 1.2.2+ 首页顺序是**单一来源** `homeOrder`（区块 / 类别 / 收藏都是其中条目）。
+
+- [x] **一次性迁移**（vc189 已单独装机验证）：`GraceHomeViewModel.migrateFavoritesToHomeOrder()`
+  —— `homeReady` 后触发，`homeOrder` 非空即跳过（幂等），把 `区块 key + favoriteOrder` 写入 homeOrder。
+  Route 里 `LaunchedEffect(state.homeReady)` 调用。实测日志：
+  `favorites→homeOrder migrate: blocks=2 favorites=10 total=12`（该机无小组件，故 blocks=2）。
+- [x] **单源读取**（vc190）：`AppsLoader` 的收藏顺序改为
+  `homeOrder（去掉 grace:/widget:） + Store 差集` —— 既以 homeOrder 为准，又保留
+  "新增收藏只写了 Store"的补全路径，迁移失败也不会丢收藏。
+- [x] **双写**：`SettingsSync.reorderFavorites` 同时写 homeOrder（区块相对位置不动，收藏段换新顺序）
+  与 `FavoritesStore`（镜像存根）。读取只认 homeOrder → 语义与上游一致，回退仍有 Store 可用。
+- [x] 验证：零 FATAL、`refreshApps` 142/142 图标零缺失、迁移日志只在首轮出现（第二轮幂等跳过）。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.174-p11b-single-order-source-190.apk`。
+
+**P11b 第二段（待做）**：`HomeScreen` / `ClockRegionHeader` 换上游实现 + Route 接适配层。
+策略：模块版改名 `LegacyHomeScreen` 保留，上游版上线后出问题可一行切回。

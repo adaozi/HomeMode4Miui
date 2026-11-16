@@ -342,6 +342,31 @@ class GraceHomeViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateHomeOrder(order: List<String>) = widget.updateHomeOrder(order)
 
+    /**
+     * P11b 一次性迁移：把 FavoritesStore 里保存的收藏顺序并入 `homeLayout.homeOrder`。
+     *
+     * 背景：上游 1.2.2+ 首页顺序是**单一来源** homeOrder（区块 / 类别 / 收藏都是其中条目）；
+     * 模块此前双源 —— FavoritesStore(SP) 存收藏顺序，homeOrder 只存区块顺序。
+     * 本函数幂等（homeOrder 非空即跳过），且写失败不影响旧读取路径（收藏仍从 Store 读）。
+     */
+    fun migrateFavoritesToHomeOrder() {
+        val state = _uiState.value
+        if (!state.homeReady) return
+        if (!state.settings.homeLayout.homeOrder.isNullOrEmpty()) return
+        if (state.favoriteOrder.isEmpty()) return
+        val blocks = buildList {
+            if (state.settings.clockEnabled || state.settings.calendarAgenda) {
+                add(com.galaxyrio.gracelauncher.data.GraceWidget.ClockCalendar.key)
+            }
+            if (state.settings.homeLayout.hasWidget) add("widget:${state.settings.homeLayout.widgetId}")
+            if (state.settings.mediaPlayer) add(com.galaxyrio.gracelauncher.data.GraceWidget.Media.key)
+        }
+        val order = (blocks + state.favoriteOrder).distinct()
+        ModLog.i("favorites→homeOrder migrate: blocks=" + blocks.size
+            + " favorites=" + state.favoriteOrder.size + " total=" + order.size)
+        updateHomeOrder(order)
+    }
+
     fun updatePopupWidget(
         ownerKey: String,
         layout: com.galaxyrio.gracelauncher.data.HomeLayout,

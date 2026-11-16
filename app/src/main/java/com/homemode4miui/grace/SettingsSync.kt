@@ -172,10 +172,26 @@ internal class SettingsSync(
         uiState.update { it.copy(favoriteOrder = updated) }
     }
 
-    /** hotfix8：编辑收藏页重排（原版 LauncherViewModel.reorderFavorites：Store 只重排现有成员）。 */
+    /**
+     * hotfix8：编辑收藏页重排（原版 LauncherViewModel.reorderFavorites：Store 只重排现有成员）。
+     *
+     * P11b：上游 1.2.2+ 收藏顺序存在 `homeLayout.homeOrder` 里（与区块同序）。此处在保持
+     * 「双写单读」策略：homeOrder 为主（区块相对位置不动，收藏段换成新顺序），
+     * FavoritesStore 继续镜像写入作为回退来源。
+     */
     fun reorderFavorites(keys: List<String>) {
-        val updated = favoritesStore.reorder(keys, uiState.value.favoriteOrder)
-        uiState.update { it.copy(favoriteOrder = updated) }
+        val current = uiState.value
+        val updated = favoritesStore.reorder(keys, current.favoriteOrder)
+        val homeOrder = current.settings.homeLayout.homeOrder
+        if (homeOrder.isNullOrEmpty()) {
+            uiState.update { it.copy(favoriteOrder = updated) }
+            return
+        }
+        val blocks = homeOrder.filter { it.startsWith("grace:") || it.startsWith("widget:") }
+        val favorites = keys.filterNot { it.startsWith("grace:") || it.startsWith("widget:") }
+        val merged = (blocks + favorites).distinct()
+        update { it.copy(homeLayout = it.homeLayout.copy(homeOrder = merged)) }
+        uiState.update { it.copy(favoriteOrder = favorites) }
     }
 
     /**
