@@ -1052,3 +1052,42 @@ DIFF vs 桩文件:
   https://github.com/Galaxy-rio/GraceLauncher/issues/263 ，建议上游同样处理）。
 - [x] **验证**：`assembleRelease` 通过；装机零 FATAL；区块合并不重复渲染；天气图标点击可打开天气应用。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.168-p3-weather-click-184.apk`。
+
+### P4a 应用装载增量刷新（v2.9.169-p4a-incremental-apps / versionCode 185，2026-11-16）
+
+上游 1.2.2「修复返回桌面时重新加载应用导致的卡顿」的模块实现（P4 三小步的第 1 步：只增不删）。
+
+**问题**：模块 `refreshApps` 每次都是「全量枚举 + 全量 getBadgedIcon」。实测冷启动 142 个应用
+解码耗时约 2.1s（`refreshApps: enumerated` → `icons done`），且包安装/更新/回桌面都会重走一遍。
+上游 1.2.4 已重写成 `profileSnapshot → refreshProfile(fingerprint 增量) → buildApps`，
+模块仍是整表重载 —— 两者结构差异过大无法三方合并，故本批**只在模块结构上嫁接增量能力**。
+
+- [x] 新增 `ActivityFingerprint(component, sourceDir, splitSourceDirs, flags, lastUpdateTime)`：
+  判定单个启动项是否变化。`lastUpdateTime` 由 `pm.getPackageInfo(pkg, 0)` 按包去重查询
+  （同一包多个 launcher activity 只查一次），覆盖"sourceDir 不变但被覆盖安装"的场景。
+- [x] `AppInventory` 带出 `fingerprints`（枚举时顺带采集，零额外枚举）；新增 `decoderKeys()`。
+- [x] `AppRepository.loadApps` 拆为 `loadAppsIncremental()` + 薄包装，三条路径：
+  ① **快路径**：图标包集合与全部指纹都没变 → 直接返回上次列表（含已解码图标），不再解码；
+  ② **增量**：只对新增/指纹变化的 key 解码，其余复用上次对象（含 originalIconColor / isAdaptiveIcon 采样）；
+  ③ **全量**：首轮或图标包变更 → 全部"需要系统解码"的项重解（包图标项由 `makeApp` 直接给新图标）。
+  返回 `LoadOutcome(apps, inventory, reused, decoded)`，`inventory` 供调用方原地重试缺失图标。
+- [x] `invalidateApps(packages)`：只让受影响包失效（`key.contains("<pkg>/")`，覆盖
+  `profile:<serial>:<pkg>/<cls>` 形态）；`invalidateAll()` 整表失效。
+- [x] `AppsLoader.refreshApps` 改走 `loadAppsIncremental`，保留原有"缺失率 >5% 重试一次"与
+  "6s/15s 两轮自动重装"自愈链（重试复用同一 `inventory`，不重复枚举）。
+- [x] `packageReceiver` 在 `refreshApps()` 前调 `invalidateApps(listOf(pkg))`。
+  `SettingsViewModel` 走 `loadApps` 自动享用同一缓存。
+
+**装机实测（fuxi / OS2，142 个应用）**：
+
+| 场景 | 日志 | 说明 |
+| --- | --- | --- |
+| 冷启动首轮 | `enumerated=142 reused=0 decoded=142` | 全量，符合预期 |
+| 覆盖安装 1 个应用后 | `enumerated=142 **reused=141 decoded=1**`，`icons done` 与 `enumerated` 相差 **1ms** | 只重解变化的那 1 个；改前是全量重解（约 2.1s） |
+| 装饰结果 | `decorated iconMissing=0/142` | 无图标缺失，抽屉不会出现字母占位 |
+
+零 FATAL。**本批不动** `enumerateApps` / `withIcons` / `workProfiles` / `makeApp`（P4b 才动）。
+
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.169-p4a-incremental-apps-185.apk`。
+- [ ] **P4b 待办**：枚举路径合并（`enumerateApps` / `workProfiles` / `withIcons` 嫁接进上游
+  `profileSnapshot` / `refreshProfile` / `buildApps` 结构）。

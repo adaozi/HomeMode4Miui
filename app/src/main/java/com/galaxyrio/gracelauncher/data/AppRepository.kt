@@ -91,6 +91,22 @@ private fun android.graphics.drawable.Drawable.toIconBitmap(): android.graphics.
 /** 解码失败日志预算（避免 200+ 条失败刷屏，前 3 条足够定位异常类型）。 */
 private val iconDecodeFailureLogBudget = java.util.concurrent.atomic.AtomicInteger(3)
 
+/**
+ * 上游 1.2.2「返回桌面重新加载应用导致卡顿」的修复基础：单个启动项的变更指纹。
+ *
+ * 只要指纹不变，就认为该应用的名称/图标来源没有变化 → 可直接复用上一次装载结果（含已解码图标），
+ * 无需再次 enumerate + getBadgedIcon。覆盖场景：应用更新（sourceDir/mtime 变化）、
+ * 拆分包变化、flags 变化（系统应用/停用）、卸载重装。
+ */
+internal data class ActivityFingerprint(
+    val component: ComponentName,
+    val sourceDir: String,
+    val splitSourceDirs: List<String>,
+    val flags: Int,
+    /** 包更新时间戳（ms）：sourceDir 不变但内容被覆盖安装时兜底。 */
+    val lastUpdateTime: Long,
+)
+
 class AppRepository(
     private val context: Context,
     /** B6.4：图标包仓储（installedPacks 面板查询 + loadApps 装饰共用一个缓存）。 */
@@ -117,6 +133,8 @@ class AppRepository(
     class AppInventory internal constructor(
         val apps: List<LauncherApp>,
         private val decoders: Map<String, suspend () -> IconDecode?>,
+        /** 上游 1.2.2：app.key → 变更指纹（增量装载判据）。 */
+        internal val fingerprints: Map<String, ActivityFingerprint> = emptyMap(),
     ) {
         /**
          * 并行解码指定 key 的系统图标并回填（icon 仍为空的项；有包图标的保持包图标）。
@@ -131,6 +149,9 @@ class AppRepository(
          * 装载里单独拿到新窗口，所以正常）。现改为**按块**解码、每块独立超时：
          * 单块最多丢 ICON_CHUNK_SIZE 个图标，其余块不受牵连。
          */
+        /** 需要系统图标解码的 key 集合（包图标命中的项不在其中）。 */
+        internal fun decoderKeys(): Set<String> = decoders.keys
+
         @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
         suspend fun withIcons(keys: Set<String>, parallelism: Int = 4): List<LauncherApp> {
             if (keys.isEmpty() || decoders.isEmpty()) return apps
@@ -185,7 +206,15 @@ class AppRepository(
         val profiles = runCatching { launcher.profiles }.getOrNull() ?: listOf(myUser)
         // B6.4：图标包预载（解析失败 = 排除出 packs，应用回退系统图标）
         val packs = normalizeIconPackOrder(iconPackPackages).mapNotNull { iconPacks.load(it) }
-        class Entry(val app: LauncherApp, val decode: (suspend () -> IconDecode?)?)
+        class Entry(val app: LauncherApp, val fp: ActivityFingerprint, val decode: (suspend () -> IconDecode?)?)
+        // 包更新时间戳按包去重查询（同一包多个 launcher activity 只查一次）
+        val updateTimes = HashMap<String, Long>()
+        fun lastUpdateOf(pkg: String): Long = updateTimes.getOrPut(pkg) {
+            runCatching { pm.getPackageInfo(pkg, 0).lastUpdateTime }.getOrDefault(0L)
+        }
+        fun fingerprintOf(component: ComponentName, info: ApplicationInfo): ActivityFingerprint =
+            ActivityFingerprint(component, info.sourceDir, info.splitSourceDirs.orEmpty().toList(),
+                info.flags, lastUpdateOf(component.packageName))
         val entries = profiles.flatMap { profile ->
             // 单 profile 失败不拖垮整体（XSpace 受限/未就绪时 getActivityList 抛
             // SecurityException，降级为该 profile 无应用）
@@ -206,7 +235,7 @@ class AppRepository(
                 val app = if (serial == null) base else base.copy(user = profile, userSerial = serial)
                 // 包图标命中的应用不需要系统图标解码（原版语义包图标直接顶替系统图标）；
                 // originalIconColor/isAdaptiveIcon 在解码时顺带采样（v1.1.9，见类头注）。
-                Entry(app, if (app.icon == null) {
+                Entry(app, fingerprintOf(component, info.applicationInfo), if (app.icon == null) {
                     {
                         val drawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
                         val bitmap = drawable?.toIconBitmap()?.asImageBitmap()
@@ -227,7 +256,7 @@ class AppRepository(
                 if (label.isBlank()) return@mapNotNull null
                 val component = ComponentName(activity.packageName, activity.name)
                 val app = makeApp(component, label, null, packs, activity.applicationInfo.flags)
-                Entry(app) {
+                Entry(app, fingerprintOf(component, activity.applicationInfo)) {
                     val drawable = runCatching { resolve.loadIcon(pm) }.getOrNull()
                     val bitmap = drawable?.toIconBitmap()?.asImageBitmap()
                     IconDecode(bitmap,
@@ -239,13 +268,96 @@ class AppRepository(
         AppInventory(
             apps = result.map(Entry::app).sortedWith(LauncherAppOrder),
             decoders = result.mapNotNull { e -> e.decode?.let { e.app.key to it } }.toMap(),
+            fingerprints = result.associate { it.app.key to it.fp },
         )
     }
 
-    suspend fun loadApps(iconPackPackages: List<String> = emptyList()): List<LauncherApp> {
+    /**
+     * 增量装载（上游 1.2.2「返回桌面重新加载应用导致的卡顿」修复的模块实现）。
+     *
+     * 三种路径：
+     *  ① 快路径：图标包集合与全部应用指纹都没变 → 直接返回上次结果（已含解码图标），
+     *     零枚举成本以外的开销，桌面/抽屉切回时首帧即出图；
+     *  ② 增量：只对新增/变化的 key 走 getBadgedIcon 解码，其余复用旧对象（含采样结果）；
+     *  ③ 全量：首轮或图标包变更 → 全部需要系统解码的项重解（包图标项由 makeApp 直接给新图标）。
+     */
+    suspend fun loadApps(iconPackPackages: List<String> = emptyList()): List<LauncherApp> =
+        loadAppsIncremental(iconPackPackages).apps
+
+    /**
+     * 增量装载的结果：除最终列表外还带回本次的 [inventory]（同一批枚举产物），
+     * 供调用方对"图标缺失"做原地重试 —— 不必再次枚举（枚举是 200+ 次 binder 调用）。
+     */
+    class LoadOutcome(
+        val apps: List<LauncherApp>,
+        internal val inventory: AppInventory,
+        /** 本次复用的上次装载项数（诊断用）。 */
+        val reused: Int,
+        /** 本次实际走系统图标解码的项数（诊断用）。 */
+        val decoded: Int,
+    )
+
+    /**
+     * 增量装载（上游 1.2.2「返回桌面重新加载应用导致的卡顿」修复的模块实现）。
+     *
+     * 三种路径：
+     *  ① 快路径：图标包集合与全部应用指纹都没变 → 直接返回上次结果（已含解码图标），
+     *     桌面/抽屉切回时首帧即出图；
+     *  ② 增量：只对新增/变化的 key 走 getBadgedIcon 解码，其余复用旧对象（含采样结果）；
+     *  ③ 全量：首轮或图标包变更 → 全部需要系统解码的项重解（包图标项由 makeApp 直接给新图标）。
+     */
+    suspend fun loadAppsIncremental(iconPackPackages: List<String> = emptyList()): LoadOutcome {
+        val packs = normalizeIconPackOrder(iconPackPackages)
         val inventory = enumerateApps(iconPackPackages)
-        return inventory.withIcons(inventory.apps.map(LauncherApp::key).toSet())
+        val previous = cachedInventory
+        if (previous != null && previous.packs == packs && previous.apps.isNotEmpty() &&
+            previous.fingerprints == inventory.fingerprints) {
+            return LoadOutcome(previous.apps, inventory, reused = previous.apps.size, decoded = 0)
+        }
+        val fullReload = previous == null || previous.packs != packs
+        val changed: Set<String> = if (fullReload) {
+            inventory.decoderKeys()
+        } else {
+            val old = previous.fingerprints
+            inventory.fingerprints.keys.filterTo(HashSet()) { old[it] != inventory.fingerprints[it] }
+        }
+        val decoded = inventory.withIcons(if (fullReload) inventory.decoderKeys() else changed)
+        val reusable = if (fullReload) emptyMap() else previous.apps.associateBy { it.key }
+        val merged = if (fullReload) decoded else decoded.map { app ->
+            if (app.key in changed) app else reusable[app.key] ?: app
+        }
+        cachedInventory = CachedInventory(packs, inventory.fingerprints, merged)
+        return LoadOutcome(merged, inventory,
+            reused = if (fullReload) 0 else merged.size - changed.size.coerceAtMost(merged.size),
+            decoded = if (fullReload) inventory.decoderKeys().size else changed.size)
     }
+
+    /** 单个已装载结果的缓存（指纹 + 已解码列表 + 图标包签名）。 */
+    private data class CachedInventory(
+        val packs: List<String>,
+        val fingerprints: Map<String, ActivityFingerprint>,
+        val apps: List<LauncherApp>,
+    )
+
+    @Volatile
+    private var cachedInventory: CachedInventory? = null
+
+    /**
+     * 包变化（安装/更新/卸载/启用停用）：只让受影响的应用失效，其余继续复用。
+     * key 形态覆盖：`<pkg>/<cls>`、`profile:<serial>:<pkg>/<cls>`。
+     */
+    fun invalidateApps(packages: Collection<String>) {
+        val previous = cachedInventory ?: return
+        if (packages.isEmpty()) return
+        fun affected(key: String) = packages.any { key.contains("$it/") }
+        cachedInventory = previous.copy(
+            fingerprints = previous.fingerprints.filterKeys { !affected(it) },
+            apps = previous.apps.filterNot { it.packageName in packages },
+        )
+    }
+
+    /** 显式恢复用：整表失效（换 profile / 用户手动刷新）。 */
+    fun invalidateAll() = run { cachedInventory = null }
 
     /** 原版 makeApp 对齐：包内组件匹配图标 → 包通用 fallback → 系统图标。 */
     private fun makeApp(

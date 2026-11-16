@@ -123,6 +123,11 @@ internal class AppsLoader(
             if (intent?.action == Intent.ACTION_PACKAGE_REMOVED &&
                 intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
             ) return
+            // 上游 1.2.2：只让受影响的包失效 —— 其余应用继续复用已解码图标，
+            // 避免"装/更新一个应用就 200+ 个图标全量重解"。
+            intent?.data?.schemeSpecificPart?.takeIf { it.isNotBlank() }?.let { pkg ->
+                appRepository.invalidateApps(listOf(pkg))
+            }
             refreshApps()
         }
     }
@@ -223,10 +228,14 @@ internal class AppsLoader(
                 // 两段式（phase1 收藏子集 + phase2 全量）在 MIUI IconCustomizer 主题资源锁上
                 // 互相踩踏，全量那批撞解码超时被整批判死 → 抽屉永久骨架态。回归单段后
                 // 首帧晚 1-2 秒，但抽屉图标不再整批丢失。
-                val inventory = appRepository.enumerateApps(packs)
+                // 上游 1.2.2 增量装载：指纹未变的项直接复用上次结果（含已解码图标），
+                // 只有新增/更新的应用才走 getBadgedIcon。回桌面不再全量重解。
+                val outcome = appRepository.loadAppsIncremental(packs)
+                val inventory = outcome.inventory
                 ModLog.i("refreshApps: enumerated=" + inventory.apps.size
+                        + " reused=" + outcome.reused + " decoded=" + outcome.decoded
                         + " at=" + android.os.SystemClock.uptimeMillis())
-                var full = inventory.withIcons(inventory.apps.map(LauncherApp::key).toSet())
+                var full = outcome.apps
                 ModLog.i("refreshApps: icons done at=" + android.os.SystemClock.uptimeMillis()
                         + " missing=" + full.count { it.icon == null } + "/" + full.size)
                 // 解码瞬时失败自愈：MIUI 系统刚启动时 PackageManager 资源未就绪，
