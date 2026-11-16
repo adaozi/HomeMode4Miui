@@ -204,6 +204,14 @@ class AppRepository(
         // profile，通用；受限环境抛 SecurityException 时降级为仅主 user。
         val userManager = context.getSystemService(UserManager::class.java)
         val profiles = runCatching { launcher.profiles }.getOrNull() ?: listOf(myUser)
+        // 上游 1.2.4 readable 语义（1.2.2 工作资料修复）：静默 / 未解锁的受管 profile 不暴露应用。
+        // 只读公开 UserManager 状态，不改 profile 发现机制 —— MIUI 双开（clone）语义完全不动。
+        val visibleProfiles = profiles.filter { profile ->
+            if (profile == myUser) return@filter true
+            val quiet = runCatching { userManager?.isQuietModeEnabled(profile) }.getOrNull()
+            val unlocked = runCatching { userManager?.isUserUnlocked(profile) }.getOrNull()
+            quiet != true && unlocked != false
+        }
         // B6.4：图标包预载（解析失败 = 排除出 packs，应用回退系统图标）
         val packs = normalizeIconPackOrder(iconPackPackages).mapNotNull { iconPacks.load(it) }
         class Entry(val app: LauncherApp, val fp: ActivityFingerprint, val decode: (suspend () -> IconDecode?)?)
@@ -215,7 +223,7 @@ class AppRepository(
         fun fingerprintOf(component: ComponentName, info: ApplicationInfo): ActivityFingerprint =
             ActivityFingerprint(component, info.sourceDir, info.splitSourceDirs.orEmpty().toList(),
                 info.flags, lastUpdateOf(component.packageName))
-        val entries = profiles.flatMap { profile ->
+        val entries = visibleProfiles.flatMap { profile ->
             // 单 profile 失败不拖垮整体（XSpace 受限/未就绪时 getActivityList 抛
             // SecurityException，降级为该 profile 无应用）
             val items = runCatching { launcher.getActivityList(null, profile) }.getOrDefault(emptyList())

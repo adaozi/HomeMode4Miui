@@ -1091,3 +1091,25 @@ DIFF vs 桩文件:
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.169-p4a-incremental-apps-185.apk`。
 - [ ] **P4b 待办**：枚举路径合并（`enumerateApps` / `workProfiles` / `withIcons` 嫁接进上游
   `profileSnapshot` / `refreshProfile` / `buildApps` 结构）。
+
+### P4b 剖面可读性语义对齐（v2.9.170-p4b-profile-readable / versionCode 186，2026-11-16）
+
+**范围决策（重要）**：P4b 原计划把模块枚举链路整体嫁接进上游
+`profileSnapshot → refreshProfile → buildApps` 结构。评估后**降级为只对齐可读性语义**，理由：
+
+| 项 | 结论 |
+| --- | --- |
+| 上游 `profileSnapshot`（94 行） | 含 profile 生命周期管理（锁定/静默/移除/克隆重建/重试），是 P4a 之外的另一套增量模型 |
+| 与模块关系 | 模块 `enumerateApps` 的 dualapp / 工作资料语义是本仓反复修过的（MIUI XSpace），整体替换风险 > 收益 |
+| P4a 已覆盖 | "回桌面不重载 / 只解变化图标"这两个核心收益已在 P4a 拿到 |
+| 保留的差异 | 上游 `IconSnapshotCache<AppSourceSignature>` 的渲染签名缓存，模块用 P4a 的指纹 + 既有 `IconSnapshotCache` 等价覆盖 |
+
+故本批只搬上游 1.2.2 的 **`readable(profile)`** 语义：静默 / 未解锁的受管 profile 不暴露其应用
+（此前模块靠 `runCatching` 吞异常被动兜底，静默 profile 若仍返回数据会显示不该显示的应用）。
+
+- [x] `enumerateApps` 在枚举前过滤：`userManager.isQuietModeEnabled(profile) != true &&
+  userManager.isUserUnlocked(profile) != false`；查询失败（null）时**保留**该 profile（安全方向）。
+- [x] 只用公开 `UserManager` API，**不改 profile 发现机制** —— `launcher.profiles` 与
+  `getSerialNumberForUser` 原样保留，MIUI 双开（clone）语义完全不动。
+- [x] 装机验证：应用数仍 **142**（dualapp 应用未丢）、`iconMissing=0/142`、零 FATAL。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.170-p4b-profile-readable-186.apk`。
