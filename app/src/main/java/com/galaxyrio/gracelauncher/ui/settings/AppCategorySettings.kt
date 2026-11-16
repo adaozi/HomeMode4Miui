@@ -83,7 +83,11 @@ internal fun AppCategoriesSettings(
     }
     if (creating) TextEntryDialog(stringResource(R.string.app_category_create), "", { creating = false }, { name ->
         val id = UUID.randomUUID().toString()
-        actions.saveAppCategory(AppCategory(id, name, placement = if (selectedIds != null) selectionPlacement else CategoryPlacement.None))
+        // 模块差异：上游新建默认 CategoryPlacement.None（创建完在桌面看不见，用户必须再进编辑器
+        // 把「放置」改成桌面）。这里默认 Home —— 从「应用类别」页新建的意图就是放到桌面，
+        // 选成员时仍可改回抽屉/不放置。
+        actions.saveAppCategory(AppCategory(id, name,
+            placement = if (selectedIds != null) selectionPlacement else CategoryPlacement.Home))
         creating = false
         openingId = id
     })

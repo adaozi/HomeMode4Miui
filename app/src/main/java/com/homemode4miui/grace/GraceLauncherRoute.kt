@@ -741,6 +741,16 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                             .mapNotNull { key -> state.apps.firstOrNull { it.key == key } }
                     }
                     .filter { it.second.isNotEmpty() }
+                .also { rows ->
+                    // 诊断（category-rows）：类别行为何不显示 —— 打印全部类别与过滤后结果
+                    val categories = launcher.appCategories.joinToString { c ->
+                        c.id + "(" + c.placement + "/" + c.condition + "/items=" + c.itemKeys.size + ")"
+                    }
+                    val shown = rows.joinToString { it.first.id + ":" + it.second.size }
+                    com.homemode4miui.util.ModLog.i(
+                        "categoryRows: headphones=" + headphonesConnected + " cats=" + categories
+                            + " shown=" + rows.size + " [" + shown + "]")
+                }
             }
             if (state.homeReady) HomeScreen(
                 favorites = state.favoriteItems,

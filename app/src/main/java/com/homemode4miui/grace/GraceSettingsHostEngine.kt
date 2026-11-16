@@ -111,6 +111,12 @@ class GraceSettingsHostEngine(
                     "GraceSettingsHostEngine MUTATE keys=" + delta.keys().asSequence().toList().toString())
                 repo.mutateSettings { current ->
                     val next = GraceSettingsBridge.applyDelta(current, delta)
+                    // 诊断（category-rows）：delta 是否真的落到 LauncherSettings 上
+                    com.homemode4miui.util.ModLog.i("applyDelta result: appCategories="
+                        + (next.appCategories?.size ?: -1) + " (in delta=" + delta.has("appCategoriesJson") + ")")
+                    // 诊断（category-rows）：delta 是否真的落到 LauncherSettings 上
+                    com.homemode4miui.util.ModLog.i("applyDelta result: appCategories="
+                        + (next.appCategories?.size ?: -1) + " (in delta=" + delta.has("appCategoriesJson") + ")")
                     if (next.graceButton != current.graceButton) {
                         com.homemode4miui.util.ModLog.i(
                             "GraceSettingsHostEngine graceButton delta applied enabled=" +

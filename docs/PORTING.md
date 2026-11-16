@@ -1362,3 +1362,40 @@ P11b 拆两段，本段只解决"收藏顺序双源"，不动 `HomeScreen`（降
 
 > 这是「新增设置字段必查 4 条线」铁律的又一次实锤（第三次）。P9 的类别只走了前三步就上了线，
 > 直到用户反馈"设了一直显示也看不到"才暴露。
+
+### 修复：类别行终于显示（适配层遗漏字段）（v2.9.182 / versionCode 198，2026-11-16）
+
+用户连续三次反馈"创建了类别、设了桌面显示，桌面看不到"。三段日志最终把断点钉死在**适配层**：
+
+```
+① 发出   MUTATE keys=[appCategoriesJson]                     ✅
+② 落库   applyDelta result: appCategories=6 (in delta=true)  ✅
+③ 读回   categoryRows: cats=… 仍只有内置四类                    ❌
+```
+
+**根因**：`GraceLauncherUiStateAdapter.toLauncherSettings()` 没有映射 `appCategories`
+（P11a 写这个适配层时，`GraceHomeSettings` 还没有这个字段）。于是：
+
+```
+Room(appCategoriesJson=6 条) → GraceHomeSettings(appCategories ✅ 有值)
+  → toLauncherSettings(appCategories = ❌ 丢失 → null)
+  → LauncherUiState.appCategories getter 的 `?: migrateHomeCategories(...)`
+  → 永远返回内置四类（收藏/音乐/固定/通知）
+```
+
+**修复**：`toLauncherSettings()` 补 `appCategories = appCategories`。
+
+**装机验证（日志）**：
+```
+cats=favorites(items=9), music(Headphones/items=1), pinned, notification,
+     6ca0240f(None/items=2), 6ef0e849(Home/Always/items=2)
+shown=2 [music:1, 6ef0e849:2]
+```
+→ 用户创建的两个类别（一个 None 放置、一个 Home）都被读到，Home 的那个正常出图；
+`music` 因连了耳机且有 1 个成员也出现。**类别行渲染链路打通**。
+
+**顺带改的一处体验**：新建类别默认 `placement = Home`
+（上游默认 `None`，创建完在桌面看不见，必须再进编辑器改「放置」，用户实测踩了这个坑）。
+
+**诊断日志保留**（`categoryRows: headphones=… cats=… shown=…`、`applyDelta result: appCategories=…`），
+后续类别/通知类问题可直接看这两行。

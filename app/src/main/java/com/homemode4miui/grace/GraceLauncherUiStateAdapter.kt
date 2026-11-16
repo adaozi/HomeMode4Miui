@@ -57,6 +57,10 @@ internal fun GraceHomeSettings.toLauncherSettings(): LauncherSettings = Launcher
     graceButton = graceButton,
     homeGestures = homeGestures,
     calendar = calendar,
+    // 上游 1.2.2：类别必须带出 —— 少了这行，launcher.appCategories 恒为 null，
+    // 读取侧永远走 migrateHomeCategories 生成内置四类，用户创建的类别到不了桌面
+    // （2026-11-16 实测：MUTATE 与 applyDelta 都正常，日志显示 appCategories=6，桌面仍只有 4 类）。
+    appCategories = appCategories,
 )
 
 /** GraceScheduleStatus → 上游 ScheduleStatus（同名枚举，模块侧独立定义以免与上游耦合）。 */
