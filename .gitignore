@@ -53,3 +53,6 @@ _devkit/
 
 # AGP native 构建缓存
 app/.cxx/
+
+# Kotlin 编译错误日志（构建产物）
+.kotlin/
