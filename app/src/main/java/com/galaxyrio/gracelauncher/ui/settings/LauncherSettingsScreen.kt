@@ -75,6 +75,10 @@ import kotlinx.coroutines.withContext
 /** 上游 1.2.2：设置预览页的系统栏背景档（页面按内容报给窗口，窗口统一应用）。 */
 internal enum class SettingsSystemBarBackground { Surface, Wallpaper, WallpaperWithBottomScrim, WallpaperWithTopScrim }
 
+/** 上游 1.2.2：类别编辑器的「去开启数字健康」入口（设置页导航注入，null = 不可跳转）。 */
+internal val LocalOpenDigitalWellbeing =
+    androidx.compose.runtime.staticCompositionLocalOf<(() -> Unit)?> { null }
+
 internal val LocalSettingsSystemBarBackground =
     androidx.compose.runtime.staticCompositionLocalOf<(SettingsSystemBarBackground) -> Unit> { {} }
 
@@ -91,6 +95,8 @@ internal enum class SettingsPage {
     GraceButtonAppearance, GraceButtonPosition, CalendarAppearance, WeatherAppearance, MediaPlayerAppearance,
     // 上游 1.2.2：字体颜色集中管理页（Fonts 页入口）
     FontColors,
+    // 上游 1.2.2（P9b）：应用类别列表 + 类别编辑器
+    AppCategories, CategoryEditor,
 }
 
 /** Navigation owns each page's saved state and seekable predictive-back transition. */
@@ -177,16 +183,21 @@ fun LauncherSettingsScreen(
       ) {
         SettingsPage.entries.forEach { page ->
             val isEditor = page == SettingsPage.FolderEditor
+            val isCategoryEditor = page == SettingsPage.CategoryEditor
             // 上游同步 v1.1.8 S3：手势目标编辑页参数化路由（gesture + home 双参数）
             val isGraceAction = page in listOf(SettingsPage.GraceAction, SettingsPage.GraceApp, SettingsPage.GraceShortcut, SettingsPage.GraceFolder)
             composable(
                 route = when {
                     isEditor -> "FolderEditor/{folderId}"
+                    isCategoryEditor -> "CategoryEditor/{categoryId}"
                     isGraceAction -> "${page.name}/{gesture}?home={home}"
                     else -> page.name
                 },
                 arguments = when {
                     isEditor -> listOf(navArgument("folderId") { type = NavType.StringType })
+                    isCategoryEditor -> listOf(navArgument("categoryId") {
+                        type = NavType.StringType; defaultValue = ""
+                    })
                     isGraceAction -> listOf(navArgument("gesture") { type = NavType.StringType },
                         navArgument("home") { type = NavType.BoolType; defaultValue = false })
                     else -> emptyList()
@@ -297,6 +308,10 @@ fun LauncherSettingsScreen(
                         if (isCurrent()) navController.navigate("FolderEditor/${Uri.encode(folderId)}")
                     }
                     SettingsPage.HomeOrder -> HomeOrderSettings(uiState, actions, back)
+                    SettingsPage.AppCategories -> AppCategoriesSettings(uiState, actions, back,
+                        onEdit = { id -> if (isCurrent()) navController.navigate("CategoryEditor/${Uri.encode(id)}") })
+                    SettingsPage.CategoryEditor -> AppCategoryEditorSettings(
+                        entry.arguments?.getString("categoryId")?.takeIf { it.isNotEmpty() }, uiState, actions, back)
                     SettingsPage.ListAppearance -> ListAppearanceSettings(uiState, actions, back) { }
                     SettingsPage.ShortcutsFolders -> ShortcutsFoldersSettingsScreen(uiState, actions, back)
                     SettingsPage.Alphabet -> AlphabetSettings(uiState, actions, back) { }

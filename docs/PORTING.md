@@ -1228,3 +1228,31 @@ P11b 拆两段，本段只解决"收藏顺序双源"，不动 `HomeScreen`（降
    `AppCategoryEditorSettings` 编辑器），删除与 `CategoryLabels.kt` 重复的 `categoryLabel`；
 4. 路由：`SettingsPage.AppCategories` + `CategoryEditor/{id}`；入口：`ProductivitySettings` 加「应用类别」项；
 5. 模块 `HomeScreen` 内容源换 `visibleHomeContent(...)`（**不换骨架**，只换数据来源）。
+
+### P9b 应用类别 UI（v2.9.176-p9b-category-ui / versionCode 192，2026-11-16）
+
+上游 1.2.2 App Categories 的界面层落地（数据/写操作已在 P9a 完成）。
+
+- [x] `ItemSelectionScreen` 补上游 5 个参数并实现语义（默认值保持既有行为）：
+  `onAddStack`（应用堆入口）/ `showApps`（是否显示全部应用池）/ `readOnlySelected`（动态类别成员只读）/
+  `emptyMessage`（自定义空态）/ `selectedNotice`（已选区上方提示条）。
+  同时把 `ItemSelectionScreen` 与 `SelectionEntry` 从 `private` 放宽为 `internal`（供类别编辑器跨文件复用）。
+- [x] 新增 `ui/overlays/CategoryItemsEditor.kt`（从上游 ItemSelectionScreen 抽出，50 行）。
+  **模块差异**：暂无 `AppGroupPickerScreen`（文件夹/应用堆选择页，属 P13），
+  类别成员的文件夹/堆入口先置 null；手动类别仍可选应用与快捷方式，动态类别为只读结果。
+- [x] 新增 `ui/settings/AppCategorySettings.kt`（261 行）：
+  `AppCategoriesSettings`（列表 + 新建对话框 + 选择模式）与 `AppCategoryEditorSettings`
+  （名称 / 包含方式 / 动态规则 / 通知级别 / 数量上限 / 图标 / 放置 / 生效条件 / 起止时间 / 删除）。
+  重复的 `categoryLabel` 已剔除（统一用 `CategoryLabels.kt`）。
+- [x] `LauncherActions` 补 `requestUsageAccess`（常用应用类别的前置权限）；
+  `LauncherSettingsScreen` 补 `LocalOpenDigitalWellbeing`（类别编辑器的「去开启数字健康」跳转，默认 null 即不可跳）。
+- [x] 路由：`SettingsPage.AppCategories` + `SettingsPage.CategoryEditor`（`CategoryEditor/{categoryId}`，
+  categoryId 空 = 新建）；入口加在生产力设置第 9 项（原 8 项的 count 同步改为 9）。
+- [x] 文案：补 `plurals/app_category_item_count`（en: 1 item / N items；zh: N 个项目）；
+  应用堆入口复用已有 `app_stacks_title`。
+- [x] 验证：`assembleRelease` 通过；装机零 FATAL。
+
+**已知边界（P9c 待做）**：桌面**尚未渲染类别行** —— 模块 HomeScreen 的 `favorites` 参数是
+`List<LauncherApp>`，而 `visibleHomeContent(...)` 产出 `List<PopupItem>`（类别/文件夹/收藏混合）。
+需要给 HomeScreen 增加"类别行"渲染能力（含 `CategoryIndicator` + 成员预览），
+与上游 HomeScreen 的 `entries` 渲染对齐后再接，避免只接数据源造成"类别看不见"。

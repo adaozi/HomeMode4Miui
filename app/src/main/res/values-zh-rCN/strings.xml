@@ -1300,4 +1300,7 @@
     <!-- 模块新增：AppNameVisibility.Neither 档位展示（上游无此档位文案，按铁律新建独立名） -->
     <string name="grace_list_names_neither">不显示应用名</string>
     <string name="grace_home_order_clock_calendar">时钟与日程</string>
+    <plurals name="app_category_item_count">
+        <item quantity="other">%1$d 个项目</item>
+    </plurals>
 </resources>

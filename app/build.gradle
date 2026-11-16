@@ -14,8 +14,8 @@ android {
         applicationId "com.homemode4miui"
         minSdk 33          // 与宿主一致（com.miui.home minSdk 33）
         targetSdk 34
-        versionCode 191
-        versionName "2.9.175-p9a-category-actions"
+        versionCode 192
+        versionName "2.9.176-p9b-category-ui"
     }
 
     sourceSets {

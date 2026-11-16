@@ -47,6 +47,8 @@ data class LauncherActions(
     val updateAppCategory: (String, (com.galaxyrio.gracelauncher.data.AppCategory) -> com.galaxyrio.gracelauncher.data.AppCategory) -> Unit = { _, _ -> },
     val deleteAppCategory: (String) -> Unit = {},
     val toggleCategoryItem: (String, LauncherApp) -> Unit = { _, _ -> },
+    /** 上游 1.2.2：申请使用时长权限（常用应用类别的前置）。 */
+    val requestUsageAccess: () -> Unit = {},
     val applyClockStyle: suspend (ClockStyle) -> Boolean = { false },
     val deleteFonts: suspend (Set<String>) -> Boolean = { false },
     val applyIconDesign: suspend (ItemIcon) -> Boolean = { false },

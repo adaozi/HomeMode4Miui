@@ -45,7 +45,7 @@ import com.galaxyrio.gracelauncher.ui.widgets.WidgetPreview
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-private data class SelectionEntry(val key: String, val label: String, val app: LauncherApp? = null, val widget: HomeLayout? = null)
+internal data class SelectionEntry(val key: String, val label: String, val app: LauncherApp? = null, val widget: HomeLayout? = null)
 
 @Composable
 internal fun PrivateSpaceEditorScreen(owner: LauncherApp, uiState: LauncherUiState, actions: LauncherActions,
@@ -168,7 +168,7 @@ internal fun PopupEditorScreen(owner: LauncherApp, uiState: LauncherUiState, act
 
 /** One full-screen editor for favorites and mixed pop-up contents. Search only filters All apps. */
 @Composable
-private fun ItemSelectionScreen(
+internal fun ItemSelectionScreen(
     title: String, tag: String, selected: List<SelectionEntry>, apps: List<LauncherApp>, enabled: Boolean,
     onToggle: (LauncherApp) -> Unit, onRemove: (String) -> Unit, onReorder: (List<String>) -> Unit, onDone: () -> Unit,
     shortcuts: List<LauncherApp>? = null, shortcutTitle: String = "", shortcutStatus: ShortcutStatus = ShortcutStatus.Ready,
@@ -180,6 +180,17 @@ private fun ItemSelectionScreen(
     loading: Boolean = false,
     /** v2.9.157：可选池是否放行快捷方式（收藏页需要；弹层编辑器另有专属入口，保持原行为）。 */
     includeShortcuts: Boolean = false,
+    // ---- 上游 1.2.2（P9b）：类别编辑器需要的参数，默认值保持既有行为 ----
+    /** 应用堆入口（类别手动成员里可加整堆）。 */
+    onAddStack: (() -> Unit)? = null,
+    /** 是否显示「全部应用」可选池（动态类别只看结果，不可手选）。 */
+    showApps: Boolean = true,
+    /** 已选项只读（动态类别成员由规则决定，不能取消）。 */
+    readOnlySelected: Boolean = false,
+    /** 自定义空态文案（类别编辑器与收藏页文案不同）。 */
+    emptyMessage: String? = null,
+    /** 已选区上方的提示条（类别权限提示等）。 */
+    selectedNotice: (@Composable () -> Unit)? = null,
 ) {
     val selectedKeys = selected.map { it.key }
     val selectedEntries = selected.associateBy { it.key }
@@ -213,13 +224,14 @@ private fun ItemSelectionScreen(
             modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
             state = list, listTag = "${tag}_list", searchTag = "${tag}_search", itemTagPrefix = "favorite_all",
             enabled = enabled && reorder.draggingKey == null, userScrollEnabled = reorder.draggingKey == null,
-            showApps = !reorderOnly,
+            showApps = showApps && !reorderOnly,
         ) {
             if (header != null) item(key = "editor_header", contentType = "header") { header() }
             item(key = "selected_header", contentType = "header") { SelectionHeading(stringResource(R.string.favorites_selected), "${tag}_selected") }
+            if (selectedNotice != null) item(key = "selected_notice", contentType = "notice") { selectedNotice() }
             if (loading) item(key = "loading") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(8.dp)) }
             if (!loading && reorder.keys.isEmpty()) item(key = "empty") {
-                Text(stringResource(if (reorderOnly) R.string.private_space_empty else if (onAddWidget == null) R.string.favorites_empty else R.string.popup_empty), Modifier.padding(8.dp),
+                Text(emptyMessage ?: stringResource(if (reorderOnly) R.string.private_space_empty else if (onAddWidget == null) R.string.favorites_empty else R.string.popup_empty), Modifier.padding(8.dp),
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(reorder.keys.mapNotNull(selectedEntries::get), key = { FavoritesReorderState.itemKey(it.key) }, contentType = { if (it.widget == null) "selected" else "widget" }) { entry ->
@@ -241,7 +253,7 @@ private fun ItemSelectionScreen(
                         }
                     }) {
                     SelectionChoice(entry, true, "favorite:${entry.key}", enabled && reorder.draggingKey == null, { onRemove(entry.key) },
-                        selectable = !reorderOnly) {
+                        selectable = !reorderOnly && !readOnlySelected) {
                         var menu by remember { mutableStateOf(false) }
                         Box {
                             IconButton(onClick = { menu = true }, enabled = enabled,
@@ -300,6 +312,12 @@ private fun ItemSelectionScreen(
                     SelectionHeading(stringResource(R.string.settings_folders), "${tag}_folders")
                 }
                 item(key = "add_folder") { AddSelectionContent("${tag}_add_folder", enabled, onAddFolder) }
+            }
+            if (onAddStack != null) {
+                item(key = "add_stacks_header", contentType = "header") {
+                    SelectionHeading(stringResource(R.string.app_stacks_title), "${tag}_stacks")
+                }
+                item(key = "add_stack") { AddSelectionContent("${tag}_add_stack", enabled, onAddStack) }
             }
             if (!reorderOnly) item(key = "all_header", contentType = "header") {
                 SelectionHeading(stringResource(R.string.favorites_all_apps), "${tag}_all_apps")
