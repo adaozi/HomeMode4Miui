@@ -1148,3 +1148,35 @@ AppCategorySettings ───→ CategoryItemsEditor（在 ItemSelectionScreen �
 `AppSearchScreen`（269）、`SearchIndex`（61）、`LauncherListGestures`（61）、`AppStack`（39）、
 `ListAppearanceSettings` + 两个 Preview、`AlphabetSettings`（154）、`ShortcutsFoldersSettings`、
 `AppStackSettings`。
+
+### P11a 首页契约补齐（v2.9.172-p11a-uistate-contract / versionCode 188，2026-11-16）
+
+P11（首页切上游 `uiState` 契约）的第一步：**只补契约、不切调用方**，零行为变化。
+
+- [x] `LauncherUiState` 补齐上游 1.2.4 的 12 项：
+  - 普通字段 6 个：`calendarSources` / `calendarSourcesStatus` / `isDefaultHome`(null=未查询) /
+    `categoryNotifications` / `usage`(UsageSnapshot) / `workFolderApp`
+  - 派生 getter 6 个：`canFavoritePrivateSpace` / `canFavoriteWorkProfile` / `favoriteFolders` /
+    `appCategories`（`settings.appCategories ?: migrateHomeCategories(...)`）/ `homeItems`
+    （`orderedHomeItems(migrated, 类别 + 收藏文件夹, popups[HomeContentKey])`）/ `needsCategoryOpenCounts`
+  - 依赖类型经检查全部已在仓内：`CalendarSource`（CalendarRepository）、`NotificationAppId` +
+    `CategoryNotificationLevel`（AppCategory）、`UsageSnapshot`（DigitalWellbeing）、`AppCategory`
+  - 注意：模块**已有** `workFolder: LauncherFolder?`（可空版，1.2.0 形态），本次复用之，
+    `favoriteFolders` 里用 `workFolder?.let { add(it) }`（上游是非空版，语义等价）
+- [x] 新增适配层 `homemode4miui/grace/GraceLauncherUiStateAdapter.kt`：
+  - `GraceHomeSettings.toLauncherSettings()`：模块桌面侧设置模型 → 上游完整设置模型
+    （模块没有的字段取上游默认值：mediaKeepWhilePlaying / dismissResistance / mediaStyle /
+    weatherConnection / agendaAppearance / digitalWellbeing / widgetScreen / appCategories 等）
+  - `GraceScheduleStatus.toScheduleStatus()`：同名枚举桥接（模块侧独立定义，避免与上游耦合）
+  - `GraceHomeUiState.toLauncherUiState()`：26+ 字段投影到 67 字段契约；`favoriteKeys` 由
+    `favoriteOrder` 派生、`folderApps` 取 Map.values、`media` 由 `hasMediaAccess + homeMedia` 组装
+  - **本批不被任何调用方引用**（P11b 才接线），故零行为变化
+- [x] 装机验证：零 FATAL；`GraceHomeView attached` 正常；`refreshApps` 仍 142/142 图标零缺失
+  （与 P4a 一致），桌面表现与上一版无差异。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.172-p11a-uistate-contract-188.apk`。
+
+**P11b 待办（高风险，单独一批）**：
+① `HomeScreen` / `ClockRegionHeader` / `AlphabetRail` 等换上游实现并接适配层；
+② **排序单一来源统一**（现状双源：`FavoritesStore`(SP) 存收藏顺序 + `homeLayout.homeOrder` 存区块顺序；
+上游只用 `homeOrder`）—— 需一次性迁移 + 双读兜底；
+③ 完整回归：收藏增删排序 / 文件夹 / 应用堆 / 拖动排序 / 手势 / 时钟 / 日程 / 天气 / widget。

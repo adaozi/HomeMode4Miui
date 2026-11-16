@@ -37,6 +37,18 @@ import com.galaxyrio.gracelauncher.data.notifications.AppNotification
 import com.galaxyrio.gracelauncher.data.weather.WeatherState
 import com.galaxyrio.gracelauncher.platform.PrivateSpaceState
 import com.galaxyrio.gracelauncher.data.tasks.TasksState
+import com.galaxyrio.gracelauncher.data.AppCategory
+import com.galaxyrio.gracelauncher.data.CalendarSource
+import com.galaxyrio.gracelauncher.data.CategoryDynamicRule
+import com.galaxyrio.gracelauncher.data.CategoryInclusion
+import com.galaxyrio.gracelauncher.data.CategoryNotificationLevel
+import com.galaxyrio.gracelauncher.data.UsageSnapshot
+import com.galaxyrio.gracelauncher.data.migrateHomeCategories
+import com.galaxyrio.gracelauncher.data.orderedHomeItems
+import com.galaxyrio.gracelauncher.data.notifications.NotificationAppId
+import com.galaxyrio.gracelauncher.data.PrivateSpaceFolderKey
+import com.galaxyrio.gracelauncher.data.WorkProfileFolderKey
+import com.galaxyrio.gracelauncher.data.HomeContentKey
 
 enum class ScheduleStatus {
     PermissionRequired,
@@ -87,6 +99,18 @@ data class LauncherUiState(
     val workProfiles: List<com.galaxyrio.gracelauncher.data.WorkProfile> = emptyList(),
     val workProfileApps: List<LauncherApp> = emptyList(),
     val shownShortcutKeys: Set<String> = emptySet(),
+    // ---- 上游 1.2.4 契约补齐（P11a，纯新增；P11b 起被 HomeScreen 等上游 Composable 消费）----
+    /** 上游 1.2.3：可选日历源（多日历选择页）。 */
+    val calendarSources: List<CalendarSource> = emptyList(),
+    val calendarSourcesStatus: ScheduleStatus = ScheduleStatus.Loading,
+    /** null = 尚未查询，避免首帧闪"设为默认"横幅。 */
+    val isDefaultHome: Boolean? = null,
+    /** 上游 1.2.2：类别派生通知（按应用 + 通知重要级）。 */
+    val categoryNotifications: Map<NotificationAppId, Set<CategoryNotificationLevel>> = emptyMap(),
+    /** 上游 1.2.3：应用使用时长（数字健康 / 常用应用类别）。 */
+    val usage: UsageSnapshot = UsageSnapshot(),
+    /** 上游 1.2.0：工作资料文件夹的展示项（装饰后回填）。 */
+    val workFolderApp: LauncherApp? = null,
     // 上游同步 v1.1.8 S8b（LauncherViewModel.kt:254/460）：Grace 按钮虚拟项。
     // designer-only 身份——IconDesignerSettings 依赖 findItem 解析它进入按钮特化面
     // （Suggestion 行/圆形锁定/iconSize=100），从未命中时按钮设计页退化为普通应用面。
@@ -138,6 +162,42 @@ data class LauncherUiState(
 
     // 审计修缮（2026-10-16）：删除 recentlyInstalledFolder() —— 全仓零调用
     // （popupItems 只引用 RecentlyInstalledFolderId 常量；AppListModel 头注同登记）。
+
+    // ---- 上游 1.2.4 契约补齐（P11a）：派生 getter ----
+    // Locking/pausing a profile does not remove its pinned folder; only its contents are protected.
+    val canFavoritePrivateSpace: Boolean get() = !isLoadingSettings && !settingsLoadFailed &&
+        settings.privateSpace.enabled && privateSpace.supported && privateSpace.user != null
+    val canFavoriteWorkProfile: Boolean get() = !isLoadingSettings && !settingsLoadFailed &&
+        settings.workProfile.enabled && workProfiles.isNotEmpty()
+
+    /** User folders use placement; built-in profile folders use stable favorite keys. */
+    val favoriteFolders: List<LauncherFolder>
+        get() {
+            if (isLoadingSettings || settingsLoadFailed) return emptyList()
+            return buildList {
+                addAll(folders.filter { it.placement.inFavorites })
+                if (canFavoritePrivateSpace && PrivateSpaceFolderKey in favoriteKeys) add(privateFolder)
+                if (canFavoriteWorkProfile && WorkProfileFolderKey in favoriteKeys) workFolder?.let { add(it) }
+            }
+        }
+
+    /** 上游 1.2.2：应用类别（首次读取时把旧收藏顺序迁移成"全部"类别）。 */
+    val appCategories: List<AppCategory> get() = settings.appCategories
+        ?: requireNotNull(migrateHomeCategories(settings, favoriteOrder.ifEmpty { favoriteKeys.toList() }).appCategories)
+
+    /** 首页内容（区块 + 类别 + 收藏文件夹），顺序由 homeOrder 驱动。 */
+    val homeItems: List<PopupItem> get() {
+        val migrated = migrateHomeCategories(settings, favoriteOrder.ifEmpty { favoriteKeys.toList() })
+        return orderedHomeItems(migrated,
+            (if (isLoadingSettings || settingsLoadFailed) emptyList() else appCategories.filter { it.showOnHome }.map { it.key }) +
+                favoriteFolders.map { it.key },
+            popups[HomeContentKey].orEmpty())
+    }
+
+    /** 有"常用应用"类动态类别时，需要读使用时长（性能开关）。 */
+    val needsCategoryOpenCounts: Boolean get() = appCategories.any {
+        it.inclusion == CategoryInclusion.Dynamic && it.dynamicRule == CategoryDynamicRule.FrequentlyOpened
+    }
 
     fun folderItem(folder: LauncherFolder): LauncherApp = ((if (folder.id == PrivateSpaceFolderId) privateFolderApp
         else folderApps.firstOrNull { it.folderId == folder.id })
