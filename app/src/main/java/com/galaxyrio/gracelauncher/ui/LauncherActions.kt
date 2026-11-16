@@ -42,6 +42,11 @@ data class LauncherActions(
     val refreshIconPacks: () -> Unit = {},
     val refreshApps: () -> Unit = {},
     val updateSettings: ((LauncherSettings) -> LauncherSettings) -> Unit = {},
+    // 上游 1.2.2：应用类别（按条件决定应用出现在桌面还是抽屉）
+    val saveAppCategory: (com.galaxyrio.gracelauncher.data.AppCategory) -> Unit = {},
+    val updateAppCategory: (String, (com.galaxyrio.gracelauncher.data.AppCategory) -> com.galaxyrio.gracelauncher.data.AppCategory) -> Unit = { _, _ -> },
+    val deleteAppCategory: (String) -> Unit = {},
+    val toggleCategoryItem: (String, LauncherApp) -> Unit = { _, _ -> },
     val applyClockStyle: suspend (ClockStyle) -> Boolean = { false },
     val deleteFonts: suspend (Set<String>) -> Boolean = { false },
     val applyIconDesign: suspend (ItemIcon) -> Boolean = { false },

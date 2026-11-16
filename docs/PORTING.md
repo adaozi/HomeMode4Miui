@@ -1202,3 +1202,29 @@ P11b 拆两段，本段只解决"收藏顺序双源"，不动 `HomeScreen`（降
 
 **P11b 第二段（待做）**：`HomeScreen` / `ClockRegionHeader` 换上游实现 + Route 接适配层。
 策略：模块版改名 `LegacyHomeScreen` 保留，上游版上线后出问题可一行切回。
+
+### P9a 应用类别数据层（v2.9.175-p9a-category-actions / versionCode 191，2026-11-16）
+
+上游 1.2.2「App Categories」的**数据与写操作链路**（UI 页面留下一段，见文末）。
+
+- [x] `LauncherActions` 补 4 个类别动作（与上游签名一致）：
+  `saveAppCategory: (AppCategory) -> Unit`、`updateAppCategory: (String, (AppCategory) -> AppCategory) -> Unit`、
+  `deleteAppCategory: (String) -> Unit`、`toggleCategoryItem: (String, LauncherApp) -> Unit`。
+- [x] `SettingsViewModel` 接线：4 个动作全部走既有 `applySettingsSuspend` ——
+  本地乐观更新 + `diffRow` 产出 `appCategoriesJson` → 桥命令 → 宿主 `applyDelta`。
+  **无需新增桥命令**（P1 的 13 字段里已含 `appCategoriesJson`，4 条线早已铺好）。
+  写后统一过 `synchronizeCategoryPlacement(current, next)`（类别放置与首页顺序同步）；
+  `deleteAppCategory` 对内建类别（`BuiltInCategoryIds`）直接忽略（上游同语义）。
+- [x] `LauncherUiState` 已具备类别派生（上一提交）：`appCategories` / `homeItems` /
+  `categoryItems`（手动 / 通知 / 最近安装 / 常用应用四种规则）/ `visibleHomeContent` /
+  `needsCategoryOpenCounts`。
+- [x] 验证：`assembleRelease` 通过；装机零 FATAL。
+
+**P9b 待办（UI 段落）**：
+1. `ItemSelectionScreen` 补上游 5 个参数并实现语义：`onAddStack` / `showApps` /
+   `readOnlySelected` / `emptyMessage` / `selectedNotice`（默认值保持现有行为）；
+2. 从上游 `ItemSelectionScreen` 抽出 `CategoryItemsEditor`（58 行）到独立文件；
+3. 拷 `ui/settings/AppCategorySettings.kt`（268 行，含 `AppCategoriesSettings` 列表页 +
+   `AppCategoryEditorSettings` 编辑器），删除与 `CategoryLabels.kt` 重复的 `categoryLabel`；
+4. 路由：`SettingsPage.AppCategories` + `CategoryEditor/{id}`；入口：`ProductivitySettings` 加「应用类别」项；
+5. 模块 `HomeScreen` 内容源换 `visibleHomeContent(...)`（**不换骨架**，只换数据来源）。

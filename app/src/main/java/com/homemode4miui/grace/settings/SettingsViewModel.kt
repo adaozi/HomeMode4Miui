@@ -64,6 +64,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
+import com.galaxyrio.gracelauncher.data.synchronizeCategoryPlacement
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -433,6 +434,46 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         },
         refreshWeather = ::refreshWeather,
         openWeatherApp = ::openWeatherApp,
+        // 上游 1.2.2：应用类别写操作 —— 走既有 applySettingsSuspend（diffRow → 桥命令 →
+        // 宿主 applyDelta 的 appCategoriesJson 已通，无需新增桥命令）。
+        saveAppCategory = { category ->
+            viewModelScope.launch {
+                applySettingsSuspend { current ->
+                    val categories = current.appCategories.orEmpty()
+                    if (categories.any { it.id == category.id }) current
+                    else synchronizeCategoryPlacement(current, current.copy(appCategories = categories + category))
+                }
+            }
+        },
+        updateAppCategory = { id, transform ->
+            viewModelScope.launch {
+                applySettingsSuspend { current ->
+                    val next = current.copy(appCategories = current.appCategories.orEmpty().map {
+                        if (it.id == id) transform(it).copy(id = id) else it
+                    })
+                    synchronizeCategoryPlacement(current, next)
+                }
+            }
+        },
+        deleteAppCategory = { id ->
+            if (id !in com.galaxyrio.gracelauncher.data.BuiltInCategoryIds) viewModelScope.launch {
+                applySettingsSuspend { current ->
+                    synchronizeCategoryPlacement(current,
+                        current.copy(appCategories = current.appCategories.orEmpty().filterNot { it.id == id }))
+                }
+            }
+        },
+        toggleCategoryItem = { id, app ->
+            viewModelScope.launch {
+                applySettingsSuspend { current ->
+                    current.copy(appCategories = current.appCategories.orEmpty().map { category ->
+                        if (category.id != id) category else category.copy(itemKeys =
+                            if (app.key in category.itemKeys) category.itemKeys - app.key
+                            else category.itemKeys + app.key)
+                    })
+                }
+            }
+        },
     )
 
     private suspend fun applySettingsSuspend(transform: (LauncherSettings) -> LauncherSettings): Boolean =
