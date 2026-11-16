@@ -40,6 +40,12 @@ data class GraceHomeSettings(
     val showBatteryPercentage: Boolean = true,
     /** 上游 1.2.3：日历偏好（预报天数 / 选中的日历源 / 全天事件降权）。 */
     val calendar: CalendarPreferences = CalendarPreferences(),
+    /**
+     * 上游 1.2.2：应用类别（JSON 列 appCategoriesJson）。
+     * null = 尚未迁移，读取侧用 migrateHomeCategories 生成内置类别（收藏/音乐/固定/通知）。
+     * 此前缺这个字段导致桌面侧永远拿不到用户创建的类别（类别行不显示）。
+     */
+    val appCategories: List<AppCategory>? = null,
     /** B6.1：媒体控制（原版默认 true；实际显示还需通知监听权限，无权限自然隐藏）。 */
     val mediaPlayer: Boolean = true,
     /** B6.1：无播放会话时常驻占位播放器（原版默认 false）。 */
@@ -116,6 +122,7 @@ data class GraceHomeSettings(
                    calendarAgenda: Boolean = true, calendarAboveClock: Boolean = false,
                    showBatteryPercentage: Boolean = true, mediaPlayer: Boolean = true,
                    calendarPreferencesJson: String? = null,
+                   appCategoriesJson: String? = null,
                    mediaAlwaysVisible: Boolean = false, mediaAppKey: String? = null,
                    clockAppKey: String? = null, allowHapticFeedback: Boolean = true,
                    weatherEnabled: Boolean = false,
@@ -148,6 +155,7 @@ data class GraceHomeSettings(
             calendarAboveClock = calendarAboveClock,
             showBatteryPercentage = showBatteryPercentage,
             calendar = CalendarPreferences.decode(calendarPreferencesJson),
+            appCategories = AppCategory.decode(appCategoriesJson),
             mediaPlayer = mediaPlayer,
             mediaAlwaysVisible = mediaAlwaysVisible,
             mediaAppKey = mediaAppKey,
@@ -205,6 +213,7 @@ class GraceHomeSettingsStore(context: Context) {
         calendarAboveClock = preferences.getBoolean(KEY_CALENDAR_ABOVE_CLOCK, false),
         showBatteryPercentage = preferences.getBoolean(KEY_SHOW_BATTERY, true),
         calendarPreferencesJson = preferences.getString(KEY_CALENDAR_PREFERENCES, null),
+        appCategoriesJson = preferences.getString(KEY_APP_CATEGORIES, null),
         mediaPlayer = preferences.getBoolean(KEY_MEDIA_PLAYER, true),
         mediaAlwaysVisible = preferences.getBoolean(KEY_MEDIA_ALWAYS, false),
         mediaAppKey = preferences.getString(KEY_MEDIA_APP, null),
@@ -247,6 +256,7 @@ class GraceHomeSettingsStore(context: Context) {
         putBoolean(KEY_CALENDAR_ABOVE_CLOCK, settings.calendarAboveClock)
         putBoolean(KEY_SHOW_BATTERY, settings.showBatteryPercentage)
         putString(KEY_CALENDAR_PREFERENCES, settings.calendar.encode())
+        putString(KEY_APP_CATEGORIES, settings.appCategories?.let(AppCategory::encode))
         putBoolean(KEY_MEDIA_PLAYER, settings.mediaPlayer)
         putBoolean(KEY_MEDIA_ALWAYS, settings.mediaAlwaysVisible)
         // putString(key, null) = 移除语义（读侧 getString 回 null = 默认行为）
@@ -311,6 +321,7 @@ class GraceHomeSettingsStore(context: Context) {
         const val KEY_FONT_LIBRARY = "font_library"
         const val KEY_FONT_COLORS = "font_colors"
         const val KEY_CALENDAR_PREFERENCES = "calendar_preferences"
+        const val KEY_APP_CATEGORIES = "app_categories"
         const val KEY_WORK_PROFILE = "work_profile"
         const val KEY_APP_FONT_ID = "app_font_id"
         const val KEY_ICON_DESIGN = "icon_design_json"

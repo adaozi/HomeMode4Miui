@@ -1328,3 +1328,37 @@ P11b 拆两段，本段只解决"收藏顺序双源"，不动 `HomeScreen`（降
 并发跑两个 `gradle`（主代理 + 子代理）会损坏增量编译缓存：
 `Incremental compilation failed: Storage ... already registered` + 一串假的 `Unresolved reference`。
 解法：`rm -rf app/build/kotlin` 后重编即可，**不要按那些假错误去改代码**。
+
+### 修复：类别行不显示（第④条线缺失）（v2.9.181-category-host-sync / versionCode 197，2026-11-16）
+
+用户实测：手动创建的「游戏」类别设为"一直显示"，桌面看不到类别行；连蓝牙耳机也没有出现音乐类别。
+
+**根因：类别这次只补了 ①②③，第④条线漏了**
+
+```
+① 模型 LauncherSettings.appCategories        ✅ P0
+② Room 列 appCategoriesJson                   ✅ P0（DB v34）
+③ 模块 → 宿主：diffRow / encodeRow / applyDelta  ✅ P1（13 字段之一）
+④ 宿主 → 桌面：GraceHomeSettings（桌面侧 SP 模型）+ GraceSettingsRepository 三处映射
+                                              ❌ **漏了**
+```
+
+`GraceHomeSettings` 里根本没有 `appCategories` 字段，所以：
+- 设置页创建类别 → 桥 → 宿主 Room 写入成功（`appCategoriesJson` 列有值）
+- 桌面侧 `GraceHomeSettingsStore.load()` 读回来时**没有这个字段**
+- 适配层 `appCategories` getter 于是走 `?: migrateHomeCategories(...)`，
+  永远只生成内置四个类别（收藏/音乐/固定/通知）→ 用户创建的类别根本到不了桌面
+
+**修复**：
+- [x] `GraceHomeSettings` 加 `appCategories: List<AppCategory>?`（null = 未迁移，交由读取侧 migrate）：
+  `decode(appCategoriesJson)`、SP 键 `KEY_APP_CATEGORIES = "app_categories"`、load/save 对称。
+- [x] `GraceSettingsRepository` 三处映射补齐：`toEntity`（encode）、`seed`（encode）、`toGraceSettings`（读 `appCategoriesJson`）。
+- [x] 验证：装配后零 FATAL。
+
+**附带说明（不是 bug）**：内置「音乐」类别默认 `condition = Headphones` 但 **itemKeys 为空**
+（`AppCategory.defaults()` 里就是空），所以即使连上耳机也不会显示 ——
+需要在「应用类别 → 音乐」里先手动加入应用，桌面才会出现这一行。类别的空成员行一律不渲染
+（`categoryRows` 计算里 `filter { it.second.isNotEmpty() }`）。
+
+> 这是「新增设置字段必查 4 条线」铁律的又一次实锤（第三次）。P9 的类别只走了前三步就上了线，
+> 直到用户反馈"设了一直显示也看不到"才暴露。
