@@ -1,9 +1,3 @@
-/*
- * 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
- * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/data/HomeLayout.kt
- * P3 移植：逐字拷贝，未改动。launcher_settings.homeLayoutJson 的编解码模型，
- *   P4 widget 布局（widgetId/provider/height）复用同一 JSON 格式。
- */
 package com.galaxyrio.gracelauncher.data
 
 import org.json.JSONObject
@@ -15,23 +9,25 @@ data class HomeLayout(
     val widgetProvider: String? = null,
     val widgetLabel: String? = null,
     val widgetHeightDp: Int = 0,
-    // 上游同步 1.2.0（widget 可用性/尺寸）：弹层内 widget 的呈现参数 ——
-    // 桌面网格自己有尺寸概念，这里的只作用于应用/文件夹弹层里的 widget 槽。
+    /** Per-widget presentation in app/folder pop-ups; the desktop grid owns its own size. */
     val popupWidthPercent: Int = 100,
     val popupFullWidth: Boolean = false,
     val popupBackground: Boolean = false,
     val popupContentScale: Int = 100,
-    // 上游同步 1.2.0（S6 主页排序）：主页区块顺序（clock/baseline/calendar/widget/media/收藏…）。
-    // null = 沿用旧的固定排布，直到用户第一次调整顺序。
+    /** Null reads the legacy header/widget/favorites arrangement until the first edit. */
     val homeOrder: List<String>? = null,
     val baselineEnabled: Boolean = true,
-    /** 旧主页原点偏移，首次编辑时捕获一次以保持既有视觉位置。 */
+    /** Master visibility preserves the independent clock, calendar and weather preferences. */
+    val clockCalendarEnabled: Boolean = true,
+    /** Offset from the old home origin, captured once to preserve its existing visual position. */
     val baselineOffsetDp: Float? = null,
+    val editingLocked: Boolean = false,
 ) {
     val hasWidget: Boolean get() = widgetId >= 0
 
     fun withoutWidget() = HomeLayout(topOffsetDp = topOffsetDp, homeOrder = homeOrder,
-        baselineEnabled = baselineEnabled, baselineOffsetDp = baselineOffsetDp)
+        baselineEnabled = baselineEnabled, clockCalendarEnabled = clockCalendarEnabled,
+        baselineOffsetDp = baselineOffsetDp, editingLocked = editingLocked)
 
     fun encode(): String = JSONObject().apply {
         put("topOffsetDp", topOffsetDp.takeIf { it.isFinite() }?.coerceIn(-1200f, 1200f) ?: 0f)
@@ -43,8 +39,10 @@ data class HomeLayout(
         put("popupFullWidth", popupFullWidth)
         put("popupBackground", popupBackground)
         put("popupContentScale", popupContentScale.coerceIn(50, 150))
-        homeOrder?.let { put("homeOrder", org.json.JSONArray(it.distinct())) }
+        homeOrder?.let { put("homeOrder", org.json.JSONArray(normalizeHomeOrder(it))) }
         put("baselineEnabled", baselineEnabled)
+        put("clockCalendarEnabled", clockCalendarEnabled)
+        put("editingLocked", editingLocked)
         baselineOffsetDp?.takeIf { it.isFinite() }?.let { put("baselineOffsetDp", it.coerceIn(0f, 1600f)) }
     }.toString()
 
@@ -62,11 +60,12 @@ data class HomeLayout(
                 popupBackground = data.optBoolean("popupBackground", false),
                 popupContentScale = data.optInt("popupContentScale", 100).coerceIn(50, 150),
                 homeOrder = data.optJSONArray("homeOrder")?.let { array ->
-                    (0 until array.length()).mapNotNull { (array.opt(it) as? String)?.takeIf(String::isNotBlank) }.distinct()
+                    normalizeHomeOrder((0 until array.length()).mapNotNull { (array.opt(it) as? String)?.takeIf(String::isNotBlank) })
                 },
                 baselineEnabled = data.optBoolean("baselineEnabled", true),
-                baselineOffsetDp = data.optDouble("baselineOffsetDp", Double.NaN).toFloat()
-                    .takeIf { it.isFinite() }?.coerceIn(0f, 1600f),
+                clockCalendarEnabled = data.optBoolean("clockCalendarEnabled", true),
+                editingLocked = data.optBoolean("editingLocked", false),
+                baselineOffsetDp = data.optDouble("baselineOffsetDp", Double.NaN).toFloat().takeIf { it.isFinite() }?.coerceIn(0f, 1600f),
             )
         }.getOrDefault(HomeLayout())
     }

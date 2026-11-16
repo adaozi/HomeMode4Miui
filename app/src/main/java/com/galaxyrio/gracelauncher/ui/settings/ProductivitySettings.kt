@@ -422,9 +422,10 @@ internal fun HomeOrderSettings(uiState: LauncherUiState, actions: LauncherAction
     val available = remember(layout.hasWidget, layout.widgetId, uiState.settings.mediaPlayer,
         uiState.settings.calendarAgenda, uiState.settings.clockEnabled) {
         buildList {
-            add(com.galaxyrio.gracelauncher.data.GraceWidget.Clock.key)
-            // 上游同步 1.2.0（S6e）：日程与日期行是独立区块，必须列出来
-            if (uiState.settings.calendarAgenda) add(com.galaxyrio.gracelauncher.data.GraceWidget.Calendar.key)
+            // 上游 P3（1.2.2）：时钟与日程已合并为单一区块（内部区域由 ClockStyle.regions 控制）
+            if (uiState.settings.clockEnabled || uiState.settings.calendarAgenda) {
+                add(com.galaxyrio.gracelauncher.data.GraceWidget.ClockCalendar.key)
+            }
             if (layout.hasWidget) add("widget:${layout.widgetId}")
             if (uiState.settings.mediaPlayer) add(com.galaxyrio.gracelauncher.data.GraceWidget.Media.key)
         }
@@ -480,8 +481,7 @@ internal fun HomeOrderSettings(uiState: LauncherUiState, actions: LauncherAction
 
 @Composable
 private fun homeBlockLabel(key: String): String = when (key) {
-    com.galaxyrio.gracelauncher.data.GraceWidget.Clock.key -> stringResource(R.string.home_order_clock)
-    com.galaxyrio.gracelauncher.data.GraceWidget.Calendar.key -> stringResource(R.string.home_order_calendar)
+    com.galaxyrio.gracelauncher.data.GraceWidget.ClockCalendar.key -> stringResource(R.string.grace_home_order_clock_calendar)
     com.galaxyrio.gracelauncher.data.GraceWidget.Media.key -> stringResource(R.string.home_order_media)
     else -> stringResource(R.string.home_order_widget)
 }

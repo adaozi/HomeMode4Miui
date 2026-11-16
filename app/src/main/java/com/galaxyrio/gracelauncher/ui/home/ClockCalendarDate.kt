@@ -48,6 +48,7 @@ internal fun clockCalendarDate(now: Instant, locale: Locale, showWeekday: Boolea
     }
     return buildAnnotatedString {
         append(text)
+        var previousColor: Color? = null
         var start = fields.beginIndex
         while (start < fields.endIndex) {
             fields.setIndex(start)
@@ -59,7 +60,10 @@ internal fun clockCalendarDate(now: Instant, locale: Locale, showWeekday: Boolea
                 java.text.DateFormat.Field.DAY_OF_MONTH in attributes -> dayColor
                 else -> null
             }
-            if (color != null) addStyle(SpanStyle(color = color), start - fields.beginIndex, end - fields.beginIndex)
+            // literal 段继承前一个字段色，中文「月」「日」才和数字同色
+            val spanColor = color ?: previousColor
+            if (color != null) previousColor = color
+            if (spanColor != null) addStyle(SpanStyle(color = spanColor), start - fields.beginIndex, end - fields.beginIndex)
             start = end
         }
     }

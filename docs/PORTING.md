@@ -1023,3 +1023,32 @@ DIFF vs 桩文件:
 - [ ] **已知边界**：日程仍由独立 `LegacyHomeClockHeader` 区块渲染（上游把 clock+calendar 合成一个区域
   widget，需改 `HomeContent` 枚举 → P3）；Agenda 面板天气仍是兼容层（P5）。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.166-p2-clock-regions-182.apk`。
+
+### P3 首页区块合并 + 天气点击 + 日期文字色（v2.9.168-p3-weather-click / versionCode 184，2026-11-16）
+
+上游 1.2.2「clock 与 calendar 合并为单一区域 widget」的模型对齐，附两处用户实测问题的修复。
+
+- [x] **GraceWidget 合并**：`{Clock, Calendar, Media, Baseline}` → 上游 `{ClockCalendar, Media, Baseline}`。
+  日历 / 日期 / 天气 / 电量 / 任务都由 ClockCalendar 的内部区域承担，开关收敛为
+  `homeLayout.clockCalendarEnabled`（`enabled()` 里再与本区块各部件开关做或运算）。
+- [x] **老数据兼容**：`normalizeHomeOrder` 用上游 `normalizedGraceWidgetKey` —— 存量 homeOrder 里的
+  `grace:clock` / `grace:calendar` 自动映射到 `grace:clock-calendar` 并 `distinct()`，用户无需清排序。
+- [x] `HomeLayout` 补 `clockCalendarEnabled` + `editingLocked`（含 encode/decode，DB 无新列）。
+- [x] **HomeScreen**：原先 `GraceWidget.Clock` / `GraceWidget.Calendar` 两个分支合并为一个
+  `ClockCalendar` 分支 → 一个 `HomeClockHeader`（`showClock=clockEnabled`、`showCalendar=calendarAgenda`、
+  `showBattery=showBatteryPercentage`、`weather=weather`），区块顺序里只保留一个 key，杜绝重复渲染。
+- [x] **设置页**：主页排序区块列表 4 项 → 3 项（时钟与日程 / 小组件 / 媒体）；文案新建
+  `grace_home_order_clock_calendar`（上游无对应 key，遵守独立 string 名铁律）。
+- [x] **修复：天气图标点击无反应（移植缺口，非上游行为）** —— 上游链路是
+  `LauncherScreen:1208 onWeatherClick = actions.openWeatherApp` → `HomeScreen` → `HomeClockHeader` →
+  `HomeWeather.onClick`；模块 `HomeScreen` 主签名从来没有这个参数（只有内部 `LegacyHomeClockHeader` 有），
+  链路自旧版起就是断的。本批补 `HomeScreen.onWeatherClick` → `ClockCalendar` 分支透传 →
+  `GraceLauncherRoute` 接 `AgendaIntents.openWeatherApp(hostContext)`（与 Agenda 面板同一条 Intent 链）。
+- [x] **修复：日期行「月」「日」与数字不同色（上游同样存在，已上报 issue #263）** ——
+  `clockCalendarDate()` 按 `DateFormat.Field` 逐段上色，中文 pattern `M月d日` 的「月」「日」是 literal
+  文本、不属于任何 Field → 拿不到颜色 → 落回基础文字色。修复：literal 段继承**前一个已上色字段**的颜色
+  （首个上色字段之前的 literal 仍保持不上色）。英文等 literal 为标点的语言肉眼无变化。
+  **这是本仓对上游的唯一主动偏离**（上游 issue：
+  https://github.com/Galaxy-rio/GraceLauncher/issues/263 ，建议上游同样处理）。
+- [x] **验证**：`assembleRelease` 通过；装机零 FATAL；区块合并不重复渲染；天气图标点击可打开天气应用。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.168-p3-weather-click-184.apk`。

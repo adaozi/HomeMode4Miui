@@ -766,6 +766,8 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
                 // P6（B6.2）：日期点击 → 日程+天气面板（原版 LauncherOverlay.Agenda 语义）
                 onDateClick = { overlay = LauncherOverlay.Agenda },
                 onClockClick = viewModel::openClock,
+                // 上游 1.2.4：天气图标点击 → 打开天气应用（与 Agenda 面板同一条 Intent 链）
+                onWeatherClick = { AgendaIntents.openWeatherApp(hostContext) },
                 // hotfix2：面板打开即刷新授权态（hasMediaAccess 随面板打开保持新鲜）
                 onWidgetMenu = { viewModel.refreshMediaAccess(); overlay = LauncherOverlay.HomeWidgetMenu },
                 onCustomWidgetMenu = { overlay = LauncherOverlay.CustomWidgetMenu },

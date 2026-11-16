@@ -160,6 +160,8 @@ fun HomeScreen(
     onAppShortcuts: (LauncherApp, Rect) -> Unit,
     onDateClick: () -> Unit,
     onClockClick: () -> Unit,
+    /** 上游 1.2.4：点击天气图标打开天气应用（LauncherActions.openWeatherApp 语义）。 */
+    onWeatherClick: () -> Unit = {},
     onWidgetMenu: () -> Unit,
     onCustomWidgetMenu: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -270,15 +272,13 @@ fun HomeScreen(
         (if (widgetHeight == 0f) hostedWidget.defaultHeight else widgetHeight.roundToInt()).coerceIn(minWidgetHeight, maximumWidgetHeight)
     val resizeLimit = (availableHeight - resolvedTop - headerHeight - 56.dp).value.toInt()
         .coerceIn(minWidgetHeight, maximumWidgetHeight)
-    // 上游同步 1.2.0（S6b）：区块顺序由 homeLayout.homeOrder 驱动。
-    // 模块差异：没有独立的 calendar / baseline 区块（它们在 HomeClockHeader 内部），
-    // 因此可排序区块只有 clock（含日期/日程）/ widget / media，收藏恒在尾部。
+    // 上游同步 P3（1.2.2）：区块顺序由 homeLayout.homeOrder 驱动。
+    // clock 与 calendar 已合并为 ClockCalendar 单一区块（日期/日程/天气/电量/任务都是它的内部区域，
+    // 由 ClockStyle.regions 控制），因此可排序区块 = clockCalendar / widget / media，收藏恒在尾部。
     // 注意：必须在 LazyListScope 之外计算 —— 里面不是 @Composable 上下文。
     val blockOrder = remember(homeLayout.homeOrder, clockEnabled, calendarAgenda, media, hostedWidget) {
         val available = buildList {
-            // 上游同步 1.2.0（S6e）：clock 与 calendar 拆成两个独立区块（各自由开关控制）
-            if (clockEnabled) add(GraceWidget.Clock.key)
-            if (calendarAgenda) add(GraceWidget.Calendar.key)
+            if (clockEnabled || calendarAgenda) add(GraceWidget.ClockCalendar.key)
             if (hostedWidget != null) add("widget:${homeLayout.widgetId}")
             if (media != null) add(GraceWidget.Media.key)
         }
@@ -334,9 +334,9 @@ fun HomeScreen(
                     }
                 } else Modifier)) {
                 when (blockKey) {
-                    GraceWidget.Clock.key -> {
-                        // 上游 1.2.3：区域化时钟（ClockRegions 多区域 + 逐元素配色 + 秒/前导零）
-                        // 在 clockStyle.regions 存在时生效；否则内部回落 LegacyHomeClockHeader。
+                    // 上游 P3（1.2.2）：clock + calendar 合并为一个区块 —— 一个 HomeClockHeader 全权渲染
+                    // （区域顺序/可见性/配色由 ClockStyle.regions 决定；regions 为 null 时内部回落 Legacy）。
+                    GraceWidget.ClockCalendar.key -> {
                         HomeClockHeader(
                             now = now,
                             event = event,
@@ -344,32 +344,15 @@ fun HomeScreen(
                             onClockClick = onClockClick,
                             onLongClick = onWidgetMenu,
                             onAnchorOffsetChange = { anchorOffsetPx = it },
-                            showClock = true,
+                            showClock = clockEnabled,
                             clockStyle = clockStyle,
                             interactive = !editingLayout,
-                            showCalendar = false,
-                            showBattery = false,
-                            weather = null,
-                            modifier = Modifier.fillMaxWidth().onSizeChanged { headerHeightPx = it.height },
-                        )
-                        Spacer(Modifier.height(2.dp))
-                    }
-                    // 上游同步 1.2.0（S6e）：日程作为独立区块（电池/天气跟随日程，与上游一致）
-                    GraceWidget.Calendar.key -> {
-                        LegacyHomeClockHeader(
-                            now = now,
-                            event = event,
-                            onDateClick = onDateClick,
-                            onClockClick = onClockClick,
-                            onLongClick = onWidgetMenu,
-                            showClock = false,
-                            clockStyle = clockStyle,
-                            interactive = !editingLayout,
-                            showCalendar = true,
+                            showCalendar = calendarAgenda,
                             calendarAboveClock = calendarAboveClock,
                             showBattery = showBatteryPercentage,
                             weather = weather,
-                            modifier = Modifier.fillMaxWidth().onSizeChanged { calendarHeightPx = it.height },
+                            onWeatherClick = onWeatherClick,
+                            modifier = Modifier.fillMaxWidth().onSizeChanged { headerHeightPx = it.height },
                         )
                         Spacer(Modifier.height(2.dp))
                     }
