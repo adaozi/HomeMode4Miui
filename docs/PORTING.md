@@ -1113,3 +1113,38 @@ DIFF vs 桩文件:
   `getSerialNumberForUser` 原样保留，MIUI 双开（clone）语义完全不动。
 - [x] 装机验证：应用数仍 **142**（dualapp 应用未丢）、`iconMissing=0/142`、零 FATAL。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.170-p4b-profile-readable-186.apk`。
+
+### P4c-1 字母条组件升级（v2.9.171-p4c-alphabet-rail / versionCode 187，2026-11-16）
+
+**先记一条计划偏差（重要）**：P4 的 UI 部分（抽屉 / 搜索 / 字母条 / 列表外观）**依赖 P9（应用类别）
+与 P10（快捷方式设计）**，原批次顺序不成立。实测链条：
+
+```
+ListAppearanceSettings ──→ ListAppearancePreviewPopup ──→ ShortcutPopup 新版（P10，390 行重写）
+AlphabetRail ──────────→ AppCategory + CategoryIndicator（P9）
+ItemSelectionScreen ───→ AppCategoriesSettings / FavoriteFoldersScreen / AppGroupPickerScreen（P9+P12）
+AppCategorySettings ───→ CategoryItemsEditor（在 ItemSelectionScreen 内，P13）
+```
+
+即 P4c / P9 / P10 / P13 互相咬合。**后续按「最小可编译闭包」推进**：每次选一个功能，
+把它的全部依赖一起拷（允许跨批次），保证编译通过且不留 UI 死链，而不是严格按批次号走。
+
+本批是该策略的第一个闭包（字母条显示层），不依赖 P9 的完整设置页：
+
+- [x] `ui/components/AlphabetRail.kt` 换上游 1.2.3 版：**RTL 自动镜像**（`LayoutDirection` 判定 +
+  `inwardDirection` 物理像素内移）、**可调触控区宽度**（`rightTouchWidth` 28..56dp）、
+  **类别分段入口**（`categorySections` 参数默认 `emptyMap()`，P9 接入后才有内容）、
+  起止命名由 left/right 改为 start/end（语义与上游一致）。
+- [x] `data/AlphabetAppearance` 补上游 1.2.3 三字段：`showOnHome: Boolean?`（null = 沿用旧
+  「隐藏字母条」开关）、`showInAppList: Boolean`、`rightTouchWidth: Int`，含 encode/decode。
+- [x] `ui/home/HeadphoneConnection.kt`（新）：耳机连接状态（类别条件与 Agenda 用）。
+- [x] `ui/components/CategoryIcon.kt`（新，含 `CategoryIndicator`）+ `ui/settings/CategoryLabels.kt`
+  （从上游 `AppCategorySettings` 抽出的 `categoryLabel`，避免为一行文案整页搬 P9）。
+- [x] 验证：`assembleRelease` 通过；装机零 FATAL；抽屉正常打开（新 AlphabetRail 用默认参数，
+  行为与旧版一致，触控区调宽需 P4c-2 的设置页接线）。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.171-p4c-alphabet-rail-187.apk`。
+
+**P4c 剩余（待 P9/P10 解封）**：`AppListModel`（122）、`AppDrawerScreen`（222）、
+`AppSearchScreen`（269）、`SearchIndex`（61）、`LauncherListGestures`（61）、`AppStack`（39）、
+`ListAppearanceSettings` + 两个 Preview、`AlphabetSettings`（154）、`ShortcutsFoldersSettings`、
+`AppStackSettings`。

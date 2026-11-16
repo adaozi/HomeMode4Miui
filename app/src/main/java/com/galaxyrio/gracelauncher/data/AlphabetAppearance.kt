@@ -15,6 +15,11 @@ data class AlphabetAppearance(
     val topPercent: Int? = null,
     val bottomPercent: Int = 85,
     val freeMovement: Boolean = false,
+    /** 上游 1.2.3：null = 沿用桌面「隐藏字母条」旧开关；控制字母条在桌面/抽屉的显示。 */
+    val showOnHome: Boolean? = null,
+    val showInAppList: Boolean = true,
+    /** 上游 1.2.3：右侧触控区宽度（dp），可调范围 28..56。 */
+    val rightTouchWidth: Int = 36,
 ) {
     fun normalized(): AlphabetAppearance {
         val top = topPercent?.coerceIn(0, 99)
@@ -42,6 +47,8 @@ data class AlphabetAppearance(
         put("pebbleRoundness", value.pebbleRoundness); put("squareCornerRadius", value.squareCornerRadius)
         put("cookieSides", value.cookieSides); put("topPercent", value.topPercent ?: JSONObject.NULL)
         put("bottomPercent", value.bottomPercent); put("freeMovement", value.freeMovement)
+        put("showOnHome", value.showOnHome ?: JSONObject.NULL); put("showInAppList", value.showInAppList)
+        put("rightTouchWidth", value.rightTouchWidth)
     } }
 
     companion object {
@@ -64,6 +71,9 @@ data class AlphabetAppearance(
                     topPercent = top,
                     bottomPercent = bottom,
                     freeMovement = it.optBoolean("freeMovement", defaults.freeMovement),
+                    showOnHome = if (it.isNull("showOnHome")) null else it.optBoolean("showOnHome", true),
+                    showInAppList = it.optBoolean("showInAppList", true),
+                    rightTouchWidth = it.optInt("rightTouchWidth", 36).coerceIn(28, 56),
                 ).normalized()
             } ?: defaults
         }
