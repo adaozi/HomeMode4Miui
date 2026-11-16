@@ -51,7 +51,7 @@
 | P4 | 应用列表 + 抽屉 + 搜索 | 1.2.3 | 26 | 2182 | 10 | **高** |
 | P5 | Agenda 面板 + Tasks.org | 1.2.4 | 14 | 498 | 11 | 中高 |
 | P6 | 天气（Gadgetbridge + 逐小时图表） | 1.2.3 / 1.2.4 | 14 | 271 | 11 | 中 |
-| P7 | 小组件（Widget Screen + 尺寸/配置） | 1.2.0 / 1.2.1 | 17 | 347 | 11 | 中高 |
+| P7 | 小组件（尺寸/配置兼容，**不含 Widget Screen**） | 1.2.1 | 14 | 347 | 8 | 中高 |
 | P8 | 音乐（media3 + 多风格） | 1.2.3 | 12 | 488 | 7 | 中 |
 | P9 | 应用类别 + 数字健康 | 1.2.2 | 4 + 契约改造 | — | 4 | 中 |
 | P10 | 图标设计器 + 快捷方式设计 | 1.2.1 | 22 | 1155 | 1 | **高** |
@@ -123,22 +123,23 @@
 
 ---
 
-### P7 小组件（Widget Screen + 尺寸/配置兼容）
+### P7 小组件（尺寸/配置兼容 —— **不含 Widget Screen**，见决策 2）
 
 | 文件 | 改动 | 说明 |
 | --- | --- | --- |
-| `ui/home/WidgetScreen.kt` | 453 | 主页右侧的网格 Widget 页（1.2.0 引入，本仓当年放弃） |
-| `ui/home/WidgetGridState.kt` | 新 | 网格状态 |
+| ~~`ui/home/WidgetScreen.kt`~~ | ~~453~~ | **不移植**（决策 2：与负一屏重合） |
+| ~~`ui/home/WidgetGridState.kt`~~ | ~~新~~ | **不移植**（同上） |
 | `platform/WidgetSizing.kt` / `WidgetCompatibility.kt` / `WidgetConfigurationRouting.kt` / `WidgetLongPressTimeout.kt` | 新 | 1.2.1「小组件添加/修改兼容性」核心 |
 | `ui/widgets/HomeWidget.kt` | 133 | 尺寸手柄 + resize |
 | `ui/widgets/WidgetPicker.kt` | 109 | 选择器 |
 | `ui/widgets/WidgetConfigurationButton.kt` / `WidgetLongPressConfiguration.kt` | 新 | 配置入口 |
 | `ui/overlays/HomeWidgetSheet.kt` / `PopulationWidgetEditor.kt` | 变 | 弹层内 widget 编辑 |
 | `WidgetSetupActivity.kt` | 新 | 配置 Activity（跨进程） |
-| `ui/settings/WidgetScreenSettings.kt` | 新 | Widget Screen 设置页 |
+| ~~`ui/settings/WidgetScreenSettings.kt`~~ | ~~新~~ | **不移植**（同上） |
 
 **风险**：新页面 + 新 Activity + AppWidgetHost 交互，宿主进程内 `bindAppWidgetId` 失败要能回退。
-**验收**：添加小组件、拖动/缩放、更改配置、Widget Screen 进出、删除清理 appWidgetId 不泄漏。
+**验收**：主页添加小组件、拖动 / 缩放（1.2.3 的 resize 手柄）、更改配置、删除后 appWidgetId 不泄漏。
+**不做**：Widget Screen 页面、网格排列、`widgetScreenJson` 的任何 UI 消费。
 
 ---
 
@@ -247,12 +248,18 @@
 
 ## 5. 关键决策点（需要 User 拍板时才问）
 
-| # | 决策 | 建议 | 触发时点 |
+**已于 2026-11-16 由 User 拍板，全部锁定：**
+
+| # | 决策 | 结论 | 备注 |
 | --- | --- | --- | --- |
-| 1 | 首页是否切上游 `uiState` 契约 | **切**（P11 一次性投入，之后零成本） | P9 完成后 |
-| 2 | Widget Screen 是否恢复（1.2.0 当年放弃，用原生负一屏替代） | **恢复**（全量对齐，且能与负一屏并存） | P7 开工前 |
-| 3 | 是否引入 media3 依赖 | **引入**（随机播放/多会话必需，只影响音乐） | P8 开工前 |
-| 4 | 设置页新分组（Homepage/AppList/FeedScreen/StatusScreen）是否都建 | 依赖未完成的先占位，不留死链 | P12 |
+| 1 | 首页是否切上游 `uiState` 契约 | ✅ **切**（P11 一次性投入，之后零成本） | P9 完成后执行 |
+| 2 | Widget Screen 是否恢复 | ❌ **不恢复** | User 判断：与原生负一屏（`com.miui.personalassistant` overlay）功能重合。P7 只做「主页 widget 的尺寸/配置兼容性」，不新建 Widget Screen 页 |
+| 3 | 是否引入 media3 依赖 | ✅ **引入** | 随机播放 / 多会话必需，依赖隔离在音乐链路 |
+| 4 | 设置页新分组是否都建 | ✅ **建**，依赖未完成的先挂 `AppearancePlaceholder` | 不留死链、不留空白页 |
+
+> 决策 2 的连带影响：`ui/home/WidgetScreen.kt`、`WidgetGridState.kt`、`ui/settings/WidgetScreenSettings.kt`
+> 三个文件**不移植**；P0 已恢复的 `PopupItem.grid` 字段保留（序列化兼容，无 UI 消费，不删以免破坏
+> 上游 popup JSON 互通）。`homeLayout.widgetScreenJson` 列同理由 P0 保留、P2 起随桥同步。
 
 ---
 
@@ -296,3 +303,12 @@ P9 完成 ──→ P11 首页契约切换 ──→ P12 设置页重组 ──�
 先做 P4 的理由：它同时是 P9/P10 的前置，且是当前剩余缺口里改动量最大、最深分叉的一块 —— 早做早暴露问题。
 P5/P6 相邻（Agenda 消费天气），P7/P8 相对独立可穿插。
 P11/P12/P13 放在最后，因为它们都是"结构对齐"而非"功能补齐"，前面的批次会让这些文件自然收敛一部分。
+
+### 决策落地记录（2026-11-16）
+
+- **P11 首页契约切换**：确定执行，时点 = P9 完成之后。
+- **Widget Screen**：确定不移植。P7 降级为"主页 widget 的尺寸 / 配置兼容性"批，
+  三个 Widget Screen 文件不拷，`PopupItem.grid` 与 `widgetScreenJson` 作为数据兼容保留。
+  上游 1.2.0 引入的 Widget Screen 能力由原生负一屏承担（模块既有 `MinusOneEntry` / `OverlayKeepAlive` 链路）。
+- **media3**：P8 引入，依赖只进音乐链路，失败全 catch 不影响桌面。
+- **设置页新分组**：P12 全建，依赖未完成的挂 `AppearancePlaceholder`。
