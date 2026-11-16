@@ -49,6 +49,7 @@ import com.galaxyrio.gracelauncher.data.notifications.NotificationAppId
 import com.galaxyrio.gracelauncher.data.PrivateSpaceFolderKey
 import com.galaxyrio.gracelauncher.data.WorkProfileFolderKey
 import com.galaxyrio.gracelauncher.data.HomeContentKey
+import com.galaxyrio.gracelauncher.data.FavoritesCategoryId
 
 enum class ScheduleStatus {
     PermissionRequired,
@@ -212,6 +213,13 @@ data class LauncherUiState(
     fun categoryItems(category: AppCategory): List<String> {
         if (isLoadingSettings || settingsLoadFailed) return emptyList()
         fun available(app: LauncherApp) = !app.isPrivateSpace || (settings.privateSpace.exposesApps && privateContentVisible)
+        // 内置「收藏」类别：成员恒等于收藏列表本身。
+        // 上游靠 toggleCategoryItem(FavoritesCategoryId, …) 与收藏双写保持同步；模块暂无
+        // 收藏增删的桥命令，改为**读取时直接派生** —— 否则该类别 itemKeys 一直是空，
+        // 类别列表显示「0 个项目」（2026-11-16 用户实测）。
+        if (category.id == FavoritesCategoryId) return (favoriteOrder + favoriteKeys.filterNot { it in favoriteOrder })
+            .filter { key -> findItem(key)?.let(::available) == true }
+            .distinct()
         if (category.inclusion == CategoryInclusion.Manual) return category.itemKeys.filter { key ->
             findItem(key)?.let(::available) == true
         }

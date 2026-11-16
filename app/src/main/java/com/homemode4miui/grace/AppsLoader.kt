@@ -285,6 +285,9 @@ internal class AppsLoader(
                     ?.takeIf { it.isNotEmpty() }
                 val order = if (fromHome == null) storeOrder
                     else (fromHome + storeOrder.filterNot { it in fromHome }).distinct()
+                ModLog.i("favorites order: store=" + storeOrder.size + " fromHome="
+                    + (fromHome?.size ?: -1) + " final=" + order.size
+                    + " head=" + order.take(3).joinToString(","))
                 // 上游同步 v1.1.8 S8a：工作资料枚举（无 managed profile 时零开销静默跳过）。
                 val workProfiles = appRepository.workProfiles()
                 val workProfileApps = if (workProfiles.isNotEmpty()) {

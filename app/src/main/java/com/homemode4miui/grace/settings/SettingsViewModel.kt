@@ -184,7 +184,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 快照 → uiState（模块本地查询面保留，桥面覆盖）。 */
-    private fun applySnapshot(snapshot: GraceSettingsBridge.Snapshot) {        val previousWeatherLocationId = _uiState.value.settings.weatherLocationId
+    private fun applySnapshot(snapshot: GraceSettingsBridge.Snapshot) {
+        // 诊断（favorites-0）：设置页收藏来源是否为空
+        com.homemode4miui.util.ModLog.i("settings snapshot: favKeys=" + snapshot.favoriteKeys.size
+            + " favOrder=" + snapshot.favoriteOrder.size + " apps=" + _uiState.value.apps.size)
+        val previousWeatherLocationId = _uiState.value.settings.weatherLocationId
         // 宿主应用清单（补本地枚举差集，refreshApps 尾部合并）
         bridgedCatalog = snapshot.appCatalog.mapNotNull { wire ->
             val component = android.content.ComponentName.unflattenFromString(wire.component)

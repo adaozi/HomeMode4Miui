@@ -244,6 +244,8 @@ class GraceSettingsHostEngine(
                 val popupsJson = dao?.popups()?.first()
                     ?.associate { it.ownerKey to it.itemsJson } ?: emptyMap()
                 val favoriteOrder = favoritesStore.currentOrder().orEmpty()
+                ModLog.i("host snapshot favoriteOrder=" + favoriteOrder.size
+                    + " head=" + favoriteOrder.take(3).joinToString(","))
                 GraceSettingsBridge.Snapshot(
                     ok = true,
                     settings = snapshot.settings,

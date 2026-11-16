@@ -181,6 +181,8 @@ internal class SettingsSync(
      */
     fun reorderFavorites(keys: List<String>) {
         val current = uiState.value
+        com.homemode4miui.util.ModLog.i("reorderFavorites: keys=" + keys.size
+            + " current=" + current.favoriteOrder.size + " head=" + keys.take(3).joinToString(","))
         val updated = favoritesStore.reorder(keys, current.favoriteOrder)
         val homeOrder = current.settings.homeLayout.homeOrder
         if (homeOrder.isNullOrEmpty()) {

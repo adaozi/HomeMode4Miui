@@ -1256,3 +1256,31 @@ P11b 拆两段，本段只解决"收藏顺序双源"，不动 `HomeScreen`（降
 `List<LauncherApp>`，而 `visibleHomeContent(...)` 产出 `List<PopupItem>`（类别/文件夹/收藏混合）。
 需要给 HomeScreen 增加"类别行"渲染能力（含 `CategoryIndicator` + 成员预览），
 与上游 HomeScreen 的 `entries` 渲染对齐后再接，避免只接数据源造成"类别看不见"。
+
+### 修复：应用类别里「收藏」显示 0 个项目（v2.9.179-favorites-category-fix / versionCode 195，2026-11-16）
+
+用户实测：设置 → 生产力 → 应用类别 → 内置「收藏」类别显示 0 个项目。
+
+**根因（两层）**：
+1. 上游内置「收藏」类别（`FavoritesCategoryId`）的成员存在 `AppCategory.itemKeys` 里，
+   由 `toggleFavorite` 内 `toggleCategoryItem(FavoritesCategoryId, app)` **双写**保持同步
+   （`LauncherViewModel.kt:1714`）。模块只搬了类别 UI 与 `toggleCategoryItem`，
+   收藏增删仍走自己的 Store 路径 → `itemKeys` 永远为空 → 计数 0。
+2. `CategoryItemsEditor` 里非动态类别取 `category.itemKeys`（而非 `uiState.categoryItems()`），
+   把这个空值直接显示出来。
+
+**修复**：
+- [x] `LauncherUiState.categoryItems()` 对 `FavoritesCategoryId` **读取时派生**
+  （`favoriteOrder + favoriteKeys 差集`，按可用性过滤并去重）——
+  不依赖写侧双写同步，收藏变多/变少立即正确。
+- [x] `CategoryItemsEditor` 的 `selected` 统一取 `uiState.categoryItems(category)`（列表计数与编辑器同源）。
+- [x] 收藏类别在编辑器里设为**只读** + 指引文案 `grace_favorites_edit_hint`
+  （「收藏成员请在桌面长按 → 编辑收藏中修改」）——
+  因为模块暂无"收藏增删"桥命令（`GraceSettingsBridge.Cmd` 里没有 TOGGLE_FAVORITE），
+  直接放开会让用户改了没反应。
+- [x] 同时补诊断日志（`favorites order: store=/fromHome=/final=`、`host snapshot favoriteOrder=`、
+  `settings snapshot: favKeys=/favOrder=/apps=`），本次定位靠它们排除"桌面侧数据为空"的假设。
+- [x] 验证：装机零 FATAL。
+
+**后续可做**：补桥命令 `TOGGLE_FAVORITE`（宿主侧 `favoritesStore.toggle` + 重发快照），
+即可放开收藏类别的编辑能力，与上游行为完全一致。
