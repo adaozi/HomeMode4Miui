@@ -86,6 +86,28 @@
 
 **验收**：抽屉打开/滚动/字母条拖拽/双击锁屏、搜索过滤隐藏应用、快捷方式进列表、应用堆渲染、列表外观五项设置即时生效。
 
+#### P4 实施顺序（AppRepository 已拆解，分 3 小步，每步可独立装机验收）
+
+`data/AppRepository.kt` 无法三方合并 —— 上游 1.2.4 把它重构成
+`invalidateApps → profileSnapshot → loadCatalog → refreshProfile(fingerprint 增量) → buildApps → applyIconPacks`
+的增量管线（585 行 / 17 函数），模块仍是"整表重载"式（331 行 / 8 函数，含 5 个本地函数）。
+两者交织，只能嫁接。
+
+| 步 | 内容 | 风险 |
+| --- | --- | --- |
+| **P4a** | **只增不删**：把上游的缓存失效与增量刷新能力加到模块现有结构上（`invalidateApps` / `invalidateProfiles` / `invalidateAll` / `fingerprint` / `refreshProfile` 的增量判定 + LauncherApps 变更回调接线），不动现有枚举与图标链路 | 低（可整体回退） |
+| **P4b** | 枚举路径合并：把模块 `enumerateApps`（MIUI 可见性兜底）与 `workProfiles` / `loadWorkApps`（工作资料）合入上游 `profileSnapshot` / `loadProfileApps` 结构，`withIcons` 两段式图标装载挂在 `buildApps` 之后 | 中高（应用装载命脉） |
+| **P4c** | 列表 / 搜索 / 字母条 / 设置页（`AppDrawerScreen`、`AppSearchScreen`、`AppListModel`、`AlphabetRail`、`LauncherListGestures`、`AppStack`、`ListAppearanceSettings` + 两个 Preview、`AlphabetSettings`、`ShortcutsFoldersSettings`、`AppStackSettings` + 5 个新数据/组件文件） | 中 |
+
+**模块必须保留的 5 个本地函数**（P4b 时要一一对应到上游结构，不能丢）：
+
+| 函数 | 行数 | 用途 |
+| --- | --- | --- |
+| `enumerateApps` | 69 | MIUI 裁剪第三方调用方可见性 → 多路径枚举兜底 |
+| `withIcons` | 41 | 两段式图标装载（主线程先出行、图标后补，修过"重启后抽屉图标整批丢失"） |
+| `workProfiles` / `loadWorkApps` | 14 + 28 | 工作资料独立装载链 |
+| `makeApp` 的 42 行改动 | 42 | `isCloneProfile` / `originalIconColor` / `iconSourceRevision` 等字段填充 |
+
 ---
 
 ### P5 Agenda 面板 + Tasks.org（1.2.4）
