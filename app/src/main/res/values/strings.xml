@@ -1329,4 +1329,6 @@
     <string name="agenda_choose_create_action">Choose what to add</string>
     <string name="agenda_new_task">New task</string>
     <string name="agenda_unsaved_message">Your agenda changes haven’t been saved.</string>
+    <!-- 模块新增：AppNameVisibility.Neither 档位展示（上游无此档位文案，按铁律新建独立名） -->
+    <string name="grace_list_names_neither">No app names</string>
 </resources>

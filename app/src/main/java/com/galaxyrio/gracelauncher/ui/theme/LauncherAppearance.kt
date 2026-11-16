@@ -40,22 +40,27 @@ import com.galaxyrio.gracelauncher.data.IconColor
 import com.galaxyrio.gracelauncher.data.wallpaperPrimaryArgb
 import com.materialkolor.palettes.TonalPalette
 import java.util.function.Consumer
+import androidx.compose.ui.graphics.luminance
 
 data class LauncherAppearance(val darkText: Boolean = false, val themedIcons: Boolean = false, val iconSize: Int = 100,
-    val iconDisplay: IconDisplaySettings = IconDisplaySettings()) {
-    val text: Color get() = if (darkText) Color(0xFF202025) else Color(0xFFFAF9FE)
-    val textShadow: Shadow get() = if (darkText) Shadow.None else Shadow(Color.Black.copy(alpha = 0.32f), blurRadius = 4f)
+    val iconDisplay: IconDisplaySettings = IconDisplaySettings(),
+    /** 上游 1.2.2：字体颜色解析结果（null = 沿用 darkText 的固定双色）。 */
+    val textColor: Color? = null) {
+    val text: Color get() = textColor ?: if (darkText) Color(0xFF202025) else Color(0xFFFAF9FE)
+    val textShadow: Shadow get() = if (text.luminance() < 0.5f) Shadow.None
+        else Shadow(Color.Black.copy(alpha = 0.32f), blurRadius = 4f)
 }
 
 val LocalLauncherAppearance = staticCompositionLocalOf { LauncherAppearance() }
 
 /** 上游同步 v1.1.8：Dim Wallpaper 自定义遮罩色解析（v1.1.7 特性；S7 宿主消费接线随后）。 */
-internal fun LauncherAppearance.wallpaperTint(primary: Color, choice: IconColor? = null): Color {
+internal fun LauncherAppearance.wallpaperTint(primary: Color, choice: IconColor? = null,
+    colorScheme: androidx.compose.material3.ColorScheme? = null): Color {
     // Adjust primary's tone, not a black scrim. Dark text gets a matching light tint.
     // Change tone within the already selected theme palette; do not generate a
     // second Tonal Spot scheme that discards the user's chosen style/chroma.
     val automatic = Color(TonalPalette.fromInt(primary.toArgb()).tone(if (darkText) 95 else 10))
-    return choice?.resolve(primary.toArgb())?.let(::Color) ?: automatic
+    return choice?.resolve(primary.toArgb(), colorScheme = colorScheme)?.let(::Color) ?: automatic
 }
 
 /** One resolver for every row: a per-app override wins, else the shared setting. */
@@ -163,25 +168,6 @@ internal fun rememberWallpaperSeedColor(fallback: Int): Int {
     }
     return seed
 }
-
-@Composable
-fun rememberBatteryPercent(): Int? {
-    val context = LocalContext.current
-    var percent by remember { mutableStateOf<Int?>(null) }
-    DisposableEffect(context) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-                val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-                percent = if (level >= 0 && scale > 0) (100 * level / scale) else null
-            }
-        }
-        ContextCompat.registerReceiver(context, receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_EXPORTED)
-        onDispose { context.unregisterReceiver(receiver) }
-    }
-    return percent
-}
-
 /** The system may disable cross-window blur at runtime (e.g. battery saver). */
 @Composable
 internal fun rememberWallpaperBlurAvailable(): Boolean {
@@ -216,4 +202,40 @@ internal fun WallpaperBlur(radius: Dp) {
     DisposableEffect(window) {
         onDispose { window.setBackgroundBlurRadius(0) }
     }
+}
+
+/** 上游 1.2.3：电量百分比与充电状态的统一读取（插拔电源时图标与文字同步更新）。 */
+data class LauncherBatteryState(val percent: Int, val isCharging: Boolean)
+
+@Composable
+fun rememberBatteryPercent(): Int? = rememberBatteryState()?.percent
+
+/** Read level and charging status together so a plug change updates the icon at the same level. */
+@Composable
+fun rememberBatteryState(): LauncherBatteryState? {
+    val context = LocalContext.current
+    var battery by remember(context) { mutableStateOf<LauncherBatteryState?>(null) }
+    DisposableEffect(context) {
+        fun update(intent: Intent?) {
+            if (intent?.action != Intent.ACTION_BATTERY_CHANGED) return
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
+            val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+            battery = if (level >= 0 && scale > 0) LauncherBatteryState(
+                percent = (100L * level / scale).coerceIn(0L, 100L).toInt(),
+                isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    (status == BatteryManager.BATTERY_STATUS_FULL && plugged),
+            ) else null
+        }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                update(intent)
+            }
+        }
+        update(ContextCompat.registerReceiver(context, receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_EXPORTED))
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    return battery
 }

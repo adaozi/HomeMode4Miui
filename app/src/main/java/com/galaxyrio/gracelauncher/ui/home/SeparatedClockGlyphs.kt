@@ -1,8 +1,3 @@
-/*
- * 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
- * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/ui/home/SeparatedClockGlyphs.kt
- * P1 移植：逐字拷贝，未改动。
- */
 package com.galaxyrio.gracelauncher.ui.home
 
 import android.graphics.Paint
@@ -29,6 +24,8 @@ internal data class PositionedClockGlyph(
     val x: Float,
     val y: Float = 0f,
     val letterSpacingEm: Float = 0f,
+    /** Logical hour, minute and second tens/ones, independent of omitted leading zeros. */
+    val digitSlot: Int? = null,
 )
 
 internal data class ClockGlyphDrawing(
@@ -41,7 +38,7 @@ internal data class ClockGlyphDrawing(
 
 private data class ClockGlyphRun(val glyphs: List<PositionedClockGlyph>, val ink: ClockInkBox)
 
-/** Immutable ink-bound layout for native text; no Text-layout callbacks or state writes. */
+/** Immutable glyph layout for native text; no Text-layout callbacks or state writes. */
 internal fun measureClockGlyphs(
     text: String,
     typeface: Typeface,
@@ -53,6 +50,8 @@ internal fun measureClockGlyphs(
     centerLines: Boolean,
     maxWidth: Float,
     maxHeight: Float,
+    equalWidthDigits: Boolean = false,
+    centerDigits: Boolean = false,
 ): ClockGlyphDrawing {
     val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         this.typeface = typeface
@@ -67,7 +66,8 @@ internal fun measureClockGlyphs(
         path.computeBounds(bounds, true)
         return bounds
     }
-    fun run(value: String): ClockGlyphRun {
+    fun run(value: String, firstDigitSlot: Int? = null, cellWidth: Float? = null,
+        leadingEmptyCells: Int = 0, minimumCells: Int = 0): ClockGlyphRun {
         val boundaries = BreakIterator.getCharacterInstance().apply { setText(value) }
         val clusters = buildList {
             var start = boundaries.first()
@@ -79,12 +79,23 @@ internal fun measureClockGlyphs(
                 end = boundaries.next()
             }
         }
-        val positions = clockDigitPositions(clusters.map { it.second.width() }, digitGapPx)
+        val cellCount = maxOf(minimumCells, leadingEmptyCells + clusters.size)
+        val positions = clockDigitPositions(
+            if (cellWidth != null) List(cellCount) { cellWidth } else clusters.map { it.second.width() },
+            // Equal-width columns may overlap, but a narrow font or fitted size
+            // must not move the ones column to the left of the tens column.
+            if (cellWidth != null) digitGapPx.coerceAtLeast(-cellWidth) else digitGapPx,
+        )
+        var digitSlot = firstDigitSlot ?: 0
         val glyphs = clusters.mapIndexed { index, (cluster, bounds) ->
-            PositionedClockGlyph(cluster, bounds, positions[index] - bounds.left)
+            val cellInset = if (cellWidth != null && centerDigits) (cellWidth - bounds.width()) / 2 else 0f
+            val cellIndex = index + if (cellWidth != null) leadingEmptyCells else 0
+            PositionedClockGlyph(cluster, bounds, positions[cellIndex] + cellInset - bounds.left,
+                digitSlot = if (firstDigitSlot != null && cluster.codePoints().anyMatch(Character::isDigit)) digitSlot++ else null)
         }
         return ClockGlyphRun(glyphs, ClockInkBox(
-            width = glyphs.maxOfOrNull { it.x + it.bounds.right } ?: 0f,
+            width = if (cellWidth != null) (positions.maxOrNull() ?: 0f) + cellWidth
+                else glyphs.maxOfOrNull { it.x + it.bounds.right } ?: 0f,
             top = clusters.minOfOrNull { it.second.top } ?: 0f,
             bottom = clusters.maxOfOrNull { it.second.bottom } ?: 0f,
         ))
@@ -93,16 +104,44 @@ internal fun measureClockGlyphs(
         paint.textSize = size
         val separator = text.indexOf(':')
         var lastBaseline = 0f
+        var reservedWidth: Float? = null
         val glyphs = if (separator >= 0) {
-            val hours = run(text.substring(0, separator))
-            val minutes = run(text.substring(separator + 1))
+            // The two stacked rows remain hours and minutes even if seconds were
+            // enabled before switching layouts or supplied by an older caller.
+            val groups = text.split(':').take(if (stacked) 2 else 3)
+            val hourText = groups[0]
+            val hourDigits = hourText.codePoints().filter(Character::isDigit).count().toInt()
+            val missingHourDigits = (2 - hourDigits).coerceAtLeast(0)
+            val cellWidth = if (stacked && equalWidthDigits) {
+                // Decimal digits are contiguous within each Unicode digit set. Use
+                // the rendered clock's localized set rather than the system locale.
+                val zeroes = groups.joinToString("").codePoints().filter(Character::isDigit)
+                    .map { it - Character.digit(it, 10) }.distinct().toArray()
+                    .let { if (it.isEmpty()) intArrayOf('0'.code) else it }
+                zeroes.maxOf { zero ->
+                    (0..9).maxOf { digit -> inkBounds(String(Character.toChars(zero + digit))).width() }
+                }
+            } else null
+            val hours = run(hourText, firstDigitSlot = missingHourDigits, cellWidth = cellWidth,
+                leadingEmptyCells = missingHourDigits, minimumCells = 2)
+            val minutes = run(groups[1], firstDigitSlot = 2, cellWidth = cellWidth, minimumCells = 2)
             val colon = if (showColon && !stacked) run(":") else null
             val positions = clockGroupPositions(hours.ink, minutes.ink, groupGapPx, stacked, colon?.ink?.width, centerLines)
             lastBaseline = positions.minuteBaseline
+            if (cellWidth != null) reservedWidth = maxOf(hours.ink.width, minutes.ink.width)
             buildList {
                 addAll(hours.glyphs.map { it.copy(x = it.x + positions.hourX) })
                 if (colon != null) addAll(colon.glyphs.map { it.copy(x = it.x + requireNotNull(positions.colonX)) })
                 addAll(minutes.glyphs.map { it.copy(x = it.x + positions.minuteX, y = positions.minuteBaseline) })
+                if (!stacked && groups.size == 3) {
+                    val seconds = run(groups[2], firstDigitSlot = 4)
+                    val secondsPositions = clockGroupPositions(minutes.ink, seconds.ink, groupGapPx,
+                        stacked = false, colonWidth = colon?.ink?.width)
+                    if (colon != null) addAll(colon.glyphs.map {
+                        it.copy(x = it.x + positions.minuteX + requireNotNull(secondsPositions.colonX))
+                    })
+                    addAll(seconds.glyphs.map { it.copy(x = it.x + positions.minuteX + secondsPositions.minuteX) })
+                }
             }
         } else {
             // Keep contextual shaping for scripts with joining letters. Latin abbreviations
@@ -121,6 +160,12 @@ internal fun measureClockGlyphs(
             glyphs.maxOfOrNull { it.x + it.bounds.right } ?: 0f,
             glyphs.maxOfOrNull { it.y + it.bounds.bottom } ?: 0f,
         )
+        reservedWidth?.let { width ->
+            // Retain empty leading/trailing cell space instead of cropping it to
+            // the current glyphs; column positions stay fixed as digits change.
+            bounds.left = minOf(0f, bounds.left)
+            bounds.right = maxOf(width, bounds.right)
+        }
         return ClockGlyphDrawing(glyphs, bounds, typeface, size, lastBaseline)
     }
 
@@ -143,7 +188,8 @@ internal fun measureClockGlyphs(
     return best
 }
 
-internal fun DrawScope.drawClockGlyphs(drawing: ClockGlyphDrawing, color: Color, shadow: Shadow, separate: Boolean) {
+internal fun DrawScope.drawClockGlyphs(drawing: ClockGlyphDrawing, color: Color, shadow: Shadow, separate: Boolean,
+    digitColors: List<Color>? = null) {
     val fill = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = drawing.typeface
         textSize = drawing.fontSizePx
@@ -174,6 +220,7 @@ internal fun DrawScope.drawClockGlyphs(drawing: ClockGlyphDrawing, color: Color,
         drawing.glyphs.forEach { glyph ->
             val x = glyph.x - drawing.bounds.left
             val y = glyph.y - drawing.bounds.top
+            fill.color = (glyph.digitSlot?.let { digitColors?.getOrNull(it) } ?: color).toArgb()
             fill.letterSpacing = glyph.letterSpacingEm
             if (separate) {
                 cutout.letterSpacing = glyph.letterSpacingEm

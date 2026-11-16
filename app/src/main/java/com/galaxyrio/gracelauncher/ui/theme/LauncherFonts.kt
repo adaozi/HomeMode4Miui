@@ -63,6 +63,13 @@ internal val ClockPresetFont.assetFile: String
     }
 
 /** context 必须是模块 Context（GraceHomeRoot 已覆盖 LocalContext），否则 assets 不可达。 */
+/**
+ * 字体资产 Context（模块定制）：桌面跑在宿主进程，`LocalContext` 是宿主包装 Context，
+ * 其 assets 不含模块字体资产。Theme 层用 fontContext provide 本 Local，
+ * 深层 Composable（ClockFace 等）据此解析 preset/导入字体。
+ */
+val LocalFontAssetContext = androidx.compose.runtime.staticCompositionLocalOf<Context?> { null }
+
 internal fun ClockPresetFont.family(context: Context): FontFamily {
     val key: ClockPresetFont = this
     val typeface: Typeface = synchronized(presetTypefaces) {

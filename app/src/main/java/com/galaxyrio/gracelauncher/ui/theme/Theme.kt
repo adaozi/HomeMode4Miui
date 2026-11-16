@@ -113,6 +113,7 @@ fun GraceLauncherTheme(
     val typography = remember(family) { launcherTypography(family) }
     CompositionLocalProvider(
         LocalFontLibrary provides fontLibrary,
+        LocalFontAssetContext provides (fontContext ?: androidx.compose.ui.platform.LocalContext.current),
         LocalFontColors provides fontColors,
         LocalWallpaperFontColor provides wallpaperScheme.onSurface,
         LocalLauncherTypography provides typography,

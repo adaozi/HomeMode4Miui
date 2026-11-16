@@ -1,20 +1,14 @@
-/*
- * 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
- * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/ui/home/ClockFace.kt
- * P1 移植：逐字拷贝，未改动。（依赖 theme 包的 LauncherFontFamily / family() 扩展，
- *   已随 P1 LauncherFonts 完整版就位。）
- */
 @file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package com.galaxyrio.gracelauncher.ui.home
 
 import android.graphics.Typeface
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -23,27 +17,30 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.galaxyrio.gracelauncher.data.ClockFontStore
+import com.galaxyrio.gracelauncher.data.AppFont
+import com.galaxyrio.gracelauncher.data.ClockPresetFont
 import com.galaxyrio.gracelauncher.data.ClockStyle
 import com.galaxyrio.gracelauncher.ui.theme.LauncherFontFamily
 import com.galaxyrio.gracelauncher.ui.theme.family
-import com.homemode4miui.grace.LocalHostContext
+import com.galaxyrio.gracelauncher.ui.theme.rememberAppFontFamily
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -61,29 +58,56 @@ internal fun ClockFace(
     modifier: Modifier = Modifier,
     fontScale: Float = 1f,
     textAlign: TextAlign = TextAlign.Start,
+    digitColors: List<Color>? = null,
 ) {
     val face = style.face
-    val context = LocalContext.current // 模块 Context（GraceHomeRoot 覆盖）：preset 字体走模块 assets
-    // ClockFontStore 的 filesDir 必须留在宿主数据目录（宿主进程可写；模块目录属另一 UID）
-    val hostContext = LocalHostContext.current
-    val fonts = remember(hostContext) { ClockFontStore(hostContext) }
-    val customFamily by produceState<FontFamily?>(null, fonts, face.fontId, face.weight) {
-        value = face.fontId?.let { fonts.typeface(it, face.weight) }?.let { FontFamily(it) }
+    // Applying a preset must keep its exact font and weight synthesis in the editable layout.
+    val presetFont = style.layout.presetFont ?: when (face.fontId) {
+        AppFont.Sacramento.id -> ClockPresetFont.Sacramento
+        AppFont.Bokor.id -> ClockPresetFont.Bokor
+        AppFont.Plaster.id -> ClockPresetFont.Plaster
+        AppFont.Monoton.id -> ClockPresetFont.Monoton
+        AppFont.LuckiestGuy.id -> ClockPresetFont.LuckiestGuy
+        else -> null
     }
-    val family = style.layout.presetFont?.family(context) ?: customFamily ?: LauncherFontFamily
+    val fontContext = com.galaxyrio.gracelauncher.ui.theme.LocalFontAssetContext.current
+    val preset = presetFont
+    val family = if (preset != null && fontContext != null) preset.family(fontContext)
+        else rememberAppFontFamily(face.fontId, context = fontContext)
     val scale = fontScale.coerceIn(0.1f, 1f)
     ClockGlyphContent(
         value = time, semanticsText = clockFaceText(time, style), family = family, weight = FontWeight(face.weight),
         fontSize = face.size * scale, digitSpacing = face.letterSpacing * scale, groupSpacing = face.hourMinuteSpacing * scale,
         stacked = style.layout.stacked, showColon = face.showColon, separate = face.separateDigits,
         color = color, shadow = clockFontShadow(face.fontShadow, scale), modifier = modifier, textAlign = textAlign,
+        digitColors = digitColors, equalWidthDigits = face.equalWidthDigits, centerDigits = face.centerDigits,
     )
 }
 
-/** Week's small time uses the date typography, with the same independent spacing model. */
+/** Compact times follow their row typography; legacy layouts retain their saved glyph spacing. */
 @Composable
-internal fun ClockTimeLabel(time: String, style: ClockStyle, textStyle: TextStyle, color: Color, modifier: Modifier = Modifier) {
+internal fun ClockTimeLabel(time: String, style: ClockStyle, textStyle: TextStyle, color: Color, modifier: Modifier = Modifier,
+    digitColors: List<Color>? = null, useStandardSpacing: Boolean = false) {
     val face = style.face
+    if (useStandardSpacing) {
+        val displayTime = if (face.showColon) time else time.replace(':', ' ')
+        val colon = time.indexOf(':')
+        val hourDigits = time.take(colon.coerceAtLeast(0)).count(Char::isDigit)
+        var hourSlot = (2 - hourDigits).coerceAtLeast(0)
+        var followingSlot = 2
+        val coloredTime = buildAnnotatedString {
+            append(displayTime)
+            time.forEachIndexed { index, character ->
+                if (character.isDigit()) {
+                    val slot = if (index < colon) hourSlot++ else followingSlot++
+                    digitColors?.getOrNull(slot)?.let { addStyle(SpanStyle(color = it), index, index + 1) }
+                }
+            }
+        }
+        Text(coloredTime, modifier, color = color, style = textStyle,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        return
+    }
     val size = textStyle.fontSize.value
     val scale = size / face.size
     ClockGlyphContent(
@@ -92,11 +116,12 @@ internal fun ClockTimeLabel(time: String, style: ClockStyle, textStyle: TextStyl
         digitSpacing = face.letterSpacing * scale, groupSpacing = face.hourMinuteSpacing * scale,
         stacked = false, showColon = face.showColon, separate = false,
         color = color, shadow = clockFontShadow(face.fontShadow, scale), modifier = modifier,
+        digitColors = digitColors,
     )
 }
 
 @Composable
-private fun clockFontShadow(strength: Int, scale: Float): Shadow {
+internal fun clockFontShadow(strength: Int, scale: Float = 1f): Shadow {
     if (strength <= 0) return Shadow.None
     val amount = strength.coerceIn(0, 24)
     val density = LocalDensity.current
@@ -123,6 +148,9 @@ private fun ClockGlyphContent(
     shadow: Shadow,
     modifier: Modifier,
     textAlign: TextAlign = TextAlign.Start,
+    digitColors: List<Color>? = null,
+    equalWidthDigits: Boolean = false,
+    centerDigits: Boolean = false,
 ) {
     val typeface = LocalFontFamilyResolver.current.resolve(family, weight, FontStyle.Normal, FontSynthesis.All).value as Typeface
     val density = LocalDensity.current
@@ -132,14 +160,22 @@ private fun ClockGlyphContent(
     val centered = textAlign == TextAlign.Center
     BoxWithConstraints(
         modifier.semantics { text = AnnotatedString(semanticsText) },
-        contentAlignment = if (centered) Alignment.TopCenter else Alignment.TopStart,
+        contentAlignment = when (textAlign) {
+            TextAlign.Center -> Alignment.TopCenter
+            TextAlign.End -> Alignment.TopEnd
+            TextAlign.Right -> AbsoluteAlignment.TopRight
+            TextAlign.Left -> AbsoluteAlignment.TopLeft
+            else -> Alignment.TopStart
+        },
     ) {
         val availableWidth = constraints.maxWidth.toFloat()
         val availableHeight = constraints.maxHeight.toFloat()
-        val drawing = remember(value, typeface, fontPx, digitGapPx, groupGapPx, stacked, showColon, centered, availableWidth, availableHeight) {
-            measureClockGlyphs(value, typeface, fontPx, digitGapPx, groupGapPx, stacked, showColon, centered, availableWidth, availableHeight)
+        val drawing = remember(value, typeface, fontPx, digitGapPx, groupGapPx, stacked, showColon, centered,
+            availableWidth, availableHeight, equalWidthDigits, centerDigits) {
+            measureClockGlyphs(value, typeface, fontPx, digitGapPx, groupGapPx, stacked, showColon, centered,
+                availableWidth, availableHeight, equalWidthDigits, centerDigits)
         }
-        Layout(content = {}, modifier = Modifier.drawBehind { drawClockGlyphs(drawing, color, shadow, separate) }) { _, limits ->
+        Layout(content = {}, modifier = Modifier.drawBehind { drawClockGlyphs(drawing, color, shadow, separate, digitColors) }) { _, limits ->
             val width = limits.constrainWidth(ceil(drawing.bounds.width()).toInt().coerceAtLeast(0))
             val height = limits.constrainHeight(ceil(drawing.bounds.height()).toInt().coerceAtLeast(0))
             layout(width, height, mapOf(
@@ -151,16 +187,22 @@ private fun ClockGlyphContent(
 }
 
 internal fun clockFaceText(time: String, style: ClockStyle): String = when {
-    style.layout.stacked -> time.replace(':', '\n')
+    style.layout.stacked -> time.split(':').take(2).joinToString("\n")
     style.face.showColon -> time
     else -> time.replace(':', ' ')
 }
 
-/** Explicit HH keeps the leading zero even in locales whose default hour pattern is H. */
+/** Keep localized digits while applying the same leading-zero choice to 12- and 24-hour clocks. */
 internal fun formatHomeClock(
     now: Instant,
     use24Hour: Boolean,
     locale: Locale,
     zone: ZoneId = ZoneId.systemDefault(),
-): String = DateTimeFormatter.ofPattern(if (use24Hour) "HH:mm" else "h:mm", locale)
+    leadingZero: Boolean = true,
+    showSeconds: Boolean = false,
+): String = DateTimeFormatter.ofPattern((if (use24Hour) {
+    if (leadingZero) "HH" else "H"
+} else {
+    if (leadingZero) "hh" else "h"
+}) + (if (showSeconds) ":mm:ss" else ":mm"), locale)
     .withDecimalStyle(DecimalStyle.of(locale)).withZone(zone).format(now)

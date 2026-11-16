@@ -56,6 +56,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.indication
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -131,6 +132,15 @@ import kotlinx.coroutines.delay
 // perf3（功耗专项）：时钟 60s 循环 lifecycle-aware 化（桌面退后台挂起）
 import androidx.lifecycle.Lifecycle
 import kotlin.math.roundToInt
+import com.galaxyrio.gracelauncher.data.weather.WeatherCurrent
+import com.galaxyrio.gracelauncher.data.ClockColorPart
+import com.galaxyrio.gracelauncher.data.ClockRegions
+import com.galaxyrio.gracelauncher.ui.theme.resolvedFontColor
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
 
 @Composable
 fun HomeScreen(
@@ -325,6 +335,8 @@ fun HomeScreen(
                 } else Modifier)) {
                 when (blockKey) {
                     GraceWidget.Clock.key -> {
+                        // 上游 1.2.3：区域化时钟（ClockRegions 多区域 + 逐元素配色 + 秒/前导零）
+                        // 在 clockStyle.regions 存在时生效；否则内部回落 LegacyHomeClockHeader。
                         HomeClockHeader(
                             now = now,
                             event = event,
@@ -344,14 +356,13 @@ fun HomeScreen(
                     }
                     // 上游同步 1.2.0（S6e）：日程作为独立区块（电池/天气跟随日程，与上游一致）
                     GraceWidget.Calendar.key -> {
-                        HomeClockHeader(
+                        LegacyHomeClockHeader(
                             now = now,
                             event = event,
                             onDateClick = onDateClick,
                             onClockClick = onClockClick,
                             onLongClick = onWidgetMenu,
                             showClock = false,
-                            clockPresent = clockEnabled,
                             clockStyle = clockStyle,
                             interactive = !editingLayout,
                             showCalendar = true,
@@ -450,11 +461,14 @@ fun HomeScreen(
 // 上游同步 v1.1.8 S3：HomeOverscrollConnection 已被 LauncherListGestureConnection 取代（ui/components/LauncherListGestures.kt）。
 
 @Composable
-internal fun HomeClockHeader(
+internal fun LegacyHomeClockHeader(
     now: Instant,
+    event: ScheduleEvent?,
     onDateClick: () -> Unit,
     onClockClick: () -> Unit,
+    showBattery: Boolean,
     clockStyle: ClockStyle,
+    weather: WeatherCurrent?,
     modifier: Modifier = Modifier,
     interactive: Boolean = true,
     clockTag: String = "home_clock",
@@ -462,33 +476,52 @@ internal fun HomeClockHeader(
     onLongClick: () -> Unit = {},
     onAnchorOffsetChange: (Int) -> Unit = {},
     showClock: Boolean = true,
-    /** 上游同步 1.2.0（S6e）：日程区块独立后，用它表示"时钟区块是否存在"（影响星期行等）。 */
-    clockPresent: Boolean = showClock,
     showCalendar: Boolean = true,
     calendarAboveClock: Boolean = false,
-    showBattery: Boolean = true,
-    event: ScheduleEvent? = null,
-    weather: com.galaxyrio.gracelauncher.data.weather.WeatherCurrent? = null,
+    onWeatherClick: () -> Unit = {},
 ) {
     val appearance = LocalLauncherAppearance.current
-    val battery = if (showCalendar && showBattery) rememberBatteryPercent() else null
+    val visibility = clockStyle.effectiveVisibility
+    val week = clockStyle.layout.week
+    val clockVisible = showClock && visibility.showClock
+    val weekdayVisible = showCalendar && visibility.showWeekday
+    val dateVisible = showCalendar && visibility.showDate
+    val battery = if (showCalendar && showBattery && visibility.showBattery) rememberBatteryPercent() else null
+    val visibleWeather = weather?.takeIf { visibility.showWeather && it.temperature != null }
+    val colors = ClockColorPart.entries.associateWith { resolvedFontColor(clockStyle.colors[it], onWallpaper = true) }
+    val digitColors = listOf(ClockColorPart.HourTens, ClockColorPart.HourOnes, ClockColorPart.MinuteTens, ClockColorPart.MinuteOnes,
+        ClockColorPart.SecondTens, ClockColorPart.SecondOnes)
+        .map(colors::getValue)
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
-    val clockText = formatHomeClock(now, DateFormat.is24HourFormat(context), locale)
-    val week = clockPresent && clockStyle.layout.week
-    // perf5（功耗专项）：日期格式化器 remember 缓存 —— getBestDateTimePattern 内部
-    // 走 ICU/资源查询，原实现每次重组重建三个格式化器（时钟每分钟 tick、通知/媒体
-    // 变化都会触发本组合体重组）。
-    val weekday = remember(locale) { SimpleDateFormat("EEE", locale) }.format(Date.from(now))
-    val datePattern = remember(locale, week) {
-        DateFormat.getBestDateTimePattern(locale, if (week) "MMMd" else "MMMEd")
+    val clockText = formatHomeClock(now, DateFormat.is24HourFormat(context), locale, leadingZero = clockStyle.face.showLeadingZero)
+    val weekdayLocale = remember(locale, week, clockStyle.face.useLatinLetters) {
+        clockCalendarLocale(locale, week && clockStyle.face.useLatinLetters)
     }
-    val dateText = remember(datePattern) { SimpleDateFormat(datePattern, locale) }.format(Date.from(now))
-    val dateDescription = stringResource(if (weather != null) R.string.weather_agenda_action else R.string.date_calendar_action, dateText)
+    val weekday = clockCalendarDate(now, weekdayLocale, true, false,
+        colors.getValue(ClockColorPart.Weekday), colors.getValue(ClockColorPart.Month), colors.getValue(ClockColorPart.Day)).text
+    val dateText = clockCalendarDate(now, locale, weekdayVisible && !week, dateVisible,
+        colors.getValue(ClockColorPart.Weekday), colors.getValue(ClockColorPart.Month), colors.getValue(ClockColorPart.Day))
+    val calendarText = buildAnnotatedString {
+        append(dateText)
+        if (battery != null) {
+            if (length > 0) append("  ")
+            withStyle(SpanStyle(color = colors.getValue(ClockColorPart.Battery))) { append("$battery%") }
+        }
+    }
+    val completeDate = clockCalendarDate(now, locale, true, true,
+        colors.getValue(ClockColorPart.Weekday), colors.getValue(ClockColorPart.Month), colors.getValue(ClockColorPart.Day)).text
+    val dateDescription = stringResource(R.string.date_calendar_action, completeDate)
     val clockDescription = stringResource(R.string.clock_action, clockText)
+    val largeFaceVisible = if (week) weekdayVisible else clockVisible
+    val smallClockVisible = week && clockVisible
+    val agendaVisible = showCalendar && event != null
+    val rowVisible = smallClockVisible || calendarText.isNotEmpty() || visibleWeather != null
+    val calendarContentVisible = rowVisible || agendaVisible
+    val calendarAction = calendarContentVisible
 
     val clockContent: @Composable () -> Unit = {
-        if (showClock) ClockFace(
+        if (largeFaceVisible) ClockFace(
             time = if (week) weekday else clockText,
             style = clockStyle,
             modifier = Modifier
@@ -501,77 +534,82 @@ internal fun HomeClockHeader(
                     onLongClick = onLongClick,
                 ) else Modifier)
                 .padding(horizontal = LauncherLayout.ContentInset),
-            color = appearance.text,
+            color = if (week) colors.getValue(ClockColorPart.Weekday) else appearance.text,
+            digitColors = digitColors.takeUnless { week },
         )
     }
     val calendarContent: @Composable () -> Unit = {
         val shape = LauncherLayout.RowShape
-        if (showCalendar || weather?.temperature != null) Surface(
+        val interactions = remember { MutableInteractionSource() }
+        if (calendarContentVisible) Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag(dateTag)
-                .semantics { contentDescription = dateDescription }
-                .clip(shape)
-                .then(if (interactive) Modifier.combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = ripple(color = appearance.text),
+                .then(if (calendarAction) Modifier.semantics { contentDescription = dateDescription } else Modifier)
+                .then(if (interactive && calendarAction) Modifier.combinedClickable(
+                    interactionSource = interactions,
+                    indication = null,
                     role = Role.Button,
                     onClick = onDateClick,
                     onLongClick = onLongClick,
                 ) else Modifier),
-            shape = shape,
-            color = Color.Transparent,
-            contentColor = appearance.text,
+            propagateMinConstraints = true,
         ) {
             val dateStyle = MaterialTheme.typography.bodyLarge.copy(
                 fontWeight = FontWeight.Normal,
                 shadow = appearance.textShadow,
             )
-            Column(Modifier.padding(vertical = LauncherLayout.ContentInset)) {
-                Row(Modifier.padding(horizontal = LauncherLayout.ContentInset, vertical = 2.dp)) {
-                    if (showCalendar && week) {
-                        ClockTimeLabel(
-                            time = clockText, style = clockStyle, textStyle = dateStyle,
-                            modifier = Modifier.alignByBaseline()
-                                .semantics { contentDescription = clockDescription }
-                                .then(if (interactive) Modifier.combinedClickable(
-                                    interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                    onClick = onClockClick,
-                                    onLongClick = onLongClick,
-                                ) else Modifier),
+            CompositionLocalProvider(LocalContentColor provides appearance.text) {
+                Column(Modifier.padding(vertical = LauncherLayout.ContentInset)) {
+                    if (rowVisible) Row(Modifier.padding(horizontal = LauncherLayout.ContentInset, vertical = 2.dp)) {
+                        if (smallClockVisible) {
+                            ClockTimeLabel(
+                                time = clockText, style = clockStyle, textStyle = dateStyle,
+                                modifier = Modifier.alignByBaseline().testTag("${clockTag}_time")
+                                    .semantics { contentDescription = clockText },
+                                color = appearance.text,
+                                digitColors = digitColors,
+                            )
+                            if (calendarText.isNotEmpty()) Text(" · ", modifier = Modifier.alignByBaseline(), color = appearance.text, style = dateStyle)
+                        }
+                        if (calendarText.isNotEmpty()) Text(
+                            text = calendarText,
+                            modifier = Modifier.weight(1f, fill = false).alignByBaseline().testTag("${dateTag}_text"),
                             color = appearance.text,
+                            style = dateStyle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        Text(" · ", modifier = Modifier.alignByBaseline(), color = appearance.text, style = dateStyle)
+                        if (visibleWeather != null) {
+                            if (smallClockVisible || calendarText.isNotEmpty()) Spacer(Modifier.width(10.dp))
+                            HomeWeather(visibleWeather, colors.getValue(ClockColorPart.Weather), dateStyle, Modifier.alignByBaseline(),
+                                onClick = onWeatherClick.takeIf { interactive }, onLongClick = onLongClick.takeIf { interactive },
+                                iconColor = colors.getValue(ClockColorPart.WeatherIcon))
+                        }
                     }
-                    if (showCalendar) Text(
-                        text = dateText + (battery?.let { "  $it%" } ?: ""),
-                        modifier = Modifier.weight(1f, fill = false).alignByBaseline().testTag("${dateTag}_text"),
-                        color = appearance.text,
-                        style = dateStyle,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (weather?.temperature != null) {
-                        if (showCalendar) Spacer(Modifier.width(10.dp))
-                        HomeWeather(weather, appearance.text, dateStyle, Modifier.alignByBaseline())
+                    if (agendaVisible) {
+                        ScheduleLine(event = event, now = now, color = colors.getValue(ClockColorPart.Agenda))
                     }
                 }
-                if (showCalendar && event != null) {
-                    ScheduleLine(event = event, now = now)
-                }
+            }
+            if (interactive && calendarAction) {
+                // Keep the legacy calendar's rounded ripple separate from its text and icons.
+                Box(Modifier.matchParentSize().clip(shape)
+                    .indication(interactions, ripple(color = appearance.text)))
             }
         }
     }
     Column(modifier) {
         if (calendarAboveClock) calendarContent() else clockContent()
-        Spacer(Modifier.height(if (showClock && (showCalendar || weather != null)) 2.dp else 0.dp)
+        Spacer(Modifier.height(if (largeFaceVisible && calendarContentVisible) 2.dp else 0.dp)
             .onGloballyPositioned { onAnchorOffsetChange(it.positionInParent().y.roundToInt()) })
         if (calendarAboveClock) clockContent() else calendarContent()
+        if (largeFaceVisible || calendarContentVisible) Spacer(Modifier.height(ClockRegions().bottomPadding.dp))
     }
 }
 
 @Composable
-private fun ScheduleLine(event: ScheduleEvent, now: Instant) {
+internal fun ScheduleLine(event: ScheduleEvent, now: Instant, color: Color = LocalLauncherAppearance.current.text) {
     val appearance = LocalLauncherAppearance.current
     val remaining = eventRemainingText(event, now)
     val style = MaterialTheme.typography.bodyLarge.copy(
@@ -589,7 +627,7 @@ private fun ScheduleLine(event: ScheduleEvent, now: Instant) {
             // CJK fallback and Latin fonts can have different ascents at the same size.
             modifier = Modifier.weight(1f, fill = false).alignByBaseline().testTag("schedule_title"),
             style = style,
-            color = appearance.text,
+            color = color,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -598,7 +636,7 @@ private fun ScheduleLine(event: ScheduleEvent, now: Instant) {
             text = "· $remaining",
             modifier = Modifier.alignByBaseline().testTag("schedule_remaining"),
             style = style,
-            color = appearance.text.copy(alpha = 0.93f),
+            color = color,
             maxLines = 1,
         )
     }

@@ -209,6 +209,7 @@ private fun AppNameVisibility.label(): String = stringResource(when (this) {
     AppNameVisibility.Both -> R.string.list_names_both
     AppNameVisibility.Favorites -> R.string.list_names_favorites
     AppNameVisibility.AppList -> R.string.list_names_app_list
+    AppNameVisibility.Neither -> R.string.grace_list_names_neither
 })
 
 @Composable

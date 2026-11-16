@@ -37,7 +37,7 @@ data class FontLibrary(
     }
 }
 
-enum class AppNameVisibility { Both, Favorites, AppList }
+enum class AppNameVisibility { Both, Favorites, AppList, Neither }
 
 /** Geometry is in dp; text size is in sp. The shared icon designer owns icon size. */
 data class ListAppearance(
@@ -52,12 +52,26 @@ data class ListAppearance(
     /** null keeps the automatic, contrast-aware primary tint. */
     val wallpaperDimColor: IconColor? = null,
     val alphabet: AlphabetAppearance = AlphabetAppearance(),
+    val showRecentlyInstalled: Boolean = true,
+    /** null uses the localized name of the built-in folder. */
+    val recentlyInstalledName: String? = null,
+    /** Folder contents keep their labels unless explicitly linked to the outer list. */
+    val applyNameVisibilityToFolders: Boolean = false,
+    val appList: AppListLayout = AppListLayout(),
+    val symbolHorizontalOffset: Int = 0,
 ) {
-    fun showNames(favorites: Boolean) = names == AppNameVisibility.Both ||
-        names == if (favorites) AppNameVisibility.Favorites else AppNameVisibility.AppList
+    fun showNames(favorites: Boolean, insideFolder: Boolean = false): Boolean =
+        if (insideFolder && !applyNameVisibilityToFolders) true else when (names) {
+            AppNameVisibility.Both -> true
+            AppNameVisibility.Favorites -> favorites
+            AppNameVisibility.AppList -> !favorites
+            AppNameVisibility.Neither -> false
+        }
 
     fun normalized() = copy(appSpacing = appSpacing.coerceIn(0, 64), sidePadding = sidePadding.coerceIn(8, 80),
-        iconNameGap = iconNameGap.coerceIn(0, 64), fontSize = fontSize.coerceIn(10, 32), alphabet = alphabet.normalized())
+        iconNameGap = iconNameGap.coerceIn(0, 64), fontSize = fontSize.coerceIn(10, 32), alphabet = alphabet.normalized(),
+        symbolHorizontalOffset = symbolHorizontalOffset.coerceIn(-16, 16),
+        recentlyInstalledName = recentlyInstalledName?.trim()?.takeIf(String::isNotEmpty), appList = appList.normalized())
 
     fun encode(): String = normalized().let { safe -> JSONObject().apply {
         put("appSpacing", safe.appSpacing); put("sidePadding", safe.sidePadding); put("iconNameGap", safe.iconNameGap)
@@ -66,6 +80,11 @@ data class ListAppearance(
         put("wallpaperDimColor", safe.wallpaperDimColor?.json())
         put("alphabet", safe.alphabet.json())
         put("names", safe.names.name); put("leftAlphabet", safe.leftAlphabet)
+        put("applyNameVisibilityToFolders", safe.applyNameVisibilityToFolders)
+        put("showRecentlyInstalled", safe.showRecentlyInstalled)
+        put("recentlyInstalledName", safe.recentlyInstalledName ?: JSONObject.NULL)
+        put("appList", safe.appList.json())
+        put("symbolHorizontalOffset", safe.symbolHorizontalOffset)
     }.toString() }
 
     companion object {
@@ -81,6 +100,11 @@ data class ListAppearance(
                 names = AppNameVisibility.entries.firstOrNull { it.name == value.optString("names") }
                     ?: if (hideFavoriteNames) AppNameVisibility.AppList else AppNameVisibility.Both,
                 leftAlphabet = value.optBoolean("leftAlphabet", true),
+                applyNameVisibilityToFolders = value.optBoolean("applyNameVisibilityToFolders", false),
+                showRecentlyInstalled = value.optBoolean("showRecentlyInstalled", true),
+                recentlyInstalledName = if (value.isNull("recentlyInstalledName")) null else value.optString("recentlyInstalledName"),
+                appList = AppListLayout.decode(value.optJSONObject("appList")),
+                symbolHorizontalOffset = value.optInt("symbolHorizontalOffset", 0),
             ).normalized()
         }.getOrElse { ListAppearance() }
     }

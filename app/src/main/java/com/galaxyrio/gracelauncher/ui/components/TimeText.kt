@@ -8,12 +8,13 @@ import com.homemode4miui.R
 import com.galaxyrio.gracelauncher.data.CountdownUnit
 import com.galaxyrio.gracelauncher.data.ScheduleEvent
 import com.galaxyrio.gracelauncher.data.eventCountdown
+import com.galaxyrio.gracelauncher.data.tasks.TaskItem
+import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import kotlin.math.abs
 import kotlinx.coroutines.delay
-// perf3（功耗专项）：通知时长 60s 循环 lifecycle-aware 化（桌面退后台挂起）
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 
 @Composable
 fun eventRemainingText(event: ScheduleEvent, now: Instant): String {
@@ -33,15 +34,32 @@ fun eventRemainingText(event: ScheduleEvent, now: Instant): String {
 }
 
 @Composable
-internal fun notificationAge(postedAt: Long): String {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val now by produceState(System.currentTimeMillis(), postedAt) {
-        // perf3（功耗专项）：每条带通知的收藏行各有一个 60s 循环，桌面退后台后
-        // 仍在唤醒。repeatOnLifecycle(STARTED) 包裹 —— ≤ CREATED 挂起，回前台重启；
-        // 宿主生命周期未同步（hook 未命中）时恒为 RESUMED，行为同旧版。
-        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) { value = System.currentTimeMillis(); delay(60_000) }
+internal fun taskRemainingText(task: TaskItem, now: Instant): String {
+    val due = task.dueAt ?: return ""
+    if (task.dueAllDay) {
+        val zone = ZoneId.systemDefault()
+        val days = ChronoUnit.DAYS.between(now.atZone(zone).toLocalDate(), due.atZone(zone).toLocalDate())
+        return when {
+            days == 0L -> stringResource(R.string.tasks_due_today)
+            days > 0L -> stringResource(R.string.event_in_days, days)
+            else -> stringResource(R.string.tasks_overdue_days, -days)
         }
+    }
+    val seconds = Duration.between(now, due).seconds
+    val distance = abs(seconds)
+    val minutes = (distance / 60 + if (distance % 60 > 0) 1 else 0).coerceAtLeast(1)
+    return when {
+        distance < 60 -> stringResource(if (seconds < 0) R.string.tasks_overdue_now else R.string.tasks_due_now)
+        minutes < 60 -> stringResource(if (seconds < 0) R.string.tasks_overdue_minutes else R.string.event_in_minutes, minutes)
+        minutes < 1440 -> stringResource(if (seconds < 0) R.string.tasks_overdue_hours else R.string.event_in_hours, minutes / 60)
+        else -> stringResource(if (seconds < 0) R.string.tasks_overdue_days else R.string.event_in_days, minutes / 1440)
+    }
+}
+
+@Composable
+internal fun notificationAge(postedAt: Long): String {
+    val now by produceState(System.currentTimeMillis(), postedAt) {
+        while (true) { value = System.currentTimeMillis(); delay(60_000) }
     }
     val minutes = ((now - postedAt).coerceAtLeast(0) / 60_000)
     return when {

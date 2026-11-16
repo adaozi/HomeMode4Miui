@@ -1,8 +1,3 @@
-/*
- * 移植自 GraceLauncher v1.1.4（GPL-3.0，https://github.com/Galaxy-rio/GraceLauncher）
- * 原路径：app/src/main/java/com/galaxyrio/gracelauncher/ui/home/ClockSpacing.kt
- * P1 移植：逐字拷贝，未改动。
- */
 package com.galaxyrio.gracelauncher.ui.home
 
 /** Positions refer to visible ink edges, not font advance widths or line boxes. */

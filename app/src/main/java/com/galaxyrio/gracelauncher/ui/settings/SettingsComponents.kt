@@ -52,6 +52,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.homemode4miui.R
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
 
 internal data class SettingsStorageState(val loading: Boolean = false, val loadFailed: Boolean = false, val saveFailed: Boolean = false) {
     val canEdit: Boolean get() = !loading && !loadFailed
@@ -63,6 +68,7 @@ internal val LocalSettingsStorageState = staticCompositionLocalOf { SettingsStor
 internal val LocalOpenFontColors = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 /** Scrollable content includes this inset; fixed bottom controls stay above it. */
+private val LocalSettingsHeaderButtonSize = androidx.compose.runtime.staticCompositionLocalOf { 48.dp }
 internal val LocalSettingsBottomInset = staticCompositionLocalOf { 0.dp }
 
 @Composable
@@ -79,9 +85,22 @@ internal fun SettingsScaffold(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     fixedCollapsed: Boolean = false,
+    /** 上游 1.2.2：预览页让壁纸透出（背景/导航栏/控件层）并按需上移控件。 */
+    wallpaperBackground: Boolean = false,
+    wallpaperNavigationBar: Boolean = false,
+    controlsAbovePreview: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
+    val reportSystemBarBackground = LocalSettingsSystemBarBackground.current
+    SideEffect {
+        reportSystemBarBackground(when {
+            !wallpaperBackground -> SettingsSystemBarBackground.Surface
+            controlsAbovePreview -> SettingsSystemBarBackground.WallpaperWithTopScrim
+            wallpaperNavigationBar -> SettingsSystemBarBackground.Wallpaper
+            else -> SettingsSystemBarBackground.WallpaperWithBottomScrim
+        })
+    }
     val collapsedOffset = with(LocalDensity.current) {
         (TopAppBarDefaults.LargeAppBarCollapsedHeight -
             TopAppBarDefaults.LargeFlexibleAppBarWithoutSubtitleExpandedHeight).toPx()
@@ -107,7 +126,7 @@ internal fun SettingsScaffold(
         modifier = modifier.fillMaxSize().testTag(tag).then(
             if (fixedCollapsed) Modifier else Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         ),
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = if (wallpaperBackground) Color.Transparent else MaterialTheme.colorScheme.surfaceContainer,
         topBar = {
             LargeFlexibleTopAppBar(
                 title = { Text(title, Modifier.padding(start = 4.dp)) },
@@ -281,4 +300,25 @@ internal fun SettingsToggleItem(
             )
         },
     )
+}
+
+// ---- 上游 1.2.2 设置页头部动作组件 ----
+@Composable
+internal fun SettingsApplyAction(
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    FilledIconButton(
+        onClick = onClick, enabled = enabled,
+        modifier = modifier.padding(end = 12.dp).size(LocalSettingsHeaderButtonSize.current),
+        shape = CircleShape,
+        colors = IconButtonDefaults.filledIconButtonColors(
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = SettingsPreviewSurfaceAlpha),
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+    ) {
+        Icon(painterResource(R.drawable.ms_check), contentDescription, Modifier.size(24.dp))
+    }
 }

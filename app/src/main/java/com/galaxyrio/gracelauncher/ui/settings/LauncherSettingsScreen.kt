@@ -72,6 +72,12 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** 上游 1.2.2：设置预览页的系统栏背景档（页面按内容报给窗口，窗口统一应用）。 */
+internal enum class SettingsSystemBarBackground { Surface, Wallpaper, WallpaperWithBottomScrim, WallpaperWithTopScrim }
+
+internal val LocalSettingsSystemBarBackground =
+    androidx.compose.runtime.staticCompositionLocalOf<(SettingsSystemBarBackground) -> Unit> { {} }
+
 internal enum class SettingsPage {
     Root, Productivity, Clock, ClockStyle, Calendar, Weather, Themes, Advanced, About, HiddenApps, Folders, FolderEditor,
     Changelog, Licenses, AppLicense, IconPacks, IconDesigner, IconDesignerApp, PrivateSpace, PrivateSpaceEditor, Search,
@@ -307,7 +313,7 @@ fun LauncherSettingsScreen(
                     SettingsPage.CalendarAppearance -> AppearancePlaceholder(stringResource(R.string.widget_calendar), "calendar_appearance", back)
                     SettingsPage.WeatherAppearance -> AppearancePlaceholder(stringResource(R.string.settings_weather), "weather_appearance", back)
                     SettingsPage.MediaPlayerAppearance -> AppearancePlaceholder(stringResource(R.string.settings_media_player), "media_appearance", back)
-                    SettingsPage.ClockStyle -> ClockStyleSettings(uiState, actions, back)
+                    SettingsPage.ClockStyle -> ClockStyleSettings(uiState, actions, back) { navigate(SettingsPage.Fonts) }
                     SettingsPage.IconPacks -> IconPackSettings(uiState, actions, back) { navigate(SettingsPage.IconDesigner) }
                     SettingsPage.IconDesigner -> {
                         val selectedKey by entry.savedStateHandle.getStateFlow<String?>("icon_designer_app", initialIconDesignerApp?.key).collectAsState()

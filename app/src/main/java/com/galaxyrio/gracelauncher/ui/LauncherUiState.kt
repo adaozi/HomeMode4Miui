@@ -36,6 +36,7 @@ import com.galaxyrio.gracelauncher.data.media.NowPlaying
 import com.galaxyrio.gracelauncher.data.notifications.AppNotification
 import com.galaxyrio.gracelauncher.data.weather.WeatherState
 import com.galaxyrio.gracelauncher.platform.PrivateSpaceState
+import com.galaxyrio.gracelauncher.data.tasks.TasksState
 
 enum class ScheduleStatus {
     PermissionRequired,
@@ -50,6 +51,9 @@ data class LauncherUiState(
     val isLoadingApps: Boolean = true,
     val appLoadFailed: Boolean = false,
     val events: List<ScheduleEvent> = emptyList(),
+    /** 上游 1.2.4：Tasks.org 任务（Agenda/时钟任务区域消费）。 */
+    val tasks: TasksState = TasksState(),
+    val completingTaskIds: Set<Long> = emptySet(),
     val scheduleStatus: ScheduleStatus = ScheduleStatus.PermissionRequired,
     val hasShortcutAccess: Boolean = false,
     val categories: Map<String, String> = emptyMap(),

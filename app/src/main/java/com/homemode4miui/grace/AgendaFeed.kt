@@ -65,7 +65,7 @@ internal class AgendaFeed(
             if (uiState.value.events.isEmpty()) {
                 uiState.update { it.copy(scheduleStatus = GraceScheduleStatus.Loading) }
             }
-            runCatching { calendarRepository.upcomingEvents() }
+            runCatching { calendarRepository.refresh(uiState.value.settings.calendar.query)?.events.orEmpty() }
                 .onSuccess { events ->
                     uiState.update { it.copy(events = events, scheduleStatus = GraceScheduleStatus.Ready) }
                 }

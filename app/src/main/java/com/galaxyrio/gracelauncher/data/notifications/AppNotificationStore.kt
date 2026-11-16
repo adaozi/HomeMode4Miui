@@ -1,13 +1,16 @@
 package com.galaxyrio.gracelauncher.data.notifications
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.graphics.drawable.Icon
 import android.os.Process
+import android.os.UserHandle
 import android.service.notification.StatusBarNotification
 import androidx.annotation.MainThread
 import androidx.core.app.NotificationCompat
+import com.galaxyrio.gracelauncher.data.CategoryNotificationLevel
 import com.galaxyrio.gracelauncher.data.media.mediaPlayerLaunchOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,7 +29,17 @@ data class AppNotification(
     val silent: Boolean = false,
 )
 
-internal data class AppNotificationRanking(val visible: Boolean = true, val silent: Boolean = false)
+/** Notification presence is profile-specific and does not retain any notification content. */
+data class NotificationAppId(val packageName: String, val user: UserHandle)
+
+internal data class AppNotificationRanking(val visible: Boolean = true, val silent: Boolean = false,
+    val importance: Int = NotificationManager.IMPORTANCE_DEFAULT) {
+    val categoryLevel: CategoryNotificationLevel get() = when {
+        importance in NotificationManager.IMPORTANCE_MIN..NotificationManager.IMPORTANCE_LOW -> CategoryNotificationLevel.Silent
+        importance >= NotificationManager.IMPORTANCE_HIGH -> CategoryNotificationLevel.High
+        else -> CategoryNotificationLevel.Normal
+    }
+}
 
 @MainThread
 internal class AppNotificationStore {
@@ -38,45 +51,57 @@ internal class AppNotificationStore {
         val autoCancel: Boolean,
     )
     private val entries = linkedMapOf<String, Entry>()
+    private val categoryEntries = linkedMapOf<String, NotificationAppId>()
     private var cancel: ((String) -> Boolean)? = null
     private var classification: (String) -> AppNotificationRanking = { AppNotificationRanking() }
     private var revision = 0L
     private val _state = MutableStateFlow<Map<String, List<AppNotification>>>(emptyMap())
     val state = _state.asStateFlow()
+    private val _categoryState = MutableStateFlow<Map<NotificationAppId, Set<CategoryNotificationLevel>>>(emptyMap())
+    val categoryState = _categoryState.asStateFlow()
 
     fun connected(notifications: List<StatusBarNotification>,
         ranking: (String) -> AppNotificationRanking = { AppNotificationRanking() }, cancelNotification: (String) -> Boolean) {
-        entries.clear()
+        entries.clear(); categoryEntries.clear()
         cancel = cancelNotification
         classification = ranking
-        notifications.forEach { sbn -> parse(sbn)?.let { entries[sbn.key] = it } }
+        notifications.forEach { sbn ->
+            categoryEntries[sbn.key] = NotificationAppId(sbn.packageName, sbn.user)
+            parse(sbn)?.let { entries[sbn.key] = it }
+        }
         publish()
     }
 
     fun posted(sbn: StatusBarNotification, ranking: (String) -> AppNotificationRanking = classification) {
         if (cancel == null) return
         classification = ranking
+        categoryEntries[sbn.key] = NotificationAppId(sbn.packageName, sbn.user)
         val entry = parse(sbn)
         if (entry == null) entries.remove(sbn.key) else entries[sbn.key] = entry
         publish()
     }
 
-    fun removed(key: String) { if (entries.remove(key) != null) publish() }
+    fun removed(key: String) {
+        val removedDisplay = entries.remove(key) != null
+        val removedCategory = categoryEntries.remove(key) != null
+        if (removedDisplay || removedCategory) publish()
+    }
 
     fun ranking(ranking: (String) -> AppNotificationRanking) { classification = ranking; publish() }
 
     /**
-     * hotfix（notif-churn）：解绑 ≠ 通知被清除。
-     *   - keepDisplay=false（授权被撤销 / 进程销毁）：清空并发布空快照（真正失效语义）；
-     *   - keepDisplay=true（授权仍在，MIUI 省电解绑，notif7 自愈链会重绑）：保留最后
-     *     已知快照且【不发布】—— StateFlow 值不变 → 引擎无空广播 → 桌面不清行。
-     *     重绑后 connected(seed) 用系统真值校正；若集合未变，引擎指纹去重直接拦截，
-     *     桌面零扰动 —— 消除"解绑↔重绑"循环造成的整批出现/整批消失抖动。
-     * 解绑期间新通知 posted 被 cancel==null 守卫挡住，重连 seed 全量兜底，无丢失。
+     * 模块定制（hotfix notif-churn）：解绑 ≠ 通知被清除。
+     *  - keepDisplay=false（授权被撤销 / 进程销毁）：清空并发布空快照（真正失效语义）；
+     *  - keepDisplay=true（授权仍在，MIUI 省电解绑，notif7 自愈链会重绑）：保留最后已知快照
+     *    且不发布 —— StateFlow 值不变 → 引擎无空广播 → 桌面不清行；重绑后 connected(seed)
+     *    用系统真值校正，集合未变时引擎指纹去重直接拦截，消除「解绑↔重绑」抖动。
      */
     fun disconnected(keepDisplay: Boolean = false) {
         cancel = null; classification = { AppNotificationRanking() }
-        if (!keepDisplay) { entries.clear(); _state.value = emptyMap() }
+        if (!keepDisplay) {
+            entries.clear(); categoryEntries.clear()
+            publish()
+        }
     }
 
     fun dismiss(key: String, revision: Long): Boolean {
@@ -96,18 +121,27 @@ internal class AppNotificationStore {
     }
 
     private fun publish() {
+        // Both projections use the same ranking snapshot. Category membership deliberately
+        // includes media/blank/profile notifications that are unsuitable as text previews.
+        val rankings = categoryEntries.keys.associateWith(classification)
+        val categories = linkedMapOf<NotificationAppId, MutableSet<CategoryNotificationLevel>>()
+        categoryEntries.forEach { (key, app) ->
+            val ranking = rankings.getValue(key)
+            if (ranking.visible) categories.getOrPut(app) { linkedSetOf() }.add(ranking.categoryLevel)
+        }
         val eligible = entries.values.mapNotNull { entry ->
-            val ranking = classification(entry.display.key)
+            val ranking = rankings.getValue(entry.display.key)
             if (ranking.visible) entry.copy(display = entry.display.copy(silent = ranking.silent)) else null
         }
         val groupsWithChildren = eligible.filterNot { it.summary }.map { it.display.packageName to it.groupKey }.toSet()
         _state.value = eligible.filterNot { it.summary && (it.display.packageName to it.groupKey) in groupsWithChildren }
             .map { it.display }.sortedByDescending { it.postedAt }.groupBy { it.packageName }
+        _categoryState.value = categories.mapValues { (_, levels) -> levels.toSet() }
     }
 
     private fun parse(sbn: StatusBarNotification): Entry? = runCatching {
-        // LauncherApp currently models the personal profile only. Do not leak work/private
-        // profile text onto a same-package personal app row.
+        // Text previews remain personal-profile-only. Never put work/private notification
+        // content onto a same-package personal app row.
         if (sbn.user != Process.myUserHandle()) return null
         val notification = sbn.notification
         val extras = notification.extras ?: return null

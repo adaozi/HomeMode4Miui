@@ -978,3 +978,48 @@ DIFF vs 桩文件:
 - [ ] **已知边界（非缺陷）**：字体颜色当前只作用于设置页内部（色板、取色器、预览）。桌面实际文字
   （时钟 / 日期 / 应用名 / 字母条）的 `resolvedFontColor` 接线随 P2（时钟）/ P3（首页）/ P4（列表）落。
 - [x] 产物：`.build/out/HomeMode4Miui-v2.9.165-p1-fontcolors-181.apk`。
+
+### P2 时钟区域化体系（v2.9.166-p2-clock-regions / versionCode 182，2026-11-16）
+
+上游 1.2.3「时钟组件更多自定义 + 时钟颜色」+ 1.2.4「时钟边距修复」的完整落地。
+
+- [x] **渲染层（12 个文件）**：`ClockRegionHeader`（新 `HomeClockHeader`：按 `ClockStyle.regions` 多区域渲染，
+  逐区域可见性/顺序/对齐 + `ClockColorPart` 逐元素配色 + 秒/前导零/等宽数字/居中/拉丁数字 + 旋转布局）、
+  `ClockAgendaContent` / `ClockBatteryContent` / `ClockBatteryIcons` / `ClockCalendarDate` / `ClockTaskContent` /
+  `FixedClockWidth` / `HomeTime` 新增；`ClockFace` / `SeparatedClockGlyphs` / `ClockSpacing` 换上游 1.2.4 版。
+- [x] **`region == null` 降级链**：上游用 `LegacyHomeClockHeader`（旧一体化渲染）兜底，本批把模块原
+  `HomeClockHeader` 改名 `LegacyHomeClockHeader` 并用**上游实现替换**（签名 17 参数与旧版同序，调用点零改动），
+  保证未编辑过时钟的老用户视觉不变。
+- [x] **外观层**：`LauncherAppearance` 增 `textColor: Color?`（null=沿用 darkText 固定双色）、
+  `textShadow` 改按 `text.luminance()` 判定；`wallpaperTint` 增 `colorScheme` 参数（材质角色色才能解析）；
+  新增 `LauncherBatteryState` + `rememberBatteryPercent` / `rememberBatteryState`（电量与充电态同时读，
+  插拔电源图标与文字同步）。
+- [x] **设置基础设施（6 个新文件）**：`SettingsPreviewLayout`（`SettingsPreviewScaffold` / `SettingsPreviewSurface` /
+  `settingsPreviewScrim`）、`SettingsComponents` 扩 `SettingsScaffold` 三参数（wallpaperBackground /
+  wallpaperNavigationBar / controlsAbovePreview）+ `SettingsApplyAction` + `LocalSettingsOpenFontColors` 旁路、
+  `SettingsModeToolbar`、`ClockFieldOrder`、`ClockRegionControls`（730 行）、`ClockRegionOrder`、`ClockPresetPreview`。
+  `SettingsSystemBarBackground` 四档 + `LocalSettingsSystemBarBackground` 落在 LauncherSettingsScreen，
+  `SettingsScaffold` 用 `SideEffect` 上报 → 窗口统一应用系统栏。
+- [x] **设置页**：`ClockStyleSettings` 换上游 657 行版（样式 / 内容 / 颜色三页签 + 预设预览 + 区域编辑器），
+  入口加 `onManageFonts`（跳 Fonts 页）；路由 `SettingsPage.ClockStyle` 已适配。
+- [x] **数据层同步**：`CalendarRepository`（多日历源 `calendars()` + `refresh(CalendarQuery)` 取代无参
+  `upcomingEvents()`）、`ScheduleEvent`（displayColor/calendarName）、`WeatherModels`（WeatherMeasure /
+  WeatherWind / WeatherHour / WeatherDay）、`ListAppearance`（AppListLayout / recentlyInstalledName /
+  AppNameVisibility.Neither）、`AppListLayout`、`ShortcutsFoldersSettings`（previewNotifications）、
+  `AppNotificationStore`（categoryEntries + `NotificationAppId`）。
+- [x] **模块定制保留**：① `AppNotificationStore.disconnected(keepDisplay)` —— MIUI 省电解绑时保留快照不发布
+  （notif-churn hotfix，上游无此语义）；② `AppNameVisibility.Neither` 档位文案新建 `grace_list_names_neither`
+  （上游无该档文案，遵守"新增 UI 文案必须独立 string 名"铁律）。
+- [x] **`LocalFontAssetContext`（模块架构补丁）**：桌面在宿主进程，`LocalContext` 的 assets 不含模块字体资产
+  → 上游 `ClockFace` 的 `presetFont.family()` 必然回落。改为 Theme 层用 `fontContext` provide
+  `LocalFontAssetContext`，`ClockFace` 按它解析 preset 字体（导入字体同理）。
+- [x] **桌面接线**：`HomeScreen` 的 `GraceWidget.Clock` 区块切到新 `HomeClockHeader`（regions 存在时区域化渲染，
+  否则内部回落 Legacy）。
+- [x] **兼容层**：`WeatherComponents` 合并上游 1.2.4（`WeatherSourceNote` 新签名）+ 从 1.2.0 备份补回
+  `DailyWeather` / `HourlyWeather` / `HourlyWeatherCell`（1.2.4 已删，模块 AgendaSheet 仍消费，P5 切
+  `AgendaPanel` 后移除）。
+- [x] **装机验证（fuxi / OS2）**：零 FATAL；桌面时钟/日期/电量/天气/收藏全部正常；用户确认四项全绿 ——
+  ① 时钟样式页变三页签编辑器；② 改时钟颜色桌面立即生效；③ 秒/前导零开关生效；④ 设置页背景透出壁纸。
+- [ ] **已知边界**：日程仍由独立 `LegacyHomeClockHeader` 区块渲染（上游把 clock+calendar 合成一个区域
+  widget，需改 `HomeContent` 枚举 → P3）；Agenda 面板天气仍是兼容层（P5）。
+- [x] 产物：`.build/out/HomeMode4Miui-v2.9.166-p2-clock-regions-182.apk`。
