@@ -188,6 +188,18 @@ class GraceSettingsHostEngine(
             }
             GraceSettingsBridge.Cmd.THEMED_ICONS -> { preferences.themedIcons(arg1 == "1"); true } // 保留：桌面装饰链读 SP（协议仍在）
             GraceSettingsBridge.Cmd.RENAME -> { preferences.rename(arg1 ?: return false, arg2 ?: ""); true }
+            // 收藏增删（settings-favorites）：设置页「收藏」类别成员就是收藏列表本身，
+            // 数据在宿主 SP（FavoritesStore），模块进程只能发命令。toggle 不依赖当前
+            // 列表是否已初始化：currentOrder() 为 null（首挂载前）按空表处理，
+            // 结果落 SP 后由 handle 尾部 pushSnapshot() 回推权威态。
+            // 单条命令失败（SP 异常）只记日志返回 false —— 宿主进程不可能为此崩溃。
+            GraceSettingsBridge.Cmd.TOGGLE_FAVORITE -> {
+                val key = arg1?.takeIf { it.isNotBlank() } ?: return false
+                runCatching {
+                    favoritesStore.toggle(key, favoritesStore.currentOrder().orEmpty())
+                }.onFailure { ModLog.e("GraceSettingsHostEngine: toggle favorite $key failed", it) }
+                    .isSuccess
+            }
             // 审计修缮（2026-10-16）：CATEGORIZE 分支已删（发送端零消费）
             // 审计修缮（2026-10-16）：删除 PS_REQUEST/PS_SETTINGS/PS_REORDER/PS_RESET_APPEARANCE
             // 接收分支 —— 协议常量已随发送端缺位一并移除（见 GraceSettingsBridge.Cmd）。

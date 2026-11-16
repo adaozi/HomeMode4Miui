@@ -1284,3 +1284,47 @@ P11b 拆两段，本段只解决"收藏顺序双源"，不动 `HomeScreen`（降
 
 **后续可做**：补桥命令 `TOGGLE_FAVORITE`（宿主侧 `favoritesStore.toggle` + 重发快照），
 即可放开收藏类别的编辑能力，与上游行为完全一致。
+
+### P9c 桌面类别行 + 收藏增删桥命令（v2.9.180-p9c-category-row / versionCode 196，2026-11-16）
+
+两件并行完成（一套代码、一次验证）：桌面渲染应用类别行；设置页可直接增删收藏。
+
+#### 1. 桌面类别行（模块自研渲染，不改 HomeScreen 骨架）
+
+- [x] 新增 `ui/home/CategoryRowBlock.kt`（约 170 行）：类别标题（`CategoryIndicator` + 名称 + 成员数）
+  + 成员图标网格（每行 4 个，最多展示 8 个，超出显示 `+N`）；图标缺失时以首字母占位；
+  空类别直接不渲染。纯展示组件，不持有状态、不订阅数据。
+- [x] `HomeScreen` 加 `categoryRows: List<Pair<AppCategory, List<LauncherApp>>>` 参数：
+  类别以 `"category:<id>"` 形式进入 `blockOrder`（与 clock / widget / media 同序，可参与拖动排序），
+  `when(blockKey)` 新增前缀分支渲染 `CategoryRowBlock`。
+- [x] `GraceLauncherRoute` 计算 `categoryRows`：走适配层 `toLauncherUiState().appCategories` +
+  `categoryItems()`（手动/通知/最近安装/常用应用四种规则），按 `showOnHome` 与
+  `isVisible(headphones, minuteOfDay)` 过滤，成员为空的不传。
+  **排除内置「收藏」类别** —— 收藏区本身已是一行，否则桌面出现两个收藏。
+  `headphones` 用 `rememberHeadphonesConnected().value`（返回 `State<Boolean>`）。
+- [x] 文案：`grace_category_member_count`（成员数）、`grace_category_more`（+N）。
+
+#### 2. 收藏增删桥命令（并发任务）
+
+- [x] `GraceSettingsBridge.Cmd.TOGGLE_FAVORITE = "settings_toggle_favorite"`（EXTRA_ARG1 = app key）。
+- [x] `GraceSettingsHostEngine` 新增分支：`favoritesStore.toggle(key, currentOrder().orEmpty())`，
+  `runCatching` + `ModLog.e` 兜底；返回 true 后由 `handle()` 尾部统一 `pushSnapshot()` + `onMutated()`，
+  而 `onMutated()` → `SettingsSync.onMutated()` 重读 Store 刷新桌面 `favoriteOrder` —— 闭环成立。
+- [x] `SettingsViewModel.toggleCategoryItem`：`FavoritesCategoryId` 走发命令（模块进程无 SP 写权），
+  其余类别仍走 `applySettingsSuspend`（appCategories 增量落库）。
+- [x] `CategoryItemsEditor` 放开收藏类别编辑：`readOnlySelected = dynamic`（只读仅留给动态类别）；
+  收藏类别的「移除」= 再 toggle 一次（成员身份在宿主收藏序里）；删除只读提示分支。
+- [x] 验证：装机零 FATAL；`favorites order: store=10 fromHome=11 final=11` 正常。
+
+#### 3. 已知限制
+
+- 收藏类别在编辑器里**拖动重排仍会回弹**（`onReorder` 走 `updateAppCategory{itemKeys}`，
+  对收藏不生效）。需给 `LauncherActions` 补 `reorderFavorites` 并让设置页接上，随 P12 处理。
+- 类别的「常用应用」动态规则需要数字健康开启（`GraceHomeSettings` 暂无 `digitalWellbeing` 字段，
+  适配层取上游默认值 = 关闭）→ 该规则目前恒空，随 P9 后续（数字健康页）补齐。
+
+#### 4. 工程教训
+
+并发跑两个 `gradle`（主代理 + 子代理）会损坏增量编译缓存：
+`Incremental compilation failed: Storage ... already registered` + 一串假的 `Unresolved reference`。
+解法：`rm -rf app/build/kotlin` 后重编即可，**不要按那些假错误去改代码**。

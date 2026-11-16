@@ -1337,4 +1337,6 @@
         <item quantity="other">%1$d items</item>
     </plurals>
     <string name="grace_favorites_edit_hint">Favorites members are edited from the home screen (long-press → Edit favorites)</string>
+    <string name="grace_category_member_count">%1$d</string>
+    <string name="grace_category_more">+%1$d</string>
 </resources>

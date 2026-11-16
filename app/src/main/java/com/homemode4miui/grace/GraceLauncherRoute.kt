@@ -724,8 +724,27 @@ private fun GraceLauncherRouteContent(viewModel: GraceHomeViewModel, hostActivit
             LaunchedEffect(state.homeReady) {
                 if (state.homeReady) viewModel.migrateFavoritesToHomeOrder()
             }
+            // 上游 1.2.2（P9c）：桌面应用类别行 —— 按 showOnHome + 条件（耳机/时间段）过滤，
+            // 成员用 LauncherUiState.categoryItems 的规则计算（手动/通知/最近安装/常用应用）。
+            val headphonesConnected = com.galaxyrio.gracelauncher.ui.home.rememberHeadphonesConnected().value
+            val categoryRows = remember(
+                state.settings, state.apps, state.favoriteOrder, state.notifications, headphonesConnected,
+            ) {
+                val launcher = state.toLauncherUiState()
+                val now = java.time.LocalTime.now()
+                launcher.appCategories
+                    // 内置「收藏」类别不进桌面：收藏区本身已是一行，避免重复展示
+                    .filter { it.id != com.galaxyrio.gracelauncher.data.FavoritesCategoryId }
+                    .filter { it.showOnHome && it.isVisible(headphonesConnected, now.hour * 60 + now.minute) }
+                    .map { category ->
+                        category to launcher.categoryItems(category)
+                            .mapNotNull { key -> state.apps.firstOrNull { it.key == key } }
+                    }
+                    .filter { it.second.isNotEmpty() }
+            }
             if (state.homeReady) HomeScreen(
                 favorites = state.favoriteItems,
+                categoryRows = categoryRows,
                 homeLayout = state.settings.homeLayout,
                 clockEnabled = state.settings.clockEnabled,
                 clockStyle = state.settings.clockStyle,

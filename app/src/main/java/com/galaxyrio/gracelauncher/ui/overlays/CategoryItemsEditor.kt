@@ -41,7 +41,8 @@ internal fun CategoryItemsEditor(category: AppCategory, uiState: LauncherUiState
         return
     }
     val dynamic = category.inclusion == CategoryInclusion.Dynamic
-    // 模块差异：暂无「收藏增删」桥命令 → 收藏类别只读展示，指引去桌面编辑收藏
+    // settings-favorites：收藏类别已可编辑（增删走宿主 TOGGLE_FAVORITE + 快照回推），
+    // 但仍需区分别的类别 —— 收藏成员来自宿主收藏序，取消/重排不能走 appCategories 写。
     val isFavorites = category.id == com.galaxyrio.gracelauncher.data.FavoritesCategoryId
     val openDigitalWellbeing = LocalOpenDigitalWellbeing.current
     val needsWellbeing = dynamic && category.dynamicRule == CategoryDynamicRule.FrequentlyOpened && !uiState.settings.digitalWellbeing.enabled
@@ -53,17 +54,19 @@ internal fun CategoryItemsEditor(category: AppCategory, uiState: LauncherUiState
             SelectionEntry(key, app?.label ?: stringResource(R.string.popup_item_unavailable), app)
         }, apps = uiState.allApps, enabled = !uiState.isLoadingSettings && !uiState.settingsLoadFailed,
         onToggle = { actions.toggleCategoryItem(category.id, it) },
-        onRemove = { key -> actions.updateAppCategory(category.id) { it.copy(itemKeys = it.itemKeys - key) } },
+        // 收藏成员的「移除」= 再 toggle 一次（成员身份存在宿主收藏序里，
+        // updateAppCategory 改的 appCategories.itemKeys 对收藏类别不生效）
+        onRemove = if (isFavorites) ({ key ->
+            uiState.findItem(key)?.let { actions.toggleCategoryItem(category.id, it) }
+        }) else ({ key -> actions.updateAppCategory(category.id) { it.copy(itemKeys = it.itemKeys - key) } }),
         onReorder = { keys -> actions.updateAppCategory(category.id) { it.copy(itemKeys = mergeHomeOrder(keys, it.itemKeys)) } },
         onDone = onBack, onAddShortcut = if (dynamic) null else ({ choosingShortcut = true }),
         onAddFolder = null, onAddStack = null,
-        header = header, showApps = !dynamic && !isFavorites,
-        readOnlySelected = dynamic || isFavorites,
+        header = header, showApps = !dynamic,
+        // settings-favorites：收藏类别可增删（只读仅留给动态类别——成员由规则产生）
+        readOnlySelected = dynamic,
         emptyMessage = stringResource(if (dynamic) R.string.search_no_results else R.string.homepage_empty),
-        selectedNotice = if (isFavorites) ({
-            Text(stringResource(R.string.grace_favorites_edit_hint), Modifier.padding(horizontal = 8.dp),
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }) else if (!needsWellbeing && !needsUsageAccess && !needsNotifications) null else ({
+        selectedNotice = if (!needsWellbeing && !needsUsageAccess && !needsNotifications) null else ({
             Column(Modifier.padding(horizontal = 8.dp).testTag("category_permission_notice")) {
                 Text(stringResource(when {
                     needsWellbeing -> R.string.category_dw_disabled

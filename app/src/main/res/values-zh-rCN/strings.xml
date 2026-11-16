@@ -1304,4 +1304,6 @@
         <item quantity="other">%1$d 个项目</item>
     </plurals>
     <string name="grace_favorites_edit_hint">收藏成员请在桌面长按 →「编辑收藏」中修改</string>
+    <string name="grace_category_member_count">%1$d</string>
+    <string name="grace_category_more">+%1$d</string>
 </resources>

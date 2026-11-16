@@ -468,7 +468,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
         },
         toggleCategoryItem = { id, app ->
-            viewModelScope.launch {
+            // 收藏类别（settings-favorites）：成员不存 appCategories.itemKeys，而是
+            // 宿主 SP 里的收藏序（LauncherUiState.categoryItems 读取时派生）——
+            // 走 appCategories 增量落库对收藏无效，必须发宿主侧 toggle 命令，
+            // 由宿主改 SP 后重发快照闭环（模块侧不做乐观猜测，等快照收敛）。
+            if (id == com.galaxyrio.gracelauncher.data.FavoritesCategoryId) {
+                send(GraceSettingsBridge.Cmd.TOGGLE_FAVORITE, arg1 = app.key)
+            } else viewModelScope.launch {
                 applySettingsSuspend { current ->
                     current.copy(appCategories = current.appCategories.orEmpty().map { category ->
                         if (category.id != id) category else category.copy(itemKeys =

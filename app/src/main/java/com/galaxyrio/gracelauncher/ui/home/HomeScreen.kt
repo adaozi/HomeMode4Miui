@@ -175,6 +175,8 @@ fun HomeScreen(
     stackApps: (LauncherFolder) -> List<LauncherApp> = { emptyList() },
     /** 上游同步 1.2.0（S6d）：编辑态拖动区块后提交新的 homeOrder。 */
     onReorderHome: (List<String>) -> Unit = {},
+    /** 上游 1.2.2（P9c）：显示在桌面的应用类别（已按 showOnHome + 条件过滤，成员非空的才传）。 */
+    categoryRows: List<Pair<com.galaxyrio.gracelauncher.data.AppCategory, List<LauncherApp>>> = emptyList(),
     editingLayout: Boolean = false,
     widgetInputEnabled: Boolean = true,
     topSpace: Dp = 24.dp,
@@ -276,11 +278,13 @@ fun HomeScreen(
     // clock 与 calendar 已合并为 ClockCalendar 单一区块（日期/日程/天气/电量/任务都是它的内部区域，
     // 由 ClockStyle.regions 控制），因此可排序区块 = clockCalendar / widget / media，收藏恒在尾部。
     // 注意：必须在 LazyListScope 之外计算 —— 里面不是 @Composable 上下文。
-    val blockOrder = remember(homeLayout.homeOrder, clockEnabled, calendarAgenda, media, hostedWidget) {
+    val blockOrder = remember(homeLayout.homeOrder, clockEnabled, calendarAgenda, media, hostedWidget, categoryRows) {
         val available = buildList {
             if (clockEnabled || calendarAgenda) add(GraceWidget.ClockCalendar.key)
             if (hostedWidget != null) add("widget:${homeLayout.widgetId}")
             if (media != null) add(GraceWidget.Media.key)
+            // 上游 1.2.2（P9c）：应用类别与区块同序（key = "category:<id>"）
+            categoryRows.forEach { (category, _) -> add("category:${category.id}") }
         }
         val seeded = homeLayout.homeOrder
         if (seeded == null) available else {
@@ -355,6 +359,21 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth().onSizeChanged { headerHeightPx = it.height },
                         )
                         Spacer(Modifier.height(2.dp))
+                    }
+                    // 上游 1.2.2（P9c）：应用类别行
+                    else if (blockKey.startsWith("category:")) -> {
+                        val id = blockKey.removePrefix("category:")
+                        categoryRows.firstOrNull { it.first.id == id }?.let { (category, members) ->
+                            CategoryRowBlock(
+                                category = category,
+                                members = members,
+                                onLaunch = onLaunchApp,
+                                onLongPress = onAppDetails,
+                                showLabel = listAppearance.showNames(favorites = true),
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                            Spacer(Modifier.height(2.dp))
+                        }
                     }
                     GraceWidget.Media.key -> {
                         val session = media

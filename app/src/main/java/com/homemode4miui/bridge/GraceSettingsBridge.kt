@@ -66,6 +66,10 @@ object GraceSettingsBridge {
         const val DELETE_FOLDER = "settings_delete_folder"       // EXTRA_ARG1 = id
         const val SET_FOLDER_FAVORITES = "settings_folder_favs"  // EXTRA_JSON = {id: bool}
         const val SET_ITEM_ICON = "settings_set_icon"            // EXTRA_ARG1 = key, EXTRA_JSON = ItemIcon json / null
+        // 收藏增删（settings-favorites）：设置页「收藏」类别成员 = 收藏列表本身。
+        // 收藏序在宿主 SP（FavoritesStore），模块进程无写权 → 只上行 key，宿主 toggle
+        // 后由 handle 尾部统一重发快照（模块侧靠快照收敛，不做本地猜测）。
+        const val TOGGLE_FAVORITE = "settings_toggle_favorite"   // EXTRA_ARG1 = LauncherApp.key
         const val DELETE_ICON_DESIGNS = "settings_del_icons"     // EXTRA_JSON = [key..]
         const val REMEMBER_SHORTCUT = "settings_remember_shortcut" // EXTRA_JSON = shortcut 字段
         // 审计修缮（2026-10-16）：删除 REORDER_FAVORITES / CATEGORIZE 常量 —— 发送端
