@@ -57,6 +57,12 @@ enum class ScheduleStatus {
     Error,
 }
 
+/** 上游 1.2.2：最近安装（类别 dynamic rule + 最近安装文件夹共用）。 */
+private fun recentInstallations(apps: List<LauncherApp>): List<LauncherApp> = apps.asSequence()
+    .filter { it.shortcut == null && it.folderId == null && !it.isPrivateSpace && !it.isLauncherSettings }
+    .sortedWith(compareByDescending<LauncherApp> { it.firstInstallTime }.then(LauncherAppOrder))
+    .distinctBy { it.userSerial to it.packageName }.take(8).toList()
+
 data class LauncherUiState(
     val apps: List<LauncherApp> = emptyList(),
     val favoriteKeys: Set<String> = emptySet(),
@@ -198,6 +204,38 @@ data class LauncherUiState(
     val needsCategoryOpenCounts: Boolean get() = appCategories.any {
         it.inclusion == CategoryInclusion.Dynamic && it.dynamicRule == CategoryDynamicRule.FrequentlyOpened
     }
+
+    /**
+     * 上游 1.2.2：类别成员解析（手动 / 通知 / 最近安装 / 常用应用四种规则）。
+     * 成员资格与放置、显示条件无关，编辑器与首页看到同一结果。
+     */
+    fun categoryItems(category: AppCategory): List<String> {
+        if (isLoadingSettings || settingsLoadFailed) return emptyList()
+        fun available(app: LauncherApp) = !app.isPrivateSpace || (settings.privateSpace.exposesApps && privateContentVisible)
+        if (category.inclusion == CategoryInclusion.Manual) return category.itemKeys.filter { key ->
+            findItem(key)?.let(::available) == true
+        }
+        val candidates = allApps.filter { app -> available(app) && app.key !in effectiveHiddenAppKeys &&
+            app.shortcut == null && app.folderId == null && !app.isLauncherSettings }
+        return when (category.dynamicRule) {
+            CategoryDynamicRule.Notifications -> candidates.filter { app ->
+                categoryNotifications[NotificationAppId(app.packageName, app.user ?: android.os.Process.myUserHandle())]
+                    .orEmpty().any { it in category.notificationLevels }
+            }.sortedWith(LauncherAppOrder)
+            CategoryDynamicRule.RecentlyInstalled -> recentInstallations(candidates)
+            CategoryDynamicRule.FrequentlyOpened -> if (!settings.digitalWellbeing.enabled || !usage.hasAccess) emptyList() else
+                candidates.filter { it.user == null && (usage.openCounts[it.packageName] ?: 0) > 0 }
+                    .sortedWith(compareByDescending<LauncherApp> { usage.openCounts[it.packageName] ?: 0 }.then(LauncherAppOrder))
+                    .distinctBy { it.packageName }.take(category.appLimit)
+        }.map(LauncherApp::key)
+    }
+
+    /** 首页最终内容：类别按条件展开后的条目序列（HomeScreen 的唯一内容来源）。 */
+    internal fun visibleHomeContent(headphones: Boolean, minuteOfDay: Int) =
+        com.galaxyrio.gracelauncher.data.expandHomeCategories(homeItems, appCategories, headphones, minuteOfDay,
+            categoryItems = ::categoryItems) { key ->
+            findItem(key)?.let { !it.isPrivateSpace || (settings.privateSpace.exposesApps && privateContentVisible) } == true
+        }
 
     fun folderItem(folder: LauncherFolder): LauncherApp = ((if (folder.id == PrivateSpaceFolderId) privateFolderApp
         else folderApps.firstOrNull { it.folderId == folder.id })
